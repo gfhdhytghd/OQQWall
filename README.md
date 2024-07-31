@@ -24,13 +24,14 @@
 <br/>主账号作为群主创建一个群聊，把墙管理员拉进来，并设定为群管理员。
 <br/>目前仅在x64 archlinux上进行过测试其他系统要用的话可能要重装python venv并对bash脚本进行修改
 
+<br/>请先安装QQ，google-chrome和chrome-drive，以及python3
 
 克隆项目到任意位置，最好是用户文件夹中的某处，确保权限够用
 
 进入OQQwall文件夹
 
 <br/>执行./qqBot/Lagrange.OneBot
-<br/>扫码登陆，记得勾选下次无需扫码
+<br/>扫码登陆主账号，记得勾选下次无需扫码
 <br/>ctrl+c关闭拉格朗日机器人
 
 <br/>执行python3 ./SendQzone/send.py '测试使用程序发送一条消息' ./getmsgserv/post-step5/
@@ -57,6 +58,7 @@
 <br/>如果此帐号之前就是使用 #数字 方式进行编号，不需要进行这一步
 
 启动主程序
+<br/>打开QQ,登陆辅助账号
 <br/>./main.sh 
 <br/>然后，理论上，应该就可以用了。
 
