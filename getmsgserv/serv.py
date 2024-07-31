@@ -45,10 +45,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             sender = data.get('sender', {})
             raw_message = data.get('raw_message', '')
 
-            if (group_id ==  and sender.get('role') == 'admin' and 
-                raw_message.startswith('[CQ:at,qq=xxx]')):
+            if (group_id == 814783587 and sender.get('role') == 'admin' and 
+                raw_message.startswith('[CQ:at,qq=1050373508]')):
                 # Extract and save the relevant part of raw_message
-                command_text = raw_message[len('[CQ:at,qq=xxx] '):]
+                command_text = raw_message[len('[CQ:at,qq=1050373508] '):]
                 command_file_path = os.path.join(COMMAND_DIR, 'commands.txt')
                 
                 with open(command_file_path, 'a', encoding='utf-8') as f:
@@ -95,6 +95,17 @@ class RequestHandler(BaseHTTPRequestHandler):
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(sorted_data, f, ensure_ascii=False, indent=4)
         
+            priv_post_path = os.path.join(ALLPOST_DIR, 'priv_post.json')
+            if os.path.exists(priv_post_path):
+                with open(priv_post_path, 'r', encoding='utf-8') as f:
+                    priv_post_data = json.load(f)
+            else:
+                priv_post_data = []
+
+            priv_post_data.append(data)
+            with open(priv_post_path, 'w', encoding='utf-8') as f:
+                json.dump(priv_post_data, f, ensure_ascii=False, indent=4)
+
         # 返回响应
         self.send_response(200)
         self.end_headers()

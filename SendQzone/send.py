@@ -283,18 +283,40 @@ class QzoneAPI:
 
 
 async def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) > 3:
         print("Usage: python3 test.py <message> <image_directory>")
         return
 
     message = sys.argv[1]
-    image_directory = sys.argv[2]
+    try:
+        image_directory = sys.argv[2]
+    except:
+        image_directory='./getmsgserv/post-step5'
 
     try:
         with open('./cookies.json', 'r') as f:
             cookies = json.load(f)
     except:
         cookies = None
+
+    if message == 'relogin':
+        login = QzoneLogin()
+
+        async def qrcode_callback(qrcode: bytes):
+            with open("qrcode.png", "wb") as f:
+                f.write(qrcode)
+
+        try:
+            cookies = await login.login_via_qrcode(qrcode_callback)
+            print("Cookies after login:", cookies)
+            with open('cookies.json', 'w') as f:
+                json.dump(cookies, f)
+            os.remove('./qrcode.png')
+        except Exception as e:
+            print("Failed to generate login QR code.")
+            traceback.print_exc()
+            return
+        sys.exit()
 
     if not cookies:
         login = QzoneLogin()
