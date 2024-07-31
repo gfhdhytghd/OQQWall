@@ -45,10 +45,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             sender = data.get('sender', {})
             raw_message = data.get('raw_message', '')
 
-            if (group_id == 814783587 and sender.get('role') == 'admin' and 
-                raw_message.startswith('[CQ:at,qq=1050373508]')):
+            if (group_id ==  and sender.get('role') == 'admin' and 
+                raw_message.startswith('[CQ:at,qq=xxx]')):
                 # Extract and save the relevant part of raw_message
-                command_text = raw_message[len('[CQ:at,qq=1050373508] '):]
+                command_text = raw_message[len('[CQ:at,qq=xxx] '):]
                 command_file_path = os.path.join(COMMAND_DIR, 'commands.txt')
                 
                 with open(command_file_path, 'a', encoding='utf-8') as f:

@@ -30,16 +30,16 @@
 <br/>扫码登陆主账号，记得勾选下次无需扫码
 <br/>ctrl+c关闭拉格朗日机器人
 
-<br/>执行python3 ./SendQzone/send.py '测试使用程序发送一条消息' ./getmsgserv/post-step5/
+<br/>执行python3 ./SendQzone/send.py login
 <br/>在一分钟内打开文件夹内的文件"qrcode.png"并扫码登录（测试阶段，不稳定，建议使用辅助账号）
-<br/>查看说说有没有发出去
+<br/>会报错,这是正常的
 
 打开./SendQzone/qzonegettag
 <br/>翻到60行
 <br/>填写主账号到friendlist，辅助账号到my_qq
 <br/>打开main.sh，填写管理群群号到group_id
 <br/>打开getmsgserv/serv.py
-<br/>找到第49行的if,填写管理群号到 == 和 and中间，群号两边记得留空格。
+<br/>找到第48行的if,填写管理群号到 == 和 and中间，群号两边记得留空格。
 <br/>找到49行和51行的[CQ:at,qq=xxx]，用主账号qq号替代xxx
 
 参考此文字，获取qwen api-key
