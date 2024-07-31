@@ -52,15 +52,24 @@ def get(html):
 
     return False  # Number not found, continue to next page
 
+def read_config(file_path):
+    config = {}
+    with open(file_path, 'r') as f:
+        for line in f:
+            key, value = line.strip().split('=')
+            config[key.strip()] = value.strip().strip('"')
+    return config
+
 def main():
     # Log in
-    my_qq = ''
+    config = read_config('oqqwall.config')
+    friendlist = config.get('mainqq-id')
+    my_qq = = config.get('secondaryqq-id')
     driver = login(my_qq)
 
     # Get to the friend's QQ Zone
-    friendlist = ['']
     print('Trying to get into the QQ Zone')
-    driver.get(f'https://user.qzone.qq.com/{friendlist[0]}/311')
+    driver.get(f'https://user.qzone.qq.com/{friendlist}/311')
     print('Get in!')
 
     # Get the contents

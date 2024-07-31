@@ -3,7 +3,16 @@ import time
 import sys
 from http import HTTPStatus
 import dashscope
-dashscope.api_key=""
+def read_config(file_path):
+    config = {}
+    with open(file_path, 'r') as f:
+        for line in f:
+            key, value = line.strip().split('=')
+            config[key.strip()] = value.strip().strip('"')
+    return config
+    
+config = read_config('oqqwall.config')
+dashscope.api_key=config.get('apikey')
 
 if len(sys.argv) != 3:
     print("Usage: python3 test.py <input> <output>")

@@ -1,6 +1,7 @@
 #!/bin/bash
 
-groupid=
+groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+file_to_watch="./getmsgserv/all/priv_post.json"
 
 # Activate virtual environment
 source ./venv/bin/activate
@@ -25,9 +26,22 @@ fi
 
 sleep 10
 #避免消息反复处理
-file_to_watch="./getmsgserv/all/priv_post.json"
-command_file="./qqBot/command/commands.txt"
 
+waitforfilechange(){
+        last_mod_time_cmd=$(stat -c %Y "$1")
+
+    while true; do
+        sleep 5
+        # 获取文件的当前修改时间
+        current_mod_time_cmd=$(stat -c %Y "$1")
+
+        # 检查文件是否已被修改
+        if [ "$current_mod_time_cmd" -ne "$last_mod_time_cmd" ]; then
+            echo 检测到指令
+            break
+        fi
+    done
+}
 
 sendimagetoqqgroup() {
     # 设置文件夹路径
@@ -53,20 +67,7 @@ askforintro(){
     command="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$groupid'&message=$numnext 请发送指令'"
     eval $command
     # 初始化文件的上次修改时间
-    last_mod_time_cmd=$(stat -c %Y "$command_file")
-
-    while true; do
-        sleep 5
-        # 获取文件的当前修改时间
-        current_mod_time_cmd=$(stat -c %Y "$command_file")
-
-        # 检查文件是否已被修改
-        if [ "$current_mod_time_cmd" -ne "$last_mod_time_cmd" ]; then
-            echo 检测到指令
-            break
-        fi
-    done
-
+    waitforfilechange "./qqBot/command/commands.txt"
     mapfile -t lines < "$command_file"
     for (( i=${#lines[@]}-1; i>=0; i-- )); do
     line=${lines[$i]}
@@ -132,10 +133,19 @@ postqzone(){
     postcommand="python3 ./SendQzone/send.py '#$numnext' ./getmsgserv/post-step5/$numnext/"
     output=$(eval $postcommand)
     if echo "$output" | grep -q "Failed to publish."; then
-    sendmsggroup 空间发送错误,可能需要重新登陆,错误: 
-    sendmsggroup 发送 '@本账号 relogin 是' 以重新登陆
-    askforintro
-    rm ./getmsgserv/rawpost/$id.json
+        sendmsggroup 空间发送错误,可能需要重新登陆,错误: 
+        sendmsggroup 发送 @本账号 relogin 是 以重新登陆
+        askforintro
+    fi
+    current_mod_time_id=$(stat -c %Y "$id_file")
+    current_mod_time_privmsg=$(stat -c %Y "./all/priv_post.json")
+    if [ "$current_mod_time_id" -eq "$last_mod_time_id" ]; then
+        echo "过程中此人无新消息，删除此人记录"
+        rm ./getmsgserv/rawpost/$id.json
+    fi
+    if [ "$current_mod_time_id" -ne "$last_mod_time_id" ]; then
+        echo "过程中有新消息，重跑发件流程"
+        
     fi
 }
 renewqzonelogin(){
@@ -151,34 +161,25 @@ sendmsggroup(){
 google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$groupid'&message='$1''
 }
 
-last_mod_time=$(stat -c %Y "$file_to_watch")
-
-while true; do
-
-    while true; do
-        sleep 5
-        # 获取文件的当前修改时间
-        current_mod_time=$(stat -c %Y "$file_to_watch")
-
-        # 检查文件是否已被修改
-        if [ "$current_mod_time" -ne "$last_mod_time" ]; then
-            echo "有新消息"
-            break
-        fi   
-    done
-
-    #主逻辑代码
+#主逻辑代码
+processsend(){
+    echo getnum...
     python3 ./SendQzone/qzonegettag.py
     numnow=$( cat ./numb.txt )
     numnext=$[ numnow + 1 ]
+    echo waitingforsend...
     sleep 120
     id=$(find ./getmsgserv/rawpost -type f -printf '%T+ %p\n' | sort | head -n 1 | awk '{print $2}')
     id=$(basename "$id" .json)
     id=$(echo "$id" | sed 's/.*\///')
+    id_file=./getmsgserv/rawpost/$id.json
+    last_mod_time_id=$(stat -c %Y "$id_file")
+    last_mod_time_privmsg=$(stat -c %Y "./all/priv_post.json")
+
     echo $id
     echo 'wait-for-LM...'
     python3 ./getmsgserv/LM_work/sendtoLM.py ${id} ${numnext} 
-
+    echo LM-workdone
     json_file=./getmsgserv/post-step2/${numnext}.json 
     isover=$(jq -r '.isover' "$json_file")
     notregular=$(jq -r '.notregular' "$json_file")
@@ -209,5 +210,21 @@ while true; do
     sendimagetoqqgroup
     echo askforgroup...
     askforintro
+}
+last_mod_time=$(stat -c %Y "$file_to_watch")
+
+while true; do
+    while true; do
+        sleep 5
+        # 获取文件的当前修改时间
+        current_mod_time=$(stat -c %Y "$file_to_watch")
+
+        # 检查文件是否已被修改
+        if [ "$current_mod_time" -ne "$last_mod_time" ]; then
+            echo "有新消息"
+            break
+        fi   
+    done
+    processsend
     last_mod_time=$(stat -c %Y "$file_to_watch")
 done

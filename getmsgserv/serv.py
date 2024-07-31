@@ -11,6 +11,18 @@ COMMAND_DIR = './qqBot/command'
 os.makedirs(RAWPOST_DIR, exist_ok=True)
 os.makedirs(ALLPOST_DIR, exist_ok=True)
 
+def read_config(file_path):
+    config = {}
+    with open(file_path, 'r') as f:
+        for line in f:
+            key, value = line.strip().split('=')
+            config[key.strip()] = value.strip().strip('"')
+    return config
+
+config = read_config('oqqwall.config')
+group_id = config.get('management-group-id')
+qqid = config.get('mainqq-id')
+
 class RequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         # 解析请求头和请求体
@@ -45,10 +57,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             sender = data.get('sender', {})
             raw_message = data.get('raw_message', '')
 
-            if (group_id ==  and sender.get('role') == 'admin' and 
-                raw_message.startswith('[CQ:at,qq=xxx]')):
+            if (group_id == groupid and sender.get('role') == 'admin' and 
+                raw_message.startswith('[CQ:at,qq={qqid}]')):
                 # Extract and save the relevant part of raw_message
-                command_text = raw_message[len('[CQ:at,qq=xxx] '):]
+                command_text = raw_message[len('[CQ:at,qq={qqid}] '):]
                 command_file_path = os.path.join(COMMAND_DIR, 'commands.txt')
                 
                 with open(command_file_path, 'a', encoding='utf-8') as f:
