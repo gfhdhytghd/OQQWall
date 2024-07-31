@@ -23,7 +23,7 @@
 # 使用方法
 <br/>首先需要你注册两个qq号，一个作为主账号，一个作为辅助账号
 <br/>主账号作为群主创建一个群聊，把墙管理员拉进来，并设定为群管理员。
-<br/>目前仅在x64 archlinux上进行过测试其他系统要用的话可能要重装python venv并对bash脚本进行修改
+<br/>目前仅在x64 archlinux上进行过测试其他系统要用的话可能要修改一些东西（你最好有基础的bash和python编写能力）
 
 <br/>请先安装QQ，google-chrome和chrome-drive，以及python3，还有dotnet框架
 
