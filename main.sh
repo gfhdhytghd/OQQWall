@@ -220,6 +220,9 @@ processsend(){
     echo askforgroup...
     askforintro
 }
+
+sendmsggroup 机器人已启动
+
 echo 获取priv_post文件更改时间
 last_mod_time=$(stat -c %Y "$file_to_watch")
 echo $last_mod_time
