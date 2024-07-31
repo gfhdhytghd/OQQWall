@@ -1,0 +1,11 @@
+venv
+device.json
+keystore.json
+lagrange-0-log.db
+lagrange-0.db
+numb.txt
+oqqwall.config
+qr-0.png
+screenshot.png
+getmsgserv/all/all_posts.json
+getmsgserv/all/priv_post.json

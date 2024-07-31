@@ -2,6 +2,13 @@
 
 groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 file_to_watch="./getmsgserv/all/priv_post.json"
+command_file="./qqBot/command/commands.txt"
+
+mkdir ./getmsgserv/rawpost
+mkdir ./getmsgserv/post-step2
+mkdir ./getmsgserv/post-step3
+mkdir ./getmsgserv/post-step4
+mkdir ./getmsgserv/post-step5
 
 # Activate virtual environment
 source ./venv/bin/activate
@@ -24,8 +31,9 @@ else
     echo "Lagrange.OneBot started"
 fi
 
+echo 等待十秒避免消息反复处理
 sleep 10
-#避免消息反复处理
+
 
 waitforfilechange(){
         last_mod_time_cmd=$(stat -c %Y "$1")
@@ -116,6 +124,7 @@ askforintro(){
         break
     fi
     done
+    sendmsggroup 已收到指令
 }
 postqzone(){
     if [ ! -f "./cookies.json" ]; then
@@ -167,7 +176,7 @@ processsend(){
     python3 ./SendQzone/qzonegettag.py
     numnow=$( cat ./numb.txt )
     numnext=$[ numnow + 1 ]
-    echo waitingforsend...
+    echo waitingforsender...
     sleep 120
     id=$(find ./getmsgserv/rawpost -type f -printf '%T+ %p\n' | sort | head -n 1 | awk '{print $2}')
     id=$(basename "$id" .json)
@@ -211,14 +220,18 @@ processsend(){
     echo askforgroup...
     askforintro
 }
+echo 获取priv_post文件更改时间
 last_mod_time=$(stat -c %Y "$file_to_watch")
+echo $last_mod_time
 
+echo 启动主循环
 while true; do
+    echo 启动等待循环
     while true; do
         sleep 5
         # 获取文件的当前修改时间
         current_mod_time=$(stat -c %Y "$file_to_watch")
-
+        echo $current_mod_time
         # 检查文件是否已被修改
         if [ "$current_mod_time" -ne "$last_mod_time" ]; then
             echo "有新消息"

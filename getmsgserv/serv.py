@@ -20,8 +20,6 @@ def read_config(file_path):
     return config
 
 config = read_config('oqqwall.config')
-group_id = config.get('management-group-id')
-qqid = config.get('mainqq-id')
 
 class RequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -53,16 +51,20 @@ class RequestHandler(BaseHTTPRequestHandler):
         #记录群中命令
         message_type = data.get('message_type')
         if message_type == 'group':
+            print ("serv:有群组消息")
+            groupid = config.get('management-group-id')
+            qqid = config.get('mainqq-id')
             group_id = data.get('group_id')
             sender = data.get('sender', {})
             raw_message = data.get('raw_message', '')
-
+            group_id=int(group_id)
+            groupid=int(groupid)
             if (group_id == groupid and sender.get('role') == 'admin' and 
-                raw_message.startswith('[CQ:at,qq={qqid}]')):
+                raw_message.startswith(f"[CQ:at,qq={qqid}]")):
+                print ("serv:有指令消息")
                 # Extract and save the relevant part of raw_message
-                command_text = raw_message[len('[CQ:at,qq={qqid}] '):]
+                command_text = raw_message[len(f"[CQ:at,qq={qqid}]"):]
                 command_file_path = os.path.join(COMMAND_DIR, 'commands.txt')
-                
                 with open(command_file_path, 'a', encoding='utf-8') as f:
                     f.write(command_text + '\n')
 
