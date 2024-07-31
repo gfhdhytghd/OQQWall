@@ -37,22 +37,13 @@ pip install --upgrade pip
 pip install dashscope selenium re101 bs4
 
 ```
-
 <br/>执行./qqBot/Lagrange.OneBot
 <br/>扫码登陆主账号，记得勾选下次无需扫码
 <br/>ctrl+c关闭拉格朗日机器人
 
 <br/>执行python3 ./SendQzone/send.py login
-<br/>在一分钟内打开文件夹内的文件"qrcode.png"并扫码登录（测试阶段，不稳定，建议使用辅助账号）
-<br/>会报错,这是正常的
-
-打开./SendQzone/qzonegettag
-<br/>翻到60行
-<br/>填写主账号到friendlist，辅助账号到my_qq
-<br/>打开main.sh，填写管理群群号到group_id
-<br/>打开getmsgserv/serv.py
-<br/>找到第48行的if,填写管理群号到 == 和 and中间，群号两边记得留空格。
-<br/>找到49行和51行的[CQ:at,qq=xxx]，用主账号qq号替代xxx
+<br/>在一分钟内打开文件夹内的文件"qrcode.png"并扫码登录（测试阶段，不稳定，不建议直接上主账号）
+<br/>这一步程序会报错,这是正常的,什么都不影响,只是我懒得处理
 
 参考此文字，获取qwen api-key
 <br/>https://help.aliyun.com/zh/dashscope/developer-reference/acquisition-and-configuration-of-api-key?spm=a2c4g.11186623.0.0.65fe46c1Q9s8Om
@@ -64,6 +55,25 @@ pip install dashscope selenium re101 bs4
 
 手动登陆主账号qq空间，发送一条说说，文案需要由#0开头，这是为了初始化编号系统
 <br/>如果此帐号之前就是使用 #数字 方式进行编号，不需要进行这一步
+
+打开程序文件夹下的oqqwall.config,按说明填入数据
+说明:
+```
+#所有东西请填到双引号里
+
+mainqq-id="xxx"
+#填入校园墙主账号qq号
+
+secondaryqq-id="xxx"
+#填入校园墙辅账号qq号
+
+management-group-id="xxx"
+#填入管理群群号
+
+apikey="sk-"
+#填入qwen api key
+#sk-xxxxxx,"sk"也要填进来
+```
 
 启动主程序
 <br/>打开QQ,登陆辅助账号
