@@ -76,6 +76,7 @@ askforintro(){
     eval $command
     # 初始化文件的上次修改时间
     waitforfilechange "./qqBot/command/commands.txt"
+    sendmsggroup 已收到指令
     mapfile -t lines < "$command_file"
     for (( i=${#lines[@]}-1; i>=0; i-- )); do
     line=${lines[$i]}
@@ -124,7 +125,6 @@ askforintro(){
         break
     fi
     done
-    sendmsggroup 已收到指令
 }
 postqzone(){
     if [ ! -f "./cookies.json" ]; then
@@ -147,7 +147,7 @@ postqzone(){
         askforintro
     fi
     current_mod_time_id=$(stat -c %Y "$id_file")
-    current_mod_time_privmsg=$(stat -c %Y "./all/priv_post.json")
+    current_mod_time_privmsg=$(stat -c %Y "./getmsgserv/all/priv_post.json")
     if [ "$current_mod_time_id" -eq "$last_mod_time_id" ]; then
         echo "过程中此人无新消息，删除此人记录"
         rm ./getmsgserv/rawpost/$id.json
@@ -183,7 +183,7 @@ processsend(){
     id=$(echo "$id" | sed 's/.*\///')
     id_file=./getmsgserv/rawpost/$id.json
     last_mod_time_id=$(stat -c %Y "$id_file")
-    last_mod_time_privmsg=$(stat -c %Y "./all/priv_post.json")
+    last_mod_time_privmsg=$(stat -c %Y "./getmsgserv/all/priv_post.json")
 
     echo $id
     echo 'wait-for-LM...'

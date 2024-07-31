@@ -23,4 +23,4 @@ for file in *.*; do
     mv "$file" "$base_name"
   fi
 done
-cd-
+cd -
