@@ -31,7 +31,7 @@
 进入OQQwall文件夹
 创建python venv并安装依赖,注意这需要良好的网络环境
 ```
-python -m venv ./
+python -m venv ./venv/
 source ./venv/bin/activate
 pip install --upgrade pip
 pip install dashscope selenium re101 bs4
