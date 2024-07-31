@@ -63,6 +63,7 @@ pip install dashscope selenium re101 bs4
 
 启动主程序
 <br/>打开QQ,登陆辅助账号
+<br/>(建议把chrome打开,可以增加一些操作的运行速度)
 <br/>终端输入./main.sh 
 <br/>然后，理论上，应该就可以用了。
 <br/>注意ctrl+c关闭程序时,Lagrange.Onebot和serv.py不会一并关闭,需要手动终止进程
