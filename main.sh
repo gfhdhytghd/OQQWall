@@ -143,7 +143,8 @@ postqzone(){
     output=$(eval $postcommand)
     if echo "$output" | grep -q "Failed to publish."; then
         sendmsggroup 空间发送错误,可能需要重新登陆
-        sendmsggroup '发送 @本账号 relogin 是 以重新登陆'
+        command="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=发送 @本账号 relogin 是 以重新登陆'"
+        eval $command
         askforintro
     else
         echo 发送完毕
