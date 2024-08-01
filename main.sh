@@ -146,7 +146,7 @@ postqzone(){
         sendmsggroup 空间发送错误,可能需要重新登陆
         sendmsggroup '发送 @本账号 relogin 是 以重新登陆'
         askforintro
-    else;
+    else
         echo 发送完毕
         sendmsgpriv $id $numnext
         sendmsgpriv $id 已发送
