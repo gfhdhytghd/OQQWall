@@ -70,7 +70,6 @@ sendimagetoqqgroup() {
     echo "所有文件已发送"
 }
 
-
 askforintro(){
     command="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$groupid'&message=请发送指令'"
     eval $command
