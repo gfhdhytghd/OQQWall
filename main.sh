@@ -119,6 +119,7 @@ askforintro(){
             postcmd="false"
             echo retry...
             sendmsggroup 重新尝试发送中...
+            postqzone
             ;;
         esac
         # 找到符合条件的行后退出循环
@@ -145,11 +146,12 @@ postqzone(){
         sendmsggroup 空间发送错误,可能需要重新登陆
         sendmsggroup '发送 @本账号 relogin 是 以重新登陆'
         askforintro
+    else;
+        echo 发送完毕
+        sendmsgpriv $id $numnext
+        sendmsgpriv $id 已发送
+        sendmsggroup 已发送
     fi
-    echo 发送完毕
-    sendmsgpriv $id $numnext
-    sendmsgpriv $id 已发送
-    sendmsggroup 发送完毕
     current_mod_time_id=$(stat -c %Y "$id_file")
     current_mod_time_privmsg=$(stat -c %Y "./getmsgserv/all/priv_post.json")
     if [ "$current_mod_time_id" -eq "$last_mod_time_id" ]; then
