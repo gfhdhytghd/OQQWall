@@ -50,7 +50,7 @@ pip install dashscope selenium re101 bs4
 <br/>在一分钟内打开文件夹内的文件"qrcode.png"并扫码登录（目前阶段我建议登录辅助帐号，在测试环境跑一段时间再说）
 <br/>这一步程序会报错,这是正常的,什么都不影响,只是我懒得处理
 
-参考此文字，获取qwen api-key
+参考此文章，获取qwen api-key
 <br/>https://help.aliyun.com/zh/dashscope/developer-reference/acquisition-and-configuration-of-api-key?spm=a2c4g.11186623.0.0.65fe46c1Q9s8Om
 <br/>填入./getmsgserv/LM_work/sendtoLM.py 第6行的dashscope.api_key
 
