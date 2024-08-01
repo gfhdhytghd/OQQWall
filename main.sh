@@ -72,7 +72,7 @@ sendimagetoqqgroup() {
 
 
 askforintro(){
-    command="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$groupid'&message=$numnext 请发送指令'"
+    command="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$groupid'&message=请发送指令'"
     eval $command
     # 初始化文件的上次修改时间
     waitforfilechange "./qqBot/command/commands.txt"
@@ -94,7 +94,7 @@ askforintro(){
         否)
             postcmd="false"
             rm ./getmsgserv/rawpost/$id.json
-            rm -rf ./getmsgserv/post-step5/350
+            rm -rf ./getmsgserv/post-step5/$numnext
             ;;
         等)
             postcmd="wait"
@@ -103,7 +103,7 @@ askforintro(){
         删)
             postcmd="del"
             rm ./getmsgserv/rawpost/$id.json
-            rm -rf ./getmsgserv/post-step5/350
+            rm -rf ./getmsgserv/post-step5/$numnext
             ;;
         esac
         # 找到符合条件的行后退出循环
@@ -142,10 +142,14 @@ postqzone(){
     postcommand="python3 ./SendQzone/send.py '#$numnext' ./getmsgserv/post-step5/$numnext/"
     output=$(eval $postcommand)
     if echo "$output" | grep -q "Failed to publish."; then
-        sendmsggroup 空间发送错误,可能需要重新登陆,错误: 
-        sendmsggroup 发送 @本账号 relogin 是 以重新登陆
+        sendmsggroup 空间发送错误,可能需要重新登陆
+        sendmsggroup '发送 @本账号 relogin 是 以重新登陆'
         askforintro
     fi
+    echo 发送完毕
+    sendmsgpriv $id $numnext
+    sendmsgpriv $id 已发送
+    sendmsggroup 发送完毕
     current_mod_time_id=$(stat -c %Y "$id_file")
     current_mod_time_privmsg=$(stat -c %Y "./getmsgserv/all/priv_post.json")
     if [ "$current_mod_time_id" -eq "$last_mod_time_id" ]; then
@@ -154,7 +158,7 @@ postqzone(){
     fi
     if [ "$current_mod_time_id" -ne "$last_mod_time_id" ]; then
         echo "过程中有新消息，重跑发件流程"
-        
+        processsend
     fi
 }
 renewqzonelogin(){
@@ -162,12 +166,14 @@ renewqzonelogin(){
     rm ./qrcode.png
     postqzone &
     sleep 2
-    command="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$groupid'&message=[CQ:image,file=$(pwd)/qrcode.png]'"
-    eval $command
     sleep 60
 }
 sendmsggroup(){
-google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$groupid'&message='$1''
+    google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$groupid'&message='$1''
+}
+
+sendmsgpriv(){
+    google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_private_msg?user_id='$1'&message='$2''
 }
 
 #主逻辑代码
@@ -216,7 +222,9 @@ processsend(){
         sendmsggroup AI审核判定不安全
     fi
 
-    sendimagetoqqgroup
+sendimagetoqqgroup
+     command="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$groupid'&message=$numnext'"
+    eval $command
     echo askforgroup...
     askforintro
 }
@@ -234,10 +242,9 @@ while true; do
         sleep 5
         # 获取文件的当前修改时间
         current_mod_time=$(stat -c %Y "$file_to_watch")
-        echo $current_mod_time
         # 检查文件是否已被修改
         if [ "$current_mod_time" -ne "$last_mod_time" ]; then
-            echo "有新消息"
+            echo "有新私聊消息"
             break
         fi   
     done
