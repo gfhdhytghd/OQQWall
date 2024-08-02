@@ -61,54 +61,58 @@ askforintro(){
     waitforfilechange "./qqBot/command/commands.txt"
     sendmsggroup 已收到指令
     mapfile -t lines < "$command_file"
-    for (( i=${#lines[@]}-1; i>=0; i-- )); do
-    line=${lines[$i]}
-    # 获取行的第一个和第二个字段
-    number=$(echo $line | awk '{print $1}')
-    status=$(echo $line | awk '{print $2}')
-    
-    # 检查行的第一个字段是否等于 numnext
-    if [[ $number -eq $numnext ]]; then
-        case $status in
-        是)
-            postcmd="true"
-            postqzone
-            ;;
-        否)
-            postcmd="false"
-            rm ./getmsgserv/rawpost/$id.json
-            rm -rf ./getmsgserv/post-step5/$numnext
-            ;;
-        等)
-            postcmd="wait"
-            sleep 180
-            ;;
-        删)
-            postcmd="del"
-            rm ./getmsgserv/rawpost/$id.json
-            rm -rf ./getmsgserv/post-step5/$numnext
-            ;;
-        esac
-        # 找到符合条件的行后退出循环
-        break
-    fi
-        if [[ $number -eq relogin ]]; then
-        case $status in
-        是)
-            postcmd="true"
-            renewqzonelogin
-            ;;
-        否)
-            postcmd="false"
-            echo retry...
-            sendmsggroup 重新尝试发送中...
-            postqzone
-            ;;
-        esac
-        # 找到符合条件的行后退出循环
-        break
-    fi
-    done
+        line=${lines[-i]}
+        # 获取行的第一个和第二个字段
+        number=$(echo $line | awk '{print $1}')
+        status=$(echo $line | awk '{print $2}')
+        
+        # 检查行的第一个字段是否等于 numnext
+        if [[ $number -eq $numnext ]]; then
+            case $status in
+            是)
+                postcmd="true"
+                postqzone
+                ;;
+            否)
+                postcmd="false"
+                rm ./getmsgserv/rawpost/$id.json
+                rm -rf ./getmsgserv/post-step5/$numnext
+                ;;
+            等)
+                postcmd="wait"
+                sleep 180
+                ;;
+            删)
+                postcmd="del"
+                rm ./getmsgserv/rawpost/$id.json
+                rm -rf ./getmsgserv/post-step5/$numnext
+                ;;
+            *)
+                sendmsggroup 没有此指令,请查看说明
+                askforintro
+                ;;
+            esac
+        elif [[ $number -eq relogin ]]; then
+            case $status in
+            是)
+                postcmd="true"
+                renewqzonelogin
+                ;;
+            否)
+                postcmd="false"
+                echo retry...
+                sendmsggroup 重新尝试发送中...
+                postqzone
+                ;;
+             *)
+                sendmsggroup 没有此指令,请查看说明
+                askforintro
+                ;;
+            esac
+        else
+            sendmsggroup 指令语法错误,请查看说明
+            askforintro
+        fi
 }
 postqzone(){
     if [ ! -f "./cookies.json" ]; then

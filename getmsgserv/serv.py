@@ -36,6 +36,30 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(b'Invalid JSON')
             return
 
+        if data.get('notice_type') == 'friend_recall':
+            print('serv:有撤回消息')
+            user_id = data.get('user_id')
+            message_id = data.get('message_id')
+
+            if user_id and message_id:
+                file_path = os.path.join(RAWPOST_DIR, f'{user_id}.json')
+                if os.path.exists(file_path):
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+
+                    # 移除具有相同 message_id 的消息
+                    updated_data = [msg for msg in existing_data if not (msg.get('message_id') == message_id)]
+                    
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump(updated_data, f, ensure_ascii=False, indent=4)
+                    
+                    print('已删除')
+                
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'Recall notice processed')
+            return
+
         # 记录到 ./all 文件夹
         all_file_path = os.path.join(ALLPOST_DIR, 'all_posts.json')
         if os.path.exists(all_file_path):
@@ -82,6 +106,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if message_type == 'private':
             # 只保留 "message" 和 "time" 字段
             simplified_data = {
+                "message_id": data.get("message_id"),
                 "message": data.get("message"),
                 "time": data.get("time")
             }
