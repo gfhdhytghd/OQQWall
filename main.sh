@@ -122,8 +122,14 @@ postqzone(){
     else
         echo "Cookies file exists. No action needed."
     fi
-
-    postcommand="python3 ./SendQzone/send.py '#$numnext' ./getmsgserv/post-step5/$numnext/"
+    json_path="./getmsgserv/post-step2/$numnext.json"
+    need_priv=$(jq -r '.needpriv' "$json_path")
+    # 检查 need_priv 的值并执行相应的命令
+    if [ "$need_priv" == "true" ]; then
+        postcommand="python3 ./SendQzone/send.py '#$numnext' ./getmsgserv/post-step5/$numnext/"
+    else
+        postcommand="python3 ./SendQzone/send.py '#$numnext @{uin:$id,nick:,who:1}' ./getmsgserv/post-step5/$numnext/"
+    fi
     output=$(eval $postcommand)
     if echo "$output" | grep -q "Failed to publish."; then
         sendmsggroup 空间发送错误,可能需要重新登陆
