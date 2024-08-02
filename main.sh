@@ -13,24 +13,8 @@ mkdir ./getmsgserv/post-step5
 # Activate virtual environment
 source ./venv/bin/activate
 
-# Check if the serv.py process is running
-if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null
-then
-    echo "serv.py is already running"
-else
-    python3 ./getmsgserv/serv.py &
-    echo "serv.py started"
-fi
-
-# Check if the Lagrange.OneBot process is running
-if pgrep -f "./qqBot/Lagrange.OneBot" > /dev/null
-then
-    echo "Lagrange.OneBot is already running"
-else
-    nohup ./qqBot/Lagrange.OneBot &
-    echo "Lagrange.OneBot started"
-fi
-
+# start startd
+./qqBot/startd.sh &
 echo 等待十秒避免消息反复处理
 sleep 10
 
