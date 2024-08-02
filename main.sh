@@ -139,12 +139,12 @@ postqzone(){
     else
         echo 发送完毕
         sendmsgpriv $id $numnext
-        sendmsgpriv $id 已发送(系统自动发送，请勿回复)
+        sendmsgpriv $id '已发送(系统自动发送，请勿回复)'
         sendmsggroup 已发送
     fi
     current_mod_time_id=$(stat -c %Y "$id_file")
     current_mod_time_privmsg=$(stat -c %Y "./getmsgserv/all/priv_post.json")
-    if [ "$current_mod_time_id" -eq "$last_mod_time_id" ]; then
+    if [ "$current_mod_time_id" -'eq "$last_mod_time_id" ]; then
         echo "过程中此人无新消息，删除此人记录"
         rm ./getmsgserv/rawpost/$id.json
     fi
