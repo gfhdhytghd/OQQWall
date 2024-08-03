@@ -114,6 +114,75 @@ askforintro(){
             askforintro
         fi
 }
+getnumnext(){
+    getnumcmd='python3 ./SendQzone/qzonegettag.py'
+    output=$(eval $getnumcmd)
+    if echo "$output" | grep -q "Log Error!"; then
+        sendmsggroup 空间获取失败,启动备用算法,请检查qq桌面端登录状态
+        echo 空间获取失败,启动备用算法,请检查qq桌面端登录状态
+        mapfile -t lines < "$command_file"
+        line=${lines[-1]}
+        # 获取行的第一个和第二个字段
+        number=$(echo $line | awk '{print $1}')
+        status=$(echo $line | awk '{print $2}')
+        echo '$number $status'
+        if [[ $number -ne relogin ]]; then
+            echo 检查到num,检查指令
+            case $status in
+            是)
+                numnext=$[ number + 1 ]
+                ;;
+            否)
+                numnext=$number
+                ;;
+            等)
+                numnext=$[ number + 1 ]
+                ;;
+            删)
+                numnext=$number
+                ;;
+            *)
+                numnext=$[ numnext + 1 ]
+                ;;
+            esac
+        elif [[ $number -eq relogin ]]; then
+            echo 检查到relogin,检查下一行
+            line=${lines[-2]}
+            # 获取行的第一个和第二个字段
+            number=$(echo $line | awk '{print $1}')
+            status=$(echo $line | awk '{print $2}')
+            echo $number $status
+            if [[ $number -eq relogin ]]; then
+                numnext=$[ numnext + 1]
+            else
+                case $status in
+                是)
+                    numnext=$[ number + 1 ]
+                    ;;
+                否)
+                    numnext=$number
+                    ;;
+                等)
+                    numnext=$[ number + 1 ]
+                    ;;
+                删)
+                    numnext=$number
+                    ;;
+                *)
+                    numnext=$[ numnext + 1 ]
+                    ;;
+                esac
+            fi
+        fi
+    else
+        numnow=$( cat ./numb.txt )
+        numnext=$[ numnow + 1 ]
+        echo 正常情况
+    fi
+    echo numnext=$numnext
+}
+
+
 postqzone(){
     if [ ! -f "./cookies.json" ]; then
         echo "Cookies file does not exist. Executing relogin script."
@@ -175,9 +244,7 @@ sendmsgpriv(){
 #主逻辑代码
 processsend(){
     echo getnum...
-    python3 ./SendQzone/qzonegettag.py
-    numnow=$( cat ./numb.txt )
-    numnext=$[ numnow + 1 ]
+    getnumnext
     echo waitingforsender...
     sleep 120
     id=$(find ./getmsgserv/rawpost -type f -printf '%T+ %p\n' | sort | head -n 1 | awk '{print $2}')
