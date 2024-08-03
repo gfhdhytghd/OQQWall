@@ -61,7 +61,7 @@ askforintro(){
     waitforfilechange "./qqBot/command/commands.txt"
     sendmsggroup 已收到指令
     mapfile -t lines < "$command_file"
-        line=${lines[-i]}
+        line=${lines[-1]}
         # 获取行的第一个和第二个字段
         number=$(echo $line | awk '{print $1}')
         status=$(echo $line | awk '{print $2}')

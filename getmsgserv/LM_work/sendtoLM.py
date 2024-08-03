@@ -29,8 +29,15 @@ output_file_path = f'./getmsgserv/post-step2/{output}.json'
 with open(input_file_path, 'r', encoding='utf-8') as infile:
     data = json.load(infile)
 
-# 将输入数据转换为字符串
-input_content = json.dumps(data, ensure_ascii=False, indent=4)
+# 遍历数据，删除每个字典中的 `message_id` 字段
+cleaned_data = []
+for item in data:
+    if 'message_id' in item:
+        del item['message_id']
+    cleaned_data.append(item)
+
+# 将清理后的数据转换为字符串
+input_content = json.dumps(cleaned_data, ensure_ascii=False, indent=4)
 
 timenow =  time.time()
 
@@ -39,7 +46,7 @@ prompt = (
     f"{input_content}\n\n"
     f"{timenow}\n"
     "这是按照时间顺序排序的一组的校园墙投稿的聊天记录\n"
-    "将这里你认为需要放在同一稿件中的，与同一事件有关的消息的信息拆分出来，一组信息通常以在吗或者投稿或者墙之类的词语开始，但有时此类词语也会在中间才出现或者不出现,有时这些信息会包含image或者video,通常这些信息time会比较接近（大多数情况下time差距在600内,但也有例外），输出为json格式，中文统一简体，只输出最后一组，不要输出任何额外内容\n\n"
+    "将这里你认为需要放在同一稿件中的信息拆分出来，一组信息通常以在吗或者投稿或者墙之类的词语开始，但有时此类词语也会在中间才出现或者不出现,有时这些信息会包含image或者video,通常这些信息time会比较接近（大多数情况下time差距在600内,但也有例外），输出为json格式，只输出最后一组，不要输出任何额外内容,不要输出任何额外内容\n\n"
     "输出格式如下：\n"
     "{\n"
     "  \"sender\": {\n"
