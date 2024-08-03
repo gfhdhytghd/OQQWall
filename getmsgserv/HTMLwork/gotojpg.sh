@@ -2,6 +2,7 @@
 input="$1"
 folder=./getmsgserv/post-step5/${input}
 jsonfile=./getmsgserv/post-step2/${input}.json
+rm -rf $folder
 mkdir -p "$folder"
 magick convert -density 360 -quality 100 ./getmsgserv/post-step4/${input}.pdf ./getmsgserv/post-step5/${input}/${input}.jpeg
 existing_files=$(ls "$folder" | wc -l)
