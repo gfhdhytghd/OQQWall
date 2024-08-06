@@ -27,7 +27,7 @@
 <br/>目前仅在x64 archlinux上进行过测试，其他系统要用的话可能要修改一些东西（你最好有基础的bash和python编写能力）
 #### arm用户请阅读:[Arm安装指南](README_ARM.md)
 #### 低性能用户请阅读：[性能优化指南](README_performance.md)
-<br/>请先安装QQ，google-chrome和chrome-drive，jq python3，dotnet框架,ImageMagick(某些发行版[deb]这个玩意默认没法处理pdf,需要调整policy配置，自己搜索怎么搞)
+<br/>请先安装QQ，google-chrome和chrome-drive，jq, python3，dotnet框架,ImageMagick(某些发行版[deb系]这个玩意默认没法处理pdf,需要调整policy配置，自己搜索怎么搞)
 
 克隆项目到任意位置，最好是用户文件夹中的某处，确保权限够用
 
@@ -41,12 +41,12 @@ pip install dashscope selenium re101 bs4
 
 ```
 <br/>执行./qqBot/Lagrange.OneBot
-<br/>扫码登陆主账号，记得勾选下次无需扫码
+<br/>扫码登陆主账号，最好勾选下次无需扫码
 <br/>ctrl+c关闭拉格朗日机器人
 
 <br/>执行python3 ./SendQzone/send.py login
 <br/>在一分钟内打开文件夹内的文件"qrcode.png"并扫码登录（目前阶段我建议登录辅助帐号，在测试环境跑一段时间再说）
-<br/>这一步程序会报错,这是正常的,什么都不影响,只是我懒得处理
+<br/>如果不执行这一步，系统会在首次接到投稿，管理员确认发送后，立即把登陆二维码发到管理群中并要求扫描
 
 参考此文章，获取qwen api-key
 <br/>https://help.aliyun.com/zh/dashscope/developer-reference/acquisition-and-configuration-of-api-key?spm=a2c4g.11186623.0.0.65fe46c1Q9s8Om
@@ -60,7 +60,7 @@ pip install dashscope selenium re101 bs4
 <br/>如果此帐号之前就是使用 #数字 方式进行编号，不需要进行这一步
 
 打开程序文件夹下的oqqwall.config,按说明填入数据
-说明:
+<br/>说明:
 ```
 #所有东西请填到双引号里
 
@@ -102,7 +102,9 @@ apikey="sk-"
 <br/>等：等待180秒，然后重新执行分段-渲染-审核流程，常用于稿件没发完的情况
 <br/>删：此条不发送（不用机器发，也不会用人工发送）（常用于用户来找你聊天或者稿件不过审的情况）
 
-目前阶段，删和否唯一的区别是，当qzonegettag.py运行不正常时，备用算法基于你之前给出的指令来推测下一个编号时，“否”会执行 下一个编号=[ 最后一条指令中的数字+1 ]，删会执行 下一个编号=[ 最后一条指令中的数字 ]
+目前阶段，删和否唯一的区别是，当qzonegettag.py运行不正常时，备用算法基于你之前给出的指令来推测下一个编号时：
+<br/>“否”会执行 下一个编号=[ 最后一条指令中的数字+1 ]
+<br/> “删”会执行 下一个编号=[ 最后一条指令中的数字 ]
 
 <br/>比如
 @校园墙 348 是
