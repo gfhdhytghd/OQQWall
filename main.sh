@@ -133,7 +133,7 @@ getnumnext(){
                 numnext=$[ number + 1 ]
                 ;;
             否)
-                numnext=$number
+                numnext=$[ number + 1 ]
                 ;;
             等)
                 numnext=$[ number + 1 ]
@@ -160,7 +160,7 @@ getnumnext(){
                     numnext=$[ number + 1 ]
                     ;;
                 否)
-                    numnext=$number
+                    numnext=$[ number + 1 ]
                     ;;
                 等)
                     numnext=$[ number + 1 ]
