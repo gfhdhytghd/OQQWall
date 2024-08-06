@@ -26,6 +26,7 @@
 <br/>主账号作为群主创建一个群聊，把墙管理员拉进来，并设定为群管理员。
 <br/>目前仅在x64 archlinux上进行过测试，其他系统要用的话可能要修改一些东西（你最好有基础的bash和python编写能力）
 #### arm用户请阅读:[Arm安装指南](README_ARM.md)
+#### 低性能用户请阅读：[性能优化指南](README_performance.md)
 <br/>请先安装QQ，google-chrome和chrome-drive，jq python3，dotnet框架,ImageMagick(某些发行版[deb]这个玩意默认没法处理pdf,需要调整policy配置，自己搜索怎么搞)
 
 克隆项目到任意位置，最好是用户文件夹中的某处，确保权限够用
