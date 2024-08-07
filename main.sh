@@ -81,6 +81,7 @@ askforintro(){
             等)
                 postcmd="wait"
                 sleep 180
+                askforintro
                 ;;
             删)
                 postcmd="del"
