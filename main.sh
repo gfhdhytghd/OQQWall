@@ -116,7 +116,7 @@ askforintro(){
         fi
 }
 getnumnext(){
-    getnumcmd='python3 ./SendQzone/qzonegettag.py'
+    getnumcmd='python3 ./SendQzone/qzonegettag-headless.py'
     output=$(eval $getnumcmd)
     if echo "$output" | grep -q "Log Error!"; then
         sendmsggroup 空间获取失败,启动备用算法,请检查qq桌面端登录状态
