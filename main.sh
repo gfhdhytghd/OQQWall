@@ -81,7 +81,7 @@ askforintro(){
             等)
                 postcmd="wait"
                 sleep 180
-                askforintro
+                processsend
                 ;;
             删)
                 postcmd="del"

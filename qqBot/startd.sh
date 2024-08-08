@@ -18,7 +18,7 @@ fi
 
 while true; do
     sleep 10800
-    pkill Lagrange.OneBot
-    nohup ./qqBot/Lagrange.OneBot &
-    echo 'LagrangeBot restarted'
+    pkill qq
+    nohup xvfb-run -a qq --no-sandbox -q &
+    echo 'NapCapQQBot restarted'
 done

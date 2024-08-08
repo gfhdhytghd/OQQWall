@@ -5,6 +5,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 import re
+import json
 from bs4 import BeautifulSoup
 from selenium.webdriver.chrome.options import Options
 
@@ -27,6 +28,22 @@ def login(my_qq):
         print(f'Log Error! {error}')
     else:
         print("Successfully Logged!")
+        browser.switch_to.default_content()
+    try:
+        cookies = browser.get_cookies()
+        cookies_dict = {}
+        for cookie in cookies:
+            # Add cookies to the dictionary in the desired format
+            cookies = browser.get_cookies()
+            cookies_dict = {cookie['name']: cookie['value'] for cookie in cookies}
+            with open("cookies.json", "w") as f:
+                json.dump(cookies_dict, f, indent=4)  # Save cookies as JSON with indentation for readability
+        with open("cookies.json", "w") as f:
+                    json.dump(cookies_dict, f, indent=4)
+    except Exception as error:
+        print(f'Cookies Save Error! {error}')
+    else:
+        print("Successfully Saved Cookies!")
         browser.switch_to.default_content()
     return browser
 
