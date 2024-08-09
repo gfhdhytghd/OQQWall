@@ -85,6 +85,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             raw_message = data.get('raw_message', '')
             group_id=int(group_id)
             groupid=int(groupid)
+            commugroupid=int(commugroupid)
             if (group_id == groupid and sender.get('role') == 'admin' and raw_message.startswith(f"[CQ:at,qq={qqid}")):
                 print ("serv:有指令消息")
                 # Extract and save the relevant part of raw_message
