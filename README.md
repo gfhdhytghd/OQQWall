@@ -12,7 +12,7 @@
 <br/>微信短时间内不会支持，因为没有找到linux能用的，好用的api。
 
 本系统的技术实现方式非常简陋和粗暴，作者屁都不会，创建过程大量使用chatgpt编写实现小功能的脚本，并最终由一个bash把所有东西都串起来。
-<br/>编写和测试平台是archlinux x64版本。
+<br/>编写和测试平台是ubuntu 22.04 x64 UEFI版本。
 
 本系统性能极差，处理不了任何并发，在管理员秒回的情况下平均5分钟能处理一条消息。
 
@@ -22,17 +22,59 @@
 <br/>使用qwen大语言模型的情况下，处理不了太长的帖子
 
 # 使用方法
-<br/>首先需要你注册两个qq号，一个作为主账号，一个作为辅助账号
+<br/>首先需要你有一个校园墙主账号
 <br/>主账号作为群主创建一个群聊，把墙管理员拉进来，并设定为群管理员。
 <br/>目前仅在x64 archlinux上进行过测试，其他系统要用的话可能要修改一些东西（你最好有基础的bash和python编写能力）
 #### arm用户请阅读:[Arm安装指南](README_ARM.md)
 #### 低性能用户请阅读：[性能优化指南](README_performance.md)
-<br/>请先安装QQ，google-chrome和chrome-drive，jq, python3，dotnet框架,ImageMagick(某些发行版[deb系]这个玩意默认没法处理pdf,需要调整policy配置，自己搜索怎么搞)
+<br/>请先安装QQ，napcat无头ntqq框架或者LLonebot框架,google-chrome和chrome-drive，jq, python3，dotnet框架,ImageMagick(某些发行版[deb系]这个玩意默认没法处理pdf,需要调整policy配置，自己搜索怎么搞)
 
-克隆项目到任意位置，最好是用户文件夹中的某处，确保权限够用
+napcat官方文档:https://napneko.github.io/zh-CN/
+<br/>对于rpm/deb系,你们可以通过执行
+```
+curl -o napcat.sh https://fastly.jsdelivr.net/gh/NapNeko/NapCat-Installer@master/script/install.sh && sudo bash napcat.sh
+```
+来进行一键安装qq和snapcat
+<br/>对于arch,请手动执行以下内容(napcat这破玩意官网没写手动安装教程妈的):
+安装aur/linuxqq
+下载最新release,然后
+```
+mkdir ./NapCat/
+mkdir ./tmp/
+unzip -q -o -d ./tmp NapCat.linux.zip
+target_folder="/opt/QQ/resources/app/app_launcher"
+default_file="NapCat.linux.zip"
+sudo cp -r -f ./tmp/NapCat.linux.x64/* "$target_folder/napcat/"
+sudo chmod -R 777 "$target_folder/napcat/"
+sudo mv -f "$target_folder/index.js" "$target_folder/index.js.bak"
+output_index_js=$(echo -e "const path = require('path');\nconst CurrentPath = path.dirname(__filename)\nconst hasNapcatParam = process.argv.includes('--no-sandbox');\nif (hasNapcatParam) {\n    (async () => {\n        await import(\\\"file://\\\" + path.join(CurrentPath, './napcat/napcat.mjs'));\n    })();\n} else {\n    require('./launcher.node').load('external_index', module);\n}")
+```
+
+通过xvfb-run -a qq --no-sandbox -q
+<br/>或者xvfb-run -a linuxqq --no-sandbox -q
+<br/>启动napcat框架和qq,并扫码登陆
+
+然后请参考napcat或LLonebot的官方文档,设定http监听端口8083,http-post端口8082
+
+注:你可能需要自己debug一下napcat才能用,你可以在填写完OQQWall配置文件(见下文)之后单独启动serv.py和napcat来监测
+注:如果你想要使用LLonebot,请修改是./qqBot/startd.sh,删除整个wile true,加上qq
+```
+cd OQQWall
+python3 ./getmsgserv/serv.py
+```
+```for the origin of agriculture
+emphasized the competing oasis and cultural evolution hypotheses. The
+oasis hypothesis held that the postglacial drying of the Middle East
+restricted edible plants, people, and other animals to well- watered flood
+plains.This forced proximity promoted social bonds, which eventually led to
+cd OQQWall
+xvfb-run -a qq --no-sandbox -p(使用-p参数)
+```
+
+接下来,克隆项目到任意位置，最好是用户文件夹中的某处，确保权限够用
 
 进入OQQwall文件夹
-创建python venv并安装依赖,注意这需要良好的网络环境
+创建python venv并安装依赖,注意这需要良好的网络环境或者换源
 ```
 python -m venv ./venv/
 source ./venv/bin/activate
@@ -40,13 +82,10 @@ pip install --upgrade pip
 pip install dashscope selenium re101 bs4
 
 ```
-<br/>执行./qqBot/Lagrange.OneBot
+<br/>启动napcat
 <br/>扫码登陆主账号，最好勾选下次无需扫码
-<br/>ctrl+c关闭拉格朗日机器人
+<br/>关闭或者不关闭随意,不关的话注意不要不小心给终端关了
 
-<br/>执行python3 ./SendQzone/send.py login
-<br/>在一分钟内打开文件夹内的文件"qrcode.png"并扫码登录（目前阶段我建议登录辅助帐号，在测试环境跑一段时间再说）
-<br/>如果不执行这一步，系统会在首次接到投稿，管理员确认发送后，立即把登陆二维码发到管理群中并要求扫描
 
 参考此文章，获取qwen api-key
 <br/>https://help.aliyun.com/zh/dashscope/developer-reference/acquisition-and-configuration-of-api-key?spm=a2c4g.11186623.0.0.65fe46c1Q9s8Om
@@ -68,7 +107,7 @@ mainqq-id="xxx"
 #填入校园墙主账号qq号
 
 secondaryqq-id="xxx"
-#填入校园墙辅账号qq号
+#填入校园墙辅账号qq号(目前已经弃用,只是没来得及删,不用填写)
 
 management-group-id="xxx"
 #填入管理群群号

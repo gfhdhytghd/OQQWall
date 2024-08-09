@@ -81,7 +81,7 @@ def main():
     # Log in
     config = read_config('oqqwall.config')
     friendlist = config.get('mainqq-id')
-    my_qq = config.get('secondaryqq-id')
+    my_qq = config.get('mainqq-id')
     driver = login(my_qq)
 
     # Get to the friend's QQ Zone
