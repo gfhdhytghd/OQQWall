@@ -125,8 +125,12 @@ for message in json_data["messages"]:
         elif msg["type"] == "image":
             message_html += f'<img src="{msg["data"]["url"]}" alt="Image">\n'
         elif msg["type"] == "video":
-            message_html += f'<video controls autoplay muted><source src="{msg["data"]["url"]}" type="video/mp4">Your browser does not support the video tag.</video>\n'
-    
+            try:
+                message_html += f'<video controls autoplay muted><source src="file://{msg["data"]["file"]}" type="video/mp4">Your browser does not support the video tag.</video>\n'
+            except:
+                message_html += f'<video controls autoplay muted><source src="{msg["data"]["url"]}" type="video/mp4">Your browser does not support the video tag.</video>\n'
+            else
+                print ('video success')
     if combined_text:
         # 替换 \n 为 <br/>
         combined_text = combined_text.replace("\n", "<br/>")
