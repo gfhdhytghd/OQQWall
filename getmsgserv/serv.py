@@ -78,6 +78,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if message_type == 'group':
             groupid = config.get('management-group-id')
             commugroupid = config.get('communicate-group')
+            print(commugroupid)
             qqid = config.get('mainqq-id')
             group_id = data.get('group_id')
             sender = data.get('sender', {})
