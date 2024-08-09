@@ -1,7 +1,6 @@
 # Arm平台安装指南
-正常部署一切，安装除了chrome和chromedrive以外的一切
+正常部署一切，安装除了chrome和chromedrive以外的一切,LLonebot在arm上似乎不好用,建议用napcat
 
-去largrange.onebot的官方release下载最新的arm版本，替换./qqBot/largrange.onebot
 打开main.sh,删掉getnumnext函数下的
 ```
     getnumcmd='python3 ./SendQzone/qzonegettag.py'
