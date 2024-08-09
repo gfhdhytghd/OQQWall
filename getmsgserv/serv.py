@@ -25,7 +25,9 @@ class RequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         # 解析请求头和请求体
         content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
+        
+        
+        self.rfile.read(content_length)
         
         # 解析 JSON 数据
         try:
@@ -80,14 +82,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             qqid = config.get('mainqq-id')
             group_id = data.get('group_id')
             sender = data.get('sender', {})
+            name=sender.get('name')
             raw_message = data.get('raw_message', '')
             group_id=int(group_id)
             groupid=int(groupid)
             if (group_id == groupid and sender.get('role') == 'admin' and 
-                raw_message.startswith(f"[CQ:at,qq={qqid}]")):
+                raw_message.startswith(f"[CQ:at,qq={qqid},name={name} ]")):
                 print ("serv:有指令消息")
                 # Extract and save the relevant part of raw_message
-                command_text = raw_message[len(f"[CQ:at,qq={qqid}]"):]
+                command_text = re.sub(r'\[.*?\]', '', raw_message).strip()
                 command_file_path = os.path.join(COMMAND_DIR, 'commands.txt')
                 with open(command_file_path, 'a', encoding='utf-8') as f:
                     f.write(command_text + '\n')
