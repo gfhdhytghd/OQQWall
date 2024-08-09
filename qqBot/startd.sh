@@ -8,12 +8,12 @@ else
 fi
 
 # Check if the Lagrange.OneBot process is running
-if pgrep -f "./qqBot/Lagrange.OneBot" > /dev/null
+if pgrep -f "QQ" > /dev/null
 then
-    echo "Lagrange.OneBot is already running"
+    echo "OneBot is already running"
 else
-    nohup ./qqBot/Lagrange.OneBot &
-    echo "Lagrange.OneBot started"
+    nohup xvfb-run -a qq --no-sandbox -q &
+    echo "OneBot started"
 fi
 
 while true; do

@@ -47,7 +47,7 @@ sendimagetoqqgroup() {
 
     find "$folder_path" -maxdepth 1 -type f | sort | while IFS= read -r file_path; do
     echo "发送文件: $file_path"
-    command="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$groupid'&message=[CQ:image,file=$file_path]'"
+    command="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$groupid'&message=[CQ:image,file=file://$file_path]'"
     eval $command
     sleep 1  # 添加延时以避免过于频繁的请求
     done
