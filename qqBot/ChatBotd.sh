@@ -20,7 +20,6 @@ sendmsggroup(){
     google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$commgroup_id='&message='$1''
 }
 
-waitforfilechange "./getmsgserv/all/commugroup.txt"
 while true; do
     echo 启动等待循环
     waitforfilechange "./getmsgserv/all/commugroup.txt"
