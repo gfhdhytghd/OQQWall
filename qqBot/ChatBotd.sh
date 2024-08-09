@@ -20,10 +20,10 @@ sendmsggroup(){
     google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$commgroup_id='&message='$1''
 }
 
-waitforfilechange "./getmsgserv/all/commugroup.json"
+waitforfilechange "./getmsgserv/all/commugroup.txt"
 while true; do
     echo 启动等待循环
-    waitforfilechange "./getmsgserv/all/commugroup.json"
+    waitforfilechange "./getmsgserv/all/commugroup.txt"
     mapfile -t lines < "$command_file"
         line=${lines[-1]}
         # 获取行的第一个和第二个字段
