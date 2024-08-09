@@ -1,6 +1,7 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import json
 import os
+import re
 
 # 定义存储路径
 RAWPOST_DIR = './getmsgserv/rawpost'
@@ -25,9 +26,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         # 解析请求头和请求体
         content_length = int(self.headers['Content-Length'])
-        
-        
-        self.rfile.read(content_length)
+        post_data = self.rfile.read(content_length)
         
         # 解析 JSON 数据
         try:
@@ -80,21 +79,23 @@ class RequestHandler(BaseHTTPRequestHandler):
             print ("serv:有群组消息")
             groupid = config.get('management-group-id')
             qqid = config.get('mainqq-id')
+            print({qqid})
             group_id = data.get('group_id')
             sender = data.get('sender', {})
-            name=sender.get('name')
             raw_message = data.get('raw_message', '')
+            print({raw_message})
             group_id=int(group_id)
             groupid=int(groupid)
-            if (group_id == groupid and sender.get('role') == 'admin' and 
-                raw_message.startswith(f"[CQ:at,qq={qqid},name={name} ]")):
+            print({groupid})
+            print({group_id})
+            if (group_id == groupid and sender.get('role') == 'admin' and raw_message.startswith(f"[CQ:at,qq={qqid}")):
                 print ("serv:有指令消息")
                 # Extract and save the relevant part of raw_message
-                command_text = re.sub(r'\[.*?\]', '', raw_message).strip()
+                command_text =  re.sub(r'\[.*?\]', '', raw_message).strip()
                 command_file_path = os.path.join(COMMAND_DIR, 'commands.txt')
                 with open(command_file_path, 'a', encoding='utf-8') as f:
                     f.write(command_text + '\n')
-
+                    
         # 获取 message_type、user_id 和 time 字段
         message_type = data.get('message_type')
         user_id = data.get('user_id')
