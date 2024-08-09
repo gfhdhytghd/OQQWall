@@ -1,6 +1,7 @@
 #!/bin/bash
 source ./venv/bin/activate
 commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+echo $commgroup_id
 waitforfilechange(){
         last_mod_time_cmd=$(stat -c %Y "$1")
 
