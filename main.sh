@@ -1,6 +1,7 @@
 #!/bin/bash
 
 groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
 
@@ -298,6 +299,11 @@ sendmsggroup 机器人已启动
 echo 获取priv_post文件更改时间
 last_mod_time=$(stat -c %Y "$file_to_watch")
 echo $last_mod_time
+
+if [ -n "$commgroup_id" ]; then 
+    echo "commgroup_id不为空,启动chatbot守护程序"
+    nohup ./qqBot/ChatBotd.sh &
+fi
 
 echo 启动主循环
 while true; do

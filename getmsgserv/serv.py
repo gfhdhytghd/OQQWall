@@ -76,18 +76,14 @@ class RequestHandler(BaseHTTPRequestHandler):
         #记录群中命令
         message_type = data.get('message_type')
         if message_type == 'group':
-            print ("serv:有群组消息")
             groupid = config.get('management-group-id')
+            commugroupid = config.get('communicate-group')
             qqid = config.get('mainqq-id')
-            print({qqid})
             group_id = data.get('group_id')
             sender = data.get('sender', {})
             raw_message = data.get('raw_message', '')
-            print({raw_message})
             group_id=int(group_id)
             groupid=int(groupid)
-            print({groupid})
-            print({group_id})
             if (group_id == groupid and sender.get('role') == 'admin' and raw_message.startswith(f"[CQ:at,qq={qqid}")):
                 print ("serv:有指令消息")
                 # Extract and save the relevant part of raw_message
@@ -95,7 +91,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                 command_file_path = os.path.join(COMMAND_DIR, 'commands.txt')
                 with open(command_file_path, 'a', encoding='utf-8') as f:
                     f.write(command_text + '\n')
-                    
+            if (group_id == commugroupid and raw_message.startswith(f"[CQ:at,qq={qqid}")):
+                print ("serv:有LLM问答消息")
+                # Extract and save the relevant part of raw_message
+                commu_text =  re.sub(r'\[.*?\]', '', raw_message).strip()
+                commu_file_path = os.path.join(./getmsgserv/all/, 'commugroup.txt')
+                with open(commu_file_path, 'a', encoding='utf-8') as f:
+                    f.write(commu_text + '\n')       
         # 获取 message_type、user_id 和 time 字段
         message_type = data.get('message_type')
         user_id = data.get('user_id')
