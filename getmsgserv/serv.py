@@ -95,7 +95,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 print ("serv:有LLM问答消息")
                 # Extract and save the relevant part of raw_message
                 commu_text =  re.sub(r'\[.*?\]', '', raw_message).strip()
-                commu_file_path = os.path.join('COMMU_DIR, 'commugroup.txt')
+                commu_file_path = os.path.join(COMMU_DIR, 'commugroup.txt')
                 with open(commu_file_path, 'a', encoding='utf-8') as f:
                     f.write(commu_text + '\n')       
         # 获取 message_type、user_id 和 time 字段
