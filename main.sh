@@ -302,7 +302,7 @@ echo $last_mod_time
 
 if [ -n "$commgroup_id" ]; then 
     echo "commgroup_id不为空,启动chatbot守护程序"
-    nohup ./qqBot/ChatBotd.sh &
+    ./qqBot/ChatBotd.sh &
 fi
 
 echo 启动主循环
