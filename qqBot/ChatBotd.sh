@@ -1,5 +1,6 @@
 #!/bin/bash
 source ./venv/bin/activate
+commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 waitforfilechange(){
         last_mod_time_cmd=$(stat -c %Y "$1")
 
@@ -15,6 +16,9 @@ waitforfilechange(){
         fi
     done
 }
+sendmsggroup(){
+    google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$commgroup_id='&message='$1''
+}
 
 waitforfilechange "./getmsgserv/all/commugroup.json"
 while true; do
@@ -24,5 +28,8 @@ while true; do
         line=${lines[-1]}
         # 获取行的第一个和第二个字段
         question=$(echo $line | awk '{print $1}')
-        python3 /home/wilf/data/OQQWall/qqBot/ChatBot.py
+        botcmd = python3 /home/wilf/data/OQQWall/qqBot/ChatBot.py $question
+        botoutput=$(eval $botcmd)
+        cmd="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$commgroup_id='&message='$botoutput''"
+        eval $cmd
 done
