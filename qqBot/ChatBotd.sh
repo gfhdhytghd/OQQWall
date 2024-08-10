@@ -27,7 +27,5 @@ while true; do
         # 获取行的第一个和第二个字段
         botcmd="python3 ./qqBot/ChatBot.py $question"
         botoutput=$(eval $botcmd)
-        cmd="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$commgroup_id'&message='$botoutput'"
-        echo $cmd
-        eval $cmd
+        google-chrome --headless --disable-gpu -no-sendbox --screenshot http://127.0.0.1:8083/send_group_msg?group_id=$commgroup_id&message='$botoutput'
 done
