@@ -14,10 +14,12 @@ output_file_path = f"./getmsgserv/post-step3/{input}.html"
 with open(input_file_path, "r", encoding="utf-8") as file:
     json_data = json.load(file)
 
+userid=json_data["sender"]["user_id"]
 
 # 检查 needpriv 和 safemsg，并根据条件修改 user_id 和 nickname
 if json_data.get("needpriv") == "true" and json_data.get("safemsg") == "true":
     json_data["sender"]["user_id"] = 10000
+    userid = None
     json_data["sender"]["nickname"] = "匿名"
 
 # 生成 HTML 内容
@@ -105,7 +107,7 @@ html_template = """
             <img src="http://q.qlogo.cn/headimg_dl?dst_uin={user_id}&spec=640&img_type=jpg" alt="Profile Image">
             <div class="header-text">
                 <h1>{nickname}</h1>
-                <h2>{user_id}</h2>
+                <h2>{userid}</h2>
                 </div>
         </div>
         <div class="content">
@@ -141,6 +143,7 @@ for message in json_data["messages"]:
 html_content = html_template.format(
     nickname=json_data["sender"]["nickname"],
     user_id=json_data["sender"]["user_id"],
+    userid=userid,
     messages=message_html
 )
 
