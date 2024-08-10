@@ -76,6 +76,8 @@ python -m venv ./venv/
 source ./venv/bin/activate
 pip install --upgrade pip
 pip install dashscope selenium re101 bs4
+#with-ai-agents仅在需要使用群ChatBot功能时需要安装
+pip install with-ai-agents
 
 ```
 <br/>启动napcat
@@ -111,6 +113,9 @@ management-group-id="xxx"
 apikey="sk-"
 #填入qwen api key
 #sk-xxxxxx,"sk"也要填进来
+
+communicate-group="xxx"
+这是ChatBot运行的群号
 ```
 
 启动主程序
@@ -147,6 +152,7 @@ apikey="sk-"
 <br/>从系统中删掉这个人的消息记录,人工前往处理
 
 QQ空间重新登陆:
-<br/>理论上,机器人会在qq空间发送失败时(大多数时候是cookies过期)发<br/>送消息到群中要求重新登录
+<br/>注:v0.2之后不再需要重新登录
+<br/>机器人会在qq空间发送失败时(大多数时候是cookies过期)发<br/>送消息到群中要求重新登录
 <br/>此时,发送指令 '@主账号 relogin 是'
 <br/>机器人会发送一张二维码到群中,请用用来发送空间的账号扫码登陆
