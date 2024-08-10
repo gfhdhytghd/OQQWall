@@ -92,6 +92,7 @@ html_template = """
             border-radius: 10px;
             padding: 0;
             margin: 0;
+            max-height: 300px; 
         }}
         .content video {{
             background-color: transparent;
@@ -129,7 +130,7 @@ for message in json_data["messages"]:
                 message_html += f'<video controls autoplay muted><source src="file://{msg["data"]["file"]}" type="video/mp4">Your browser does not support the video tag.</video>\n'
             except:
                 message_html += f'<video controls autoplay muted><source src="{msg["data"]["url"]}" type="video/mp4">Your browser does not support the video tag.</video>\n'
-            else
+            else:
                 print ('video success')
     if combined_text:
         # 替换 \n 为 <br/>
