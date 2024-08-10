@@ -27,5 +27,9 @@ while true; do
         # 获取行的第一个和第二个字段
         botcmd="python3 ./qqBot/ChatBot.py $question"
         botoutput=$(eval $botcmd)
-        google-chrome --headless --disable-gpu -no-sendbox --screenshot http://127.0.0.1:8083/send_group_msg?group_id=$commgroup_id&message='$botoutput'
+        encoded_output=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$botoutput'''))")
+        # 构建 curl 命令，并发送编码后的消息
+        cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$commgroup_id&message=$encoded_output\""
+        echo $cmd
+        eval $cmd
 done

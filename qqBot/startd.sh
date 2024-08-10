@@ -8,17 +8,26 @@ else
 fi
 
 # Check if the Lagrange.OneBot process is running
-if pgrep -f "QQ" > /dev/null
+if pgrep -f "qq" > /dev/null
 then
     echo "OneBot is already running"
 else
-    nohup xvfb-run -a qq --no-sandbox -q &
+    nohup qq  &
     echo "OneBot started"
 fi
+commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+if [ -n "$commgroup_id" ]; then 
+    echo "commgroup_id不为空,chatbot启动"
+    
+    if pgrep -f "ChatBotd.sh" > /dev/null
+        then
+            echo "OneBot is already running"
+        else
+            ./qqBot/ChatBotd.sh &
+            echo "OneBot started"
+    fi
+fi
 
-while true; do
-    sleep 10800
-    pkill qq
-    nohup xvfb-run -a qq --no-sandbox -q &
-    echo 'NapCapQQBot restarted'
-done
+
+fi
+
