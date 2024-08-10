@@ -62,11 +62,7 @@ output_index_js=$(echo -e "const path = require('path');\nconst CurrentPath = pa
 cd OQQWall
 python3 ./getmsgserv/serv.py
 ```
-```for the origin of agriculture
-emphasized the competing oasis and cultural evolution hypotheses. The
-oasis hypothesis held that the postglacial drying of the Middle East
-restricted edible plants, people, and other animals to well- watered flood
-plains.This forced proximity promoted social bonds, which eventually led to
+```
 cd OQQWall
 xvfb-run -a qq --no-sandbox -p(使用-p参数)
 ```
