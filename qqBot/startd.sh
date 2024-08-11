@@ -1,5 +1,6 @@
 #!/bin/bash
 LLonebot=$(grep 'use_LLOnebot' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 
 if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null
 then
@@ -10,7 +11,7 @@ else
 fi
 
 # Check if the OneBot server process is running
-if pgrep -f "qq" > /dev/null
+if pgrep -fx "qq" > /dev/null
 then
     echo "OneBot is already running"
 else
@@ -25,15 +26,12 @@ else
     fi
 fi
 
-commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 if [ -n "$commgroup_id" ]; then 
-    echo "commgroup_id不为空,chatbot启动"
-    
-    if pgrep -f "ChatBotd.sh" > /dev/null
-        then
-            echo "OneBot is already running"
+    echo "commgroup_id不为空,chatbot启动" 
+    if pgrep -f "ChatBotd.sh" > /dev/null;then
+            echo "ChatBot is already running"
         else
             ./qqBot/ChatBotd.sh &
-            echo "OneBot started"
+            echo "OneBot starting"
     fi
 fi

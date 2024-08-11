@@ -12,14 +12,14 @@ waitforfilechange(){
 
         # 检查文件是否已被修改
         if [ "$current_mod_time_cmd" -ne "$last_mod_time_cmd" ]; then
-            echo 检测到指令
+            echo 检测到文件修改
             break
         fi
     done
 }
 
 while true; do
-    echo 启动等待循环
+    echo “ChatBotd：启动等待循环”
     waitforfilechange ./getmsgserv/all/commugroup.txt
     mapfile -t lines < "./getmsgserv/all/commugroup.txt"
         question=${lines[-1]}

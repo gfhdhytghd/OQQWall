@@ -204,7 +204,7 @@ postqzone(){
         python3 SendQzone/send.py relogin &
         sleep 2
         sendmsggroup 请立即扫描二维码
-        command="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=[CQ:image,file=$(pwd)/qrcode.png]'"
+        sendmsggroup "[CQ:image,file=$(pwd)/qrcode.png]"
         eval $command
         sleep 60
     else
@@ -213,17 +213,25 @@ postqzone(){
     json_path="./getmsgserv/post-step2/$numnext.json"
     need_priv=$(jq -r '.needpriv' "$json_path")
     # 检查 need_priv 的值并执行相应的命令
-    if [ "$need_priv" == "true" ]; then
+   if [ "$need_priv" == "true" ]; then
         postcommand="python3 ./SendQzone/send.py '#$numnext' ./getmsgserv/post-step5/$numnext/"
     else
         postcommand="python3 ./SendQzone/send.py '#$numnext @{uin:$id,nick:,who:1}' ./getmsgserv/post-step5/$numnext/"
     fi
     output=$(eval $postcommand)
     if echo "$output" | grep -q "Failed to publish."; then
-        sendmsggroup 空间发送错误,可能需要重新登陆
-        command="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=发送 @本账号 relogin 是 以重新登陆'"
-        eval $command
-        askforintro
+        getnumnext
+        output=$(eval $postcommand)
+        if echo "$output" | grep -q "Failed to publish."; then
+            sendmsggroup "空间发送错误，可能需要重新登陆"
+            sendmsggroup "发送\"@本账号 relogin 是\"以手动重新登陆"
+            askforintro
+        else
+            echo 发送完毕
+            sendmsgpriv $id $numnext
+            sendmsgpriv $id '已发送(系统自动发送，请勿回复)'
+            sendmsggroup 已发送
+        fi
     else
         echo 发送完毕
         sendmsgpriv $id $numnext
@@ -232,13 +240,17 @@ postqzone(){
     fi
     current_mod_time_id=$(stat -c %Y "$id_file")
     current_mod_time_privmsg=$(stat -c %Y "./getmsgserv/all/priv_post.json")
+    echo "'current-mod-time-id:'$current_mod_time_id"
+    echo "'last-mod-time-id:'$last_mod_time_id"
+    echo "'current_mod_time_privmsg'$current_mod_time_privmsg"
+    echo "'last_mod_time_privmsg':$last_mod_time_privmsg"
     if [ "$current_mod_time_id" -eq "$last_mod_time_id" ]; then
         echo "过程中此人无新消息，删除此人记录"
         rm ./getmsgserv/rawpost/$id.json
     fi
-    if [ "$current_mod_time_id" -ne "$last_mod_time_id" ]; then
+    if [ "$current_mod_time_privmsg" -ne "$last_mod_time_privmsg " ]; then
         echo "过程中有新消息，重跑发件流程"
-        processsend
+        processsend 
     fi
 }
 renewqzonelogin(){
@@ -258,11 +270,10 @@ sendmsggroup(){
 }
 
 sendmsgpriv(){
-    google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_private_msg?user_id='$1'&message='$2''
     msg=$2
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
-    cmd="curl \"http://127.0.0.1:8083/send_group_msg??user_id=$1&message=$encoded_msg\""
+    cmd="curl \"http://127.0.0.1:8083/send_private_msg?user_id=$1&message=$encoded_msg\""
     echo $cmd
     eval $cmd
 }
@@ -312,8 +323,7 @@ processsend(){
     fi
 
 sendimagetoqqgroup
-     command="google-chrome-stable --headless --screenshot 'http://127.0.0.1:8083/send_group_msg?group_id='$groupid'&message=$numnext'"
-    eval $command
+    sendmsggroup ”$numnext“
     echo askforgroup...
     askforintro
 }
@@ -323,11 +333,6 @@ sendmsggroup 机器人已启动
 echo 获取priv_post文件更改时间
 last_mod_time=$(stat -c %Y "$file_to_watch")
 echo $last_mod_time
-
-if [ -n "$commgroup_id" ]; then 
-    echo "commgroup_id不为空,启动chatbot守护程序"
-    ./qqBot/ChatBotd.sh &
-fi
 
 echo 启动主循环
 while true; do
