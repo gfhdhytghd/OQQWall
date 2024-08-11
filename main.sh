@@ -11,6 +11,8 @@ mkdir ./getmsgserv/post-step2
 mkdir ./getmsgserv/post-step3
 mkdir ./getmsgserv/post-step4
 mkdir ./getmsgserv/post-step5
+mkdir ./qqBot/command
+touch ./qqBot/command/commands.txt
 
 # Activate virtual environment
 source ./venv/bin/activate
