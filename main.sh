@@ -19,7 +19,7 @@ source ./venv/bin/activate
 
 # start startd
 ./qqBot/startd.sh &
-echo 等待十秒避免消息反复处理
+echo 等待启动十秒
 sleep 10
 
 
