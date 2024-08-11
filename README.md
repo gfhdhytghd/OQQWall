@@ -55,9 +55,9 @@ output_index_js=$(echo -e "const path = require('path');\nconst CurrentPath = pa
 <br/>启动napcat框架和qq,并扫码登陆
 
 然后请参考napcat或LLonebot的官方文档,设定http监听端口8083,http-post端口8082
-
 注:你可能需要自己debug一下napcat才能用,你可以在填写完OQQWall配置文件(见下文)之后单独启动serv.py和napcat来监测
 注:如果你想要使用LLonebot,请修改是./qqBot/startd.sh,删除整个wile true,加上qq
+注：想要换端口，请到文件夹内所有的.sh和.py文件中，用文本编辑器进行查找替换
 
 注：如果你要使用LLOneBot,请在config中设定use_LLOnebot=true
 
@@ -88,7 +88,7 @@ pip install with-ai-agents
 注：目前使用的模型是qwen2-72b-instruct，效果还行，有能力的可以自己换更牛逼的模型,或者自己测试一下哪个模型好用。
 
 手动登陆主账号qq空间，发送一条说说，文案需要由#0开头，这是为了初始化编号系统
-<br/>如果此帐号之前就是使用 #数字 方式进行编号，不需要进行这一步
+<br/>如果此帐号之前就是使用 #数字 方式进行编号，或者设定了使用轻量编号系统，不需要进行这一步
 
 打开程序文件夹下的oqqwall.config,按说明填入数据
 <br/>说明:
