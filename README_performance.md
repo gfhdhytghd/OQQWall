@@ -12,25 +12,10 @@
 桌面环境：
 <br/>本系统不要求桌面环境,删掉即可
 
-使用次等编号算法的方法：
+使用轻量编号算法：
 
-打开main.sh,删掉getnumnext函数下的
-```
-    getnumcmd='python3 ./SendQzone/qzonegettag.py'
-    output=$(eval $getnumcmd)
-    if echo "$output" | grep -q "Log Error!"; then
-        sendmsggroup 空间获取失败,启动备用算法,请检查qq桌面端登录状态
-        echo 空间获取失败,启动备用算法,请检查qq桌面端登录状态
-```
-和
-```
-    else
-        numnow=$( cat ./numb.txt )
-        numnext=$[ numnow + 1 ]
-        echo 正常情况
-    fi
-    echo numnext=$numnext
-```
+config文件中把use_lite_tag_generator设定为true
+
 <br/>保存关闭
 <br/>注.如果你想使用次等编号算法,那么相比云服务器,我更推荐把他部署到你家路由器上,还能省点钱。
 

@@ -4,6 +4,7 @@ groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
+litegettag=$(grep 'use_lite_tag_generator' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 
 mkdir ./getmsgserv/rawpost
 mkdir ./getmsgserv/post-step2
@@ -125,11 +126,15 @@ askforintro(){
         fi
 }
 getnumnext(){
-    getnumcmd='python3 ./SendQzone/qzonegettag-headless.py'
-    output=$(eval $getnumcmd)
+    if [[ "$litegettag" == false ]]; then
+        echo 使用主算法...
+        getnumcmd='python3 ./SendQzone/qzonegettag-headless.py'
+        output=$(eval $getnumcmd)
+    else 
+        output="Log Error!"
+    fi
     if echo "$output" | grep -q "Log Error!"; then
-        sendmsggroup 空间获取失败,启动备用算法,请检查qq桌面端登录状态
-        echo 空间获取失败,启动备用算法,请检查qq桌面端登录状态
+        echo 使用备用算法...
         mapfile -t lines < "$command_file"
         line=${lines[-1]}
         # 获取行的第一个和第二个字段
@@ -187,11 +192,9 @@ getnumnext(){
     else
         numnow=$( cat ./numb.txt )
         numnext=$[ numnow + 1 ]
-        echo 正常情况
     fi
     echo numnext=$numnext
 }
-
 
 postqzone(){
     if [ ! -f "./cookies.json" ]; then

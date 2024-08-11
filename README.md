@@ -1,6 +1,6 @@
 # OQQWall开放QQ校园墙自动运营系统
 # 💩!屎山警告!💩<br/>👍(但是能用)👍
-## 目前系统已经有了基础的业务能力和一定的错误处理能力，但未经过时间的检验，把它直接用在严肃的生产环境是一个很冒险的做法
+## 目前系统已经有了一定的业务能力和错误处理能力，可以比较放心的用在生产环境中
 ## 简介
 本系统是一个校园墙自动运营系统，可以实现如下功能：
 <br/>获取用户投稿消息，通过大语言模型实现自动分段，自动判断匿名与否
@@ -58,14 +58,6 @@ output_index_js=$(echo -e "const path = require('path');\nconst CurrentPath = pa
 
 注:你可能需要自己debug一下napcat才能用,你可以在填写完OQQWall配置文件(见下文)之后单独启动serv.py和napcat来监测
 注:如果你想要使用LLonebot,请修改是./qqBot/startd.sh,删除整个wile true,加上qq
-```
-cd OQQWall
-python3 ./getmsgserv/serv.py
-```
-```
-cd OQQWall
-xvfb-run -a qq --no-sandbox -p(使用-p参数)
-```
 
 接下来,克隆项目到任意位置，最好是用户文件夹中的某处，确保权限够用
 
@@ -116,6 +108,8 @@ apikey="sk-"
 
 communicate-group="xxx"
 这是ChatBot运行的群号
+use_lite_tag_generator=true/false
+#是否使用轻量编号算法,开启后将使用本地算法替代资源要求极大的selenium方法。代价是不能实现qq空间发件的自动登录，并且有时会编号不准
 ```
 
 启动主程序
