@@ -59,6 +59,8 @@ output_index_js=$(echo -e "const path = require('path');\nconst CurrentPath = pa
 注:你可能需要自己debug一下napcat才能用,你可以在填写完OQQWall配置文件(见下文)之后单独启动serv.py和napcat来监测
 注:如果你想要使用LLonebot,请修改是./qqBot/startd.sh,删除整个wile true,加上qq
 
+注：如果你要使用LLOneBot,请在config中设定use_LLOnebot=true
+
 接下来,克隆项目到任意位置，最好是用户文件夹中的某处，确保权限够用
 
 进入OQQwall文件夹
@@ -110,6 +112,8 @@ communicate-group="xxx"
 这是ChatBot运行的群号
 use_lite_tag_generator=true/false
 #是否使用轻量编号算法,开启后将使用本地算法替代资源要求极大的selenium方法。代价是不能实现qq空间发件的自动登录，并且有时会编号不准
+use_LLOnebot=true/false
+是否使用LLOnebot而非napcat
 ```
 
 启动主程序
