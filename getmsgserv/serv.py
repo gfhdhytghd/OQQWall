@@ -60,6 +60,27 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'Recall notice processed')
             return
+    
+        if data.get('notice_type') == 'group_increase':
+            print('serv:有新成员入群')
+            user_id = data.get('user_id')
+            group_id = data.get('group_id')
+            commugroupid = config.get('communicate-group')
+            commugroupid=int(commugroupid)
+            group_id=int(group_id)
+
+            if (group_id == commugroupid):
+                print ("serv:是社交群，LLM发送欢迎消息")
+                # Extract and save the relevant part of raw_message
+                commu_text =  '欢迎新成员入群'
+                commu_file_path = os.path.join(COMMU_DIR, 'commugroup.txt')
+                with open(commu_file_path, 'a', encoding='utf-8') as f:
+                    f.write(commu_text + '\n') 
+                
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'Welcome notice processed')
+            return
 
         # 记录到 ./all 文件夹
         all_file_path = os.path.join(ALLPOST_DIR, 'all_posts.json')
