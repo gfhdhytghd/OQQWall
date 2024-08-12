@@ -323,7 +323,7 @@ processsend(){
     fi
 
 sendimagetoqqgroup
-    sendmsggroup ”$numnext“
+    sendmsggroup $numnext
     echo askforgroup...
     askforintro
 }
