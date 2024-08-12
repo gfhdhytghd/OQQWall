@@ -24,9 +24,10 @@ while true; do
     mapfile -t lines < "./getmsgserv/all/commugroup.txt"
         question=${lines[-1]}
         echo $question
-        # 获取行的第一个和第二个字段
-        botcmd="python3 ./qqBot/ChatBot.py $question"
-        botoutput=$(eval $botcmd)
+        escaped_question=$(printf '%s' "$question" | sed 's/[\&/\]/\\&/g')
+        # 构建 botcmd，并执行
+        botcmd="python3 ./qqBot/ChatBot.py \"$escaped_question\""
+        botoutput=$(eval "$botcmd")
         encoded_output=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$botoutput'''))")
         # 构建 curl 命令，并发送编码后的消息
         cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$commgroup_id&message=$encoded_output\""
