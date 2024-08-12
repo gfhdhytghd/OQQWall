@@ -29,12 +29,26 @@ output_file_path = f'./getmsgserv/post-step2/{output}.json'
 with open(input_file_path, 'r', encoding='utf-8') as infile:
     data = json.load(infile)
 
-# 遍历数据，删除每个字典中的 `message_id` 字段
+# 遍历数据，删除无意义数据
 cleaned_data = []
+fields_to_remove = ['message_id', 'file', 'subType', 'file_id', 'file_size']
+
 for item in data:
-    if 'message_id' in item:
-        del item['message_id']
+    # 删除顶层的字段
+    for field in fields_to_remove:
+        if field in item:
+            del item[field]
+
+    # 检查并删除嵌套在 "message" 列表中的字段
+    if 'message' in item:
+        for message in item['message']:
+            if 'data' in message:
+                for field in fields_to_remove:
+                    if field in message['data']:
+                        del message['data'][field]
+    
     cleaned_data.append(item)
+
 
 # 将清理后的数据转换为字符串
 input_content = json.dumps(cleaned_data, ensure_ascii=False, indent=4)

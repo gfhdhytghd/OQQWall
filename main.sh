@@ -261,7 +261,7 @@ renewqzonelogin(){
     sleep 60
 }
 sendmsggroup(){
-    msg="$1"
+    msg=$1
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
     cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
@@ -293,7 +293,7 @@ processsend(){
 
     echo $id
     echo 'wait-for-LM...'
-    python3 ./getmsgserv/LM_work/sendtoLM.py ${id} ${numnext} 
+    python3 ./getmsgserv/LM_每个字典中的 `message_id` 字段work/sendtoLM.py ${id} ${numnext} 
     echo LM-workdone
     json_file=./getmsgserv/post-step2/${numnext}.json 
     isover=$(jq -r '.isover' "$json_file")

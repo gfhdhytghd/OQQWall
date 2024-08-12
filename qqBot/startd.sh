@@ -35,3 +35,19 @@ if [ -n "$commgroup_id" ]; then
             echo "OneBot starting"
     fi
 fi
+while true; do
+    # 获取当前小时和分钟
+    current_time=$(date +"%H:%M")
+
+    # 检查是否为早上7点
+    if [ "$current_time" == "07:00" ]; then
+        # 运行 Python 脚本
+        python3 ./qqBot/likeeveryday.py
+
+        # 等待 24 小时，直到第二天的 7 点
+        sleep 86340
+    else
+        # 如果不是7点，等待一分钟后再检查时间
+        sleep 59
+    fi
+done
