@@ -1,6 +1,8 @@
 # Arm平台安装指南
 正常部署一切，安装除了chrome和chromedrive以外的一切,LLonebot在arm上似乎不好用,建议用napcat
 
+项目适配了Lagrange的接口，如果你要用的话，也可以，只要把http端口设定为8083,http-post端口设定为8082，并允许本地访问
+
 Arm平台大多数情况下无法使用selenium,所以请你把config中的
 use_lite_tag_generator设定为true
 
