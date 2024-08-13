@@ -100,6 +100,26 @@ askforintro(){
                 rm ./getmsgserv/rawpost/$id.json
                 rm -rf ./getmsgserv/post-step5/$numnext
                 ;;
+            拒)
+                postcmd="ref"
+                rm ./getmsgserv/rawpost/$id.json
+                rm -rf ./getmsgserv/post-step5/$numnext
+                sendmsgpriv $id '你的稿件被拒绝,请尝试修改后重新投稿'
+                ;;
+            匿)
+                sendmsggroup 尝试切换匿名状态...
+                file="./getmsgserv/post-step2/$numnext.json"
+                json_content=$(cat "$file")
+                modified_json=$(echo "$json_content" | jq '.needpriv = (.needpriv == "true" | not | tostring)')
+                echo "$modified_json" > "$file"
+                python3 ./getmsgserv/HTMLwork/gotohtml.py "$numnext"
+                ./getmsgserv/HTMLwork/gotopdf.sh "$numnext"
+                ./getmsgserv/HTMLwork/gotojpg.sh "$numnext"
+                sendimagetoqqgroup
+                sendmsggroup $numnext
+                echo askforgroup...
+                askforintro
+                ;;
             *)
                 sendmsggroup 没有此指令,请查看说明
                 askforintro
@@ -158,6 +178,9 @@ getnumnext(){
             删)
                 numnext=$number
                 ;;
+            拒)
+                numnext=$number
+                ;;
             *)
                 numnext=$[ numnext + 1 ]
                 ;;
@@ -183,6 +206,9 @@ getnumnext(){
                     numnext=$[ number + 1 ]
                     ;;
                 删)
+                    numnext=$number
+                    ;;
+                拒)
                     numnext=$number
                     ;;
                 *)
@@ -293,7 +319,21 @@ processsend(){
 
     echo $id
     echo 'wait-for-LM...'
-    python3 ./getmsgserv/LM_每个字典中的 `message_id` 字段work/sendtoLM.py ${id} ${numnext} 
+    python3 ./getmsgserv/LM_work/sendtoLM.py ${id} ${numnext}
+    for i in {1..3}
+    do
+        if [ -f "./getmsgserv/post-step2/${numnext}.json" ]; then
+            echo "File exists, continuing..."
+            break
+        else
+            echo "File not found, running Python script..."
+            python3 ./getmsgserv/LM_work/sendtoLM.py "${id}" "${numnext}"
+        fi
+        
+        if [ "$i" -eq 3 ] && [ ! -f "./getmsgserv/post-step2/${numnext}.json" ]; then
+            sendmsggroup LLM处理错误，请检查相关信息
+        fi
+    done
     echo LM-workdone
     json_file=./getmsgserv/post-step2/${numnext}.json 
     isover=$(jq -r '.isover' "$json_file")
@@ -321,8 +361,9 @@ processsend(){
     elif [ "$safemsg" = "false" ]; then
         sendmsggroup AI审核判定不安全
     fi
-
-sendimagetoqqgroup
+    content=$(<"$id_file")
+    sendmsggroup "原始信息: $content"
+    sendimagetoqqgroup
     sendmsggroup $numnext
     echo askforgroup...
     askforintro

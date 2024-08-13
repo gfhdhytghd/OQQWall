@@ -19,7 +19,7 @@ userid=json_data["sender"]["user_id"]
 # 检查 needpriv 和 safemsg，并根据条件修改 user_id 和 nickname
 if json_data.get("needpriv") == "true" and json_data.get("safemsg") == "true":
     json_data["sender"]["user_id"] = 10000
-    userid = “”
+    userid = ''
     json_data["sender"]["nickname"] = "匿名"
 
 # 生成 HTML 内容
