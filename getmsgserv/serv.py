@@ -123,6 +123,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     f.write(commu_text + '\n')       
         # 获取 message_type、user_id 和 time 字段
         message_type = data.get('message_type')
+        post_type = data.get('post_type')
         user_id = data.get('user_id')
         timestamp = data.get('time')
         if not user_id or timestamp is None:
@@ -132,7 +133,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
 
         # 仅处理 message_type 为 "private" 的数据
-        if message_type == 'private':
+        if message_type == 'private' and post_type != 'message_sent':
             # 只保留 "message" 和 "time" 字段
             simplified_data = {
                 "message_id": data.get("message_id"),
