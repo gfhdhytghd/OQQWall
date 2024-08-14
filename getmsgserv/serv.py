@@ -113,14 +113,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                 command_text =  re.sub(r'\[.*?\]', '', raw_message).strip()
                 command_file_path = os.path.join(COMMAND_DIR, 'commands.txt')
                 with open(command_file_path, 'a', encoding='utf-8') as f:
-                    f.write(command_text + '\n')
+                    f.write('\n' + command_text)
             if (group_id == commugroupid and raw_message.startswith(f"[CQ:at,qq={qqid}")):
                 print ("serv:有LLM问答消息")
                 # Extract and save the relevant part of raw_message
                 commu_text =  re.sub(r'\[.*?\]', '', raw_message).strip()
                 commu_file_path = os.path.join(COMMU_DIR, 'commugroup.txt')
                 with open(commu_file_path, 'a', encoding='utf-8') as f:
-                    f.write(commu_text + '\n')       
+                    f.write('\n' + commu_text)       
         # 获取 message_type、user_id 和 time 字段
         message_type = data.get('message_type')
         post_type = data.get('post_type')
