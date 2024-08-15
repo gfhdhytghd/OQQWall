@@ -1,6 +1,7 @@
 #!/bin/bash
 LLonebot=$(grep 'use_LLOnebot' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+mainqqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 
 if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null
 then
@@ -16,7 +17,7 @@ then
     echo "OneBot is already running"
 else
     if [[ "$LLonebot" == false ]]; then
-    nohup xvfb-run -a qq --no-sandbox -q &
+    nohup xvfb-run -a qq --no-sandbox -q $mainqqid &
     echo "OneBot starting"
     elif [[ "$LLonebot" == true ]]; then
     nohup qq &

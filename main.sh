@@ -13,6 +13,7 @@ mkdir ./getmsgserv/post-step4
 mkdir ./getmsgserv/post-step5
 mkdir ./qqBot/command
 touch ./qqBot/command/commands.txt
+pkill startd.sh
 
 # Activate virtual environment
 source ./venv/bin/activate
@@ -77,7 +78,7 @@ askforintro(){
         # 获取行的第一个和第二个字段
         number=$(echo $line | awk '{print $1}')
         status=$(echo $line | awk '{print $2}')
-        
+
         # 检查行的第一个字段是否等于 numnext
         if [[ $number -eq $numnext ]]; then
             case $status in
@@ -152,7 +153,7 @@ getnumnext(){
         echo 使用主算法...
         getnumcmd='python3 ./SendQzone/qzonegettag-headless.py'
         output=$(eval $getnumcmd)
-    else 
+    else
         output="Log Error!"
     fi
     if echo "$output" | grep -q "Log Error!"; then
@@ -276,11 +277,11 @@ postqzone(){
     fi
     if [ "$current_mod_time_privmsg" -ne "$last_mod_time_privmsg " ]; then
         echo "过程中有新消息，重跑发件流程"
-        processsend 
+        processsend
     fi
 }
 renewqzonelogin(){
-    rm ./cookies.json 
+    rm ./cookies.json
     rm ./qrcode.png
     postqzone &
     sleep 2
@@ -329,13 +330,13 @@ processsend(){
             echo "File not found, running Python script..."
             python3 ./getmsgserv/LM_work/sendtoLM.py "${id}" "${numnext}"
         fi
-        
+
         if [ "$i" -eq 3 ] && [ ! -f "./getmsgserv/post-step2/${numnext}.json" ]; then
             sendmsggroup LLM处理错误，请检查相关信息
         fi
     done
     echo LM-workdone
-    json_file=./getmsgserv/post-step2/${numnext}.json 
+    json_file=./getmsgserv/post-step2/${numnext}.json
     isover=$(jq -r '.isover' "$json_file")
     notregular=$(jq -r '.notregular' "$json_file")
     safemsg=$(jq -r '.safemsg' "$json_file")
@@ -386,7 +387,7 @@ while true; do
         if [ "$current_mod_time" -ne "$last_mod_time" ]; then
             echo "有新私聊消息"
             break
-        fi   
+        fi
     done
     processsend
     last_mod_time=$(stat -c %Y "$file_to_watch")
