@@ -46,10 +46,12 @@ html_template = """
             padding: 5px;
         }}
         .container {{
-             max-width: 600px;
+            width: 4in;
             margin: 0 auto;
             padding: 20px;
             border-radius: 10px;
+            background-color: #f2f2f2;
+            box-sizing: border-box;
         }}
         .header {{
             display: flex;
@@ -61,7 +63,7 @@ html_template = """
             height: 50px;
             margin-right: 10px;
         }}
-                .header-text {{
+        .header-text {{
             display: block;
         }}
         .header h1 {{
@@ -108,34 +110,34 @@ html_template = """
             <div class="header-text">
                 <h1>{nickname}</h1>
                 <h2>{userid}</h2>
-                </div>
+            </div>
         </div>
         <div class="content">
             {messages}
         </div>
     </div>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function() {{
             const container = document.querySelector('.container');
             const contentHeight = container.scrollHeight;
             const pageHeight4in = 384
 
             let pageSize = '4in 8in'; // Default size
 
-            if (contentHeight <= pageHeight4in) {
+            if (contentHeight <= pageHeight4in) {{
                 pageSize = '4in 4in'; // Use 4in x 4in if content fits
-            }
+            }}
 
             // Dynamically apply the @page size
             const style = document.createElement('style');
             style.innerHTML = `
-                @page {
-                    size: ${pageSize};
+                @page {{
+                    size: ${{pageSize}};
                     margin: 0 !important;
-                }
+                }}
             `;
             document.head.appendChild(style);
-        });
+        }});
     </script>
 </body>
 </html>
