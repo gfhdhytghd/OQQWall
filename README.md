@@ -47,15 +47,14 @@ curl -o napcat.sh https://fastly.jsdelivr.net/gh/NapNeko/NapCat-Installer@master
 ```
 mkdir ./NapCat/
 mkdir ./tmp/
-unzip -q -o -d ./tmp NapCat.linux.zip
+unzip -q -o -d ./tmp NapCat.shell.zip
 target_folder="/opt/QQ/resources/app/app_launcher"
-default_file="NapCat.linux.zip"
-sudo cp -r -f ./tmp/NapCat.linux.x64/* "$target_folder/napcat/"
+default_file="NapCat.shell.zip"
+sudo cp -r -f ./tmp/NapCat.shell.x64/* "$target_folder/napcat/"
 sudo chmod -R 777 "$target_folder/napcat/"
 sudo mv -f "$target_folder/index.js" "$target_folder/index.js.bak"
 output_index_js=$(echo -e "const path = require('path');\nconst CurrentPath = path.dirname(__filename)\nconst hasNapcatParam = process.argv.includes('--no-sandbox');\nif (hasNapcatParam) {\n    (async () => {\n        await import(\\\"file://\\\" + path.join(CurrentPath, './napcat/napcat.mjs'));\n    })();\n} else {\n    require('./launcher.node').load('external_index', module);\n}")
 ```
-
 通过xvfb-run -a qq --no-sandbox -q
 <br/>或者xvfb-run -a linuxqq --no-sandbox -q
 <br/>启动napcat框架和qq,并扫码登陆
