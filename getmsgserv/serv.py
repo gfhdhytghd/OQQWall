@@ -1,4 +1,6 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
+import subprocess
 import json
 import os
 import re
@@ -24,64 +26,63 @@ config = read_config('oqqwall.config')
 
 class RequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
-        # 解析请求头和请求体
+        # 启动新线程处理业务逻辑，但保留响应逻辑在主线程
+        thread = threading.Thread(target=self.handle_request)
+        thread.start()
+        thread.join()  # 等待线程处理完毕，确保响应在主线程中执行
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'Post received and saved')
+
+    def handle_request(self):
         content_length = int(self.headers['Content-Length'])
         post_data = self.rfile.read(content_length)
         
-        # 解析 JSON 数据
         try:
             data = json.loads(post_data.decode('utf-8'))
         except json.JSONDecodeError:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b'Invalid JSON')
+            self.send_error(400, 'Invalid JSON')
             return
 
+        # 处理不同类型的通知
         if data.get('notice_type') == 'friend_recall':
-            print('serv:有撤回消息')
-            user_id = data.get('user_id')
-            message_id = data.get('message_id')
-
-            if user_id and message_id:
-                file_path = os.path.join(RAWPOST_DIR, f'{user_id}.json')
-                if os.path.exists(file_path):
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        existing_data = json.load(f)
-
-                    # 移除具有相同 message_id 的消息
-                    updated_data = [msg for msg in existing_data if not (msg.get('message_id') == message_id)]
-                    
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        json.dump(updated_data, f, ensure_ascii=False, indent=4)
-                    
-                    print('已删除')
-                
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'Recall notice processed')
-            return
+            self.handle_friend_recall(data)
+        elif data.get('notice_type') == 'group_increase':
+            self.handle_group_increase(data)
+        else:
+            self.handle_default(data)
     
-        if data.get('notice_type') == 'group_increase':
-            print('serv:有新成员入群')
-            user_id = data.get('user_id')
-            group_id = data.get('group_id')
-            commugroupid = config.get('communicate-group')
-            commugroupid=int(commugroupid)
-            group_id=int(group_id)
+    def handle_friend_recall(self, data):
+        user_id = data.get('user_id')
+        message_id = data.get('message_id')
 
-            if (group_id == commugroupid):
-                print ("serv:是社交群，LLM发送欢迎消息")
-                # Extract and save the relevant part of raw_message
-                commu_text =  '欢迎新成员入群'
-                commu_file_path = os.path.join(COMMU_DIR, 'commugroup.txt')
-                with open(commu_file_path, 'a', encoding='utf-8') as f:
-                    f.write(commu_text + '\n') 
+        if user_id and message_id:
+            file_path = os.path.join(RAWPOST_DIR, f'{user_id}.json')
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    existing_data = json.load(f)
+
+                updated_data = [msg for msg in existing_data if msg.get('message_id') != message_id]
                 
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'Welcome notice processed')
-            return
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(updated_data, f, ensure_ascii=False, indent=4)
+                
+                print('已删除')
 
+    def handle_group_increase(self, data):
+        user_id = data.get('user_id')
+        group_id = data.get('group_id')
+        commugroupid = int(config.get('communicate-group'))
+        group_id = int(group_id)
+
+        if group_id == commugroupid:
+            print ("serv:是社交群，LLM发送欢迎消息")
+            commu_text = '欢迎新成员入群'
+            commu_file_path = os.path.join(COMMU_DIR, 'commugroup.txt')
+            with open(commu_file_path, 'a', encoding='utf-8') as f:
+                f.write(commu_text + '\n')
+
+    def handle_default(self, data):
         # 记录到 ./all 文件夹
         all_file_path = os.path.join(ALLPOST_DIR, 'all_posts.json')
         if os.path.exists(all_file_path):
@@ -94,54 +95,49 @@ class RequestHandler(BaseHTTPRequestHandler):
         with open(all_file_path, 'w', encoding='utf-8') as f:
             json.dump(all_data, f, ensure_ascii=False, indent=4)
         
-        #记录群中命令
+        # 记录群中命令和私信
+        self.record_group_command(data)
+        self.record_private_message(data)
+
+    def record_group_command(self, data):
         message_type = data.get('message_type')
         if message_type == 'group':
-            groupid = config.get('management-group-id')
-            commugroupid = config.get('communicate-group')
-            print(commugroupid)
+            groupid = int(config.get('management-group-id'))
+            commugroupid = int(config.get('communicate-group'))
             qqid = config.get('mainqq-id')
-            group_id = data.get('group_id')
+            group_id = int(data.get('group_id'))
             sender = data.get('sender', {})
             raw_message = data.get('raw_message', '')
-            group_id=int(group_id)
-            groupid=int(groupid)
-            commugroupid=int(commugroupid)
+            
             if (group_id == groupid and sender.get('role') == 'admin' and raw_message.startswith(f"[CQ:at,qq={qqid}")):
-                print ("serv:有指令消息")
-                # Extract and save the relevant part of raw_message
-                command_text =  re.sub(r'\[.*?\]', '', raw_message).strip()
-                command_file_path = os.path.join(COMMAND_DIR, 'commands.txt')
-                with open(command_file_path, 'a', encoding='utf-8') as f:
-                    f.write('\n' + command_text)
+                print("serv:有指令消息")
+                command_text = re.sub(r'\[.*?\]', '', raw_message).strip()
+                command_script_path = './getmsgserv/command.sh'
+                try:
+                    subprocess.run([command_script_path, command_text], check=True)
+                except subprocess.CalledProcessError as e:
+                    print(f"Command execution failed: {e}")
+
             if (group_id == commugroupid and raw_message.startswith(f"[CQ:at,qq={qqid}")):
-                print ("serv:有LLM问答消息")
-                # Extract and save the relevant part of raw_message
-                commu_text =  re.sub(r'\[.*?\]', '', raw_message).strip()
+                print("serv:有LLM问答消息")
+                commu_text = re.sub(r'\[.*?\]', '', raw_message).strip()
                 commu_file_path = os.path.join(COMMU_DIR, 'commugroup.txt')
                 with open(commu_file_path, 'a', encoding='utf-8') as f:
-                    f.write('\n' + commu_text)       
-        # 获取 message_type、user_id 和 time 字段
+                    f.write('\n' + commu_text)
+
+    def record_private_message(self, data):
         message_type = data.get('message_type')
         post_type = data.get('post_type')
         user_id = data.get('user_id')
         timestamp = data.get('time')
-        if not user_id or timestamp is None:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(b'Missing user_id or time')
-            return
 
-        # 仅处理 message_type 为 "private" 的数据
-        if message_type == 'private' and post_type != 'message_sent':
-            # 只保留 "message" 和 "time" 字段
+        if message_type == 'private' and post_type != 'message_sent' and user_id and timestamp is not None:
             simplified_data = {
                 "message_id": data.get("message_id"),
                 "message": data.get("message"),
                 "time": data.get("time")
             }
 
-            # 记录到 ./rawpost 文件夹
             file_path = os.path.join(RAWPOST_DIR, f'{user_id}.json')
             if os.path.exists(file_path):
                 with open(file_path, 'r', encoding='utf-8') as f:
@@ -149,18 +145,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             else:
                 existing_data = []
 
-            # 检查并更新 "sender" 只记录一次
             if not existing_data:
-                sender_info = {
-                    "sender": data.get("sender")
-                }
+                sender_info = {"sender": data.get("sender")}
                 existing_data.append(sender_info)
 
-            # 添加新的数据并按时间戳排序
             existing_data.append(simplified_data)
             sorted_data = sorted(existing_data, key=lambda x: x.get('time', 0))
 
-            # 写入排序后的数据
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(sorted_data, f, ensure_ascii=False, indent=4)
         
@@ -175,11 +166,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             with open(priv_post_path, 'w', encoding='utf-8') as f:
                 json.dump(priv_post_data, f, ensure_ascii=False, indent=4)
 
-        # 返回响应
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b'Post received and saved')
-
 def run(server_class=HTTPServer, handler_class=RequestHandler, port=8082):
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
@@ -188,4 +174,3 @@ def run(server_class=HTTPServer, handler_class=RequestHandler, port=8082):
 
 if __name__ == '__main__':
     run()
-

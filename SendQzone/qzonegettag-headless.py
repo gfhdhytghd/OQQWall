@@ -13,14 +13,8 @@ def connect_to_chrome():
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_argument("--remote-debugging-port=9222")  # 确保与守护程序使用相同的端口
-
-    # 连接到已经运行的Chrome实例
-    browser = webdriver.Remote(
-        command_executor='http://127.0.0.1:9222',  # 连接到守护程序
-        options=chrome_options,
-        desired_capabilities=DesiredCapabilities.CHROME
-    )
+    chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:39222")
+    browser = webdriver.Chrome(options=chrome_options)
     return browser
 
 # Log in to QQ Zone

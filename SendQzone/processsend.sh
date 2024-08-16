@@ -5,6 +5,21 @@ command_file="./qqBot/command/commands.txt"
 litegettag=$(grep 'use_lite_tag_generator' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 
+waitforfilechange(){
+        last_mod_time_cmd=$(stat -c %Y "$1")
+
+    while true; do
+        sleep 5
+        # 获取文件的当前修改时间
+        current_mod_time_cmd=$(stat -c %Y "$1")
+
+        # 检查文件是否已被修改
+        if [ "$current_mod_time_cmd" -ne "$last_mod_time_cmd" ]; then
+            echo 检测到指令
+            break
+        fi
+    done
+}
 
 sendimagetoqqgroup() {
     # 设置文件夹路径
@@ -29,80 +44,10 @@ sendimagetoqqgroup() {
     echo "所有文件已发送"
 }
 getnumnext(){
-    if [[ "$litegettag" == false ]]; then
-        echo 使用主算法...
-        getnumcmd='python3 ./SendQzone/qzonegettag-headless.py'
-        output=$(eval $getnumcmd)
-    else
-        output="Log Error!"
-    fi
-    if echo "$output" | grep -q "Log Error!"; then
-        echo 使用备用算法...
-        mapfile -t lines < "$command_file"
-        line=${lines[-1]}
-        # 获取行的第一个和第二个字段
-        number=$(echo $line | awk '{print $1}')
-        status=$(echo $line | awk '{print $2}')
-        echo '$number $status'
-        if [[ $number -ne relogin ]]; then
-            echo 检查到num,检查指令
-            case $status in
-            是)
-                numnext=$[ number + 1 ]
-                ;;
-            否)
-                numnext=$[ number + 1 ]
-                ;;
-            等)
-                numnext=$[ number + 1 ]
-                ;;
-            删)
-                numnext=$number
-                ;;
-            拒)
-                numnext=$number
-                ;;
-            *)
-                numnext=$[ numnext + 1 ]
-                ;;
-            esac
-        elif [[ $number -eq relogin ]]; then
-            echo 检查到relogin,检查下一行
-            line=${lines[-2]}
-            # 获取行的第一个和第二个字段
-            number=$(echo $line | awk '{print $1}')
-            status=$(echo $line | awk '{print $2}')
-            echo $number $status
-            if [[ $number -eq relogin ]]; then
-                numnext=$[ numnext + 1]
-            else
-                case $status in
-                是)
-                    numnext=$[ number + 1 ]
-                    ;;
-                否)
-                    numnext=$[ number + 1 ]
-                    ;;
-                等)
-                    numnext=$[ number + 1 ]
-                    ;;
-                删)
-                    numnext=$number
-                    ;;
-                拒)
-                    numnext=$number
-                    ;;
-                *)
-                    numnext=$[ numnext + 1 ]
-                    ;;
-                esac
-            fi
-        fi
-    else
-        numnow=$( cat ./numb.txt )
-        numnext=$[ numnow + 1 ]
-    fi
-    echo numnext=$numnext
+    numnow=$(cat ./numb.txt)
+    numnext=$((numnow + 1))
+    echo "$numnext" > ./numb.txt
+    echo "numnext=$numnext"
 }
 askforintro(){
     sendmsggroup 请发送指令
@@ -122,8 +67,8 @@ askforintro(){
             if [[ $number -eq $numnext ]]; then
                 sed -i "${i}d" "$command_file"
                 found=true
-                case $status in
                 numfinal=$(cat ./numfinal.txt)
+                case $status in
                 是)
                     postcmd="true"
                     numfinal=$((numfinal + 1))
@@ -214,7 +159,7 @@ postqzone(){
 
         if echo "$output" | grep -q "Failed to publish."; then
             if [ $attempt -eq 1 ]; then
-                renewqzonelogin-auto
+                renewqzoneloginauto
             fi
             
             if [ $attempt -eq $max_attempts ]; then
@@ -235,15 +180,19 @@ postqzone(){
     current_mod_time_privmsg=$(stat -c %Y "./getmsgserv/all/priv_post.json")
     echo "'current-mod-time-id:'$current_mod_time_id"
     echo "'last-mod-time-id:'$last_mod_time_id"
-    echo "'current_mod_time_privmsg'$current_mod_time_privmsg"
-    echo "'last_mod_time_privmsg':$last_mod_time_privmsg"
     if [ "$current_mod_time_id" -eq "$last_mod_time_id" ]; then
         echo "过程中此人无新消息，删除此人记录"
         rm ./getmsgserv/rawpost/$id.json
+        rm -rf ./getmsgserv/post-step5/$numnext
+    else
+        rm -rf ./getmsgserv/post-step5/$numnext
+        echo "过程中有新消息:needreprocess:$id"
+        getnumnext
+        processsend
     fi
 }
 
-renewqzonelogin-auto(){
+renewqzoneloginauto(){
     rm ./cookies.json
     rm ./qrcode.png
     python3 ./SendQzone/qzonerenewcookies.py
@@ -335,7 +284,7 @@ processsend(){
 
 id=$1
 numnext=$2
-echo "'开始处理来自$id'的消息,内部编号'$numnext"
+echo "开始处理来自$id的消息,内部编号$numnext"
 processsend
 
 
