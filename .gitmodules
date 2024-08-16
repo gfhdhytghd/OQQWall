@@ -1,0 +1,3 @@
+[submodule "qqBot/QChatGPT"]
+	path = qqBot/QChatGPT
+	url = https://github.com/RockChinQ/QChatGPT
