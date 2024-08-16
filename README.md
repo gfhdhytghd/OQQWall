@@ -8,7 +8,7 @@
 <br/>自动渲染图片，发到群中，通过群消息发送指令审核
 <br/>自动发送到qq空间。
 <br/>附加功能：
-<br/>[校园群大语言模型智能助手](./README_Chatbot.md)
+<br/>[校园群智能助手](./README_Chatbot.md)
 
 本系统专注于“墙”本身，适用于用户量5k以下的情况，致力于给用户提供QQ校园墙的无感的交互
 <br/>微信短时间内不会支持，因为没有找到linux能用的，好用的api。
@@ -33,7 +33,7 @@
 <br/>目前仅在x64 archlinux上进行过测试，其他系统要用的话可能要修改一些东西（你最好有基础的bash和python编写能力）
 #### arm用户请阅读: [Arm安装指南](README_ARM.md)
 #### 低性能用户请阅读：[性能优化指南](README_performance.md)
-#### 启用ChatBot请阅读: [校园群大语言模型智能助手](./README_Chatbot.md)
+#### 启用ChatBot请阅读: [校园群智能助手](./README_Chatbot.md)
 <br/>请先安装QQ，napcat无头ntqq框架或者LLonebot框架,google-chrome和chrome-drive，jq, python3，dotnet框架,ImageMagick(某些发行版[deb系]这个玩意默认没法处理pdf,需要调整policy配置，自己搜索怎么搞)
 
 [napcat官方文档](https://napneko.github.io/zh-CN/)
