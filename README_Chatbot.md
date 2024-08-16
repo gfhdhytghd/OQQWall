@@ -5,6 +5,7 @@
 首先进入OQQWall文件夹,执行
 ```
 git submodule update --init --recursive
+source ./venv/bin/activate
 pip3 install -r ./qqBot/QChatGPT/requirements.txt
 ```
 <br/>在oqqwall.config中，设定communicate-group群号为QChatGPT要运行的群，并把主账号拉进去
