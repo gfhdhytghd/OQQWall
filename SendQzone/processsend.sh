@@ -145,7 +145,7 @@ postqzone(){
         sendmsggroup 请立即扫描二维码
         sendmsggroup "[CQ:image,file=$(pwd)/qrcode.png]"
         eval $command
-        sleep 20
+        sleep 120
     else
         echo "Cookies file exists. No action needed."
     fi

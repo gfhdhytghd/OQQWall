@@ -3,6 +3,7 @@ qqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+litegettag=$(grep 'use_lite_tag_generator' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 DIR="./getmsgserv/rawpost/"
 check_variable() {
     var_name=$1
@@ -71,9 +72,11 @@ getnumnext-startup(){
     else
         output="Log Error!"
     fi
+    echo $output
     if echo "$output" | grep -q "Log Error!"; then
-        numfnow=$( cat ./numfinal.txt )
+        numnow=$( cat ./numfinal.txt )
         numfinal=$[ numnow + 1 ]
+        echo numfinal:$numfinal
         echo $numfinal > ./numfinal.txt
     else
         numnow=$( cat ./numb.txt )
@@ -110,13 +113,13 @@ waitforprivmsg(){
         sleep 1
     done
 }
-sendmsggroup 机器人已启动
 # 监测目录
 DIR="./getmsgserv/rawpost/"
 # 获取初始文件列表
 initial_files=$(ls "$DIR")
 echo 初始化编号...
 getnumnext-startup
+sendmsggroup 机器人已启动
 echo 启动系统主循环
 while true; do
     echo 启动系统等待循环
