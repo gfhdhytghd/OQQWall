@@ -4,7 +4,7 @@ from selenium.webdriver.chrome.options import Options
 
 def start_chrome_daemon():
     chrome_options = Options()
-    #chrome_options.add_argument('--headless')
+    chrome_options.add_argument('--headless')
     chrome_options.add_argument('--disable-gpu')
     chrome_options.add_argument("--remote-debugging-port=39222")  # 设置远程调试端口
 
