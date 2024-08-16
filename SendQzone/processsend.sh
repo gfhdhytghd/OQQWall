@@ -71,16 +71,20 @@ askforintro(){
                 case $status in
                 是)
                     postcmd="true"
+                    postqzone
+                    numfinal=$(cat ./numfinal.txt)
                     numfinal=$((numfinal + 1))
                     echo $numfinal > ./numfinal.txt
-                    postqzone
+                    结束发件流程,是
                     ;;
                 否)
                     postcmd="false"
                     rm ./getmsgserv/rawpost/$id.json
                     rm -rf ./getmsgserv/post-step5/$numnext
+                    numfinal=$(cat ./numfinal.txt)
                     numfinal=$((numfinal + 1))
                     echo $numfinal > ./numfinal.txt
+                    echo 结束发件流程,否
                     ;;
                 等)
                     postcmd="wait"
@@ -97,6 +101,7 @@ askforintro(){
                     rm ./getmsgserv/rawpost/$id.json
                     rm -rf ./getmsgserv/post-step5/$numnext
                     sendmsgpriv $id '你的稿件被拒绝,请尝试修改后重新投稿'
+                    echo 结束发件流程,拒
                     ;;
                 匿)
                     sendmsggroup 尝试切换匿名状态...
@@ -140,7 +145,7 @@ postqzone(){
         sendmsggroup 请立即扫描二维码
         sendmsggroup "[CQ:image,file=$(pwd)/qrcode.png]"
         eval $command
-        sleep 60
+        sleep 20
     else
         echo "Cookies file exists. No action needed."
     fi
@@ -286,6 +291,4 @@ id=$1
 numnext=$2
 echo "开始处理来自$id的消息,内部编号$numnext"
 processsend
-
-
-
+echo "来自$id的消息,内部编号$numnext处理完毕"

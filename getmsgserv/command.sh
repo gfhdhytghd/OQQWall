@@ -41,7 +41,7 @@ case $object in
             echo "指令已保存到 qqBot/command/commands.txt"
         else
             echo "error: $object 不存在对应的文件夹"
-            sendmsggroup 没有可执行的对象,请检查
+            sendmsggroup '没有可执行的对象,请检查,发送 @本账号 帮助 以查看帮助'
         fi
         ;;
     "手动重新登陆")
@@ -69,6 +69,6 @@ case $object in
         ;;
     *)
         echo "error: 无效的指令"
-        sendmsggroup 指令无效,请检查
+        sendmsggroup '指令无效,请检查,发送 @本账号 帮助 以查看帮助'
         ;;
 esac
