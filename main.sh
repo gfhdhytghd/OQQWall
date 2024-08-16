@@ -76,7 +76,7 @@ getnumnext-startup(){
         numfinal=$[ numnow + 1 ]
         echo $numfinal > ./numfinal.txt
     else
-        numfnow=$( cat ./numb.txt )
+        numnow=$( cat ./numb.txt )
         numfinal=$[ numnow + 1 ]
         echo $numfinal > ./numfinal.txt
     fi
@@ -111,9 +111,6 @@ waitforprivmsg(){
     done
 }
 sendmsggroup 机器人已启动
-id=$(find ./getmsgserv/rawpost -type f -printf '%T+ %p\n' | sort | head -n 1 | awk '{print $2}')
-id=$(basename "$id" .json)
-id=$(echo "$id" | sed 's/.*\///')
 # 监测目录
 DIR="./getmsgserv/rawpost/"
 # 获取初始文件列表
@@ -125,6 +122,9 @@ while true; do
     echo 启动系统等待循环
     waitforprivmsg
     getnumnext
+    #id=$(find ./getmsgserv/rawpost -type f -printf '%T+ %p\n' | sort | head -n 1 | awk '{print $2}')
+    id=$(basename "$file" .json)
+    id=$(echo "$id" | sed 's/.*\///') 
     ./SendQzone/processsend.sh $id $numnext &
     last_mod_time=$(stat -c %Y "$file_to_watch")
 done
