@@ -62,6 +62,7 @@ html_template = """
             width: 50px;
             height: 50px;
             margin-right: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
         }}
         .header-text {{
             display: block;
@@ -93,9 +94,6 @@ html_template = """
             margin-top: 10px !important;
             margin-bottom: 10px !important;
             max-width: 50%;
-            border-radius: 10px;
-            padding: 0;
-            margin: 0;
             max-height: 300px; 
         }}
         .content video {{
