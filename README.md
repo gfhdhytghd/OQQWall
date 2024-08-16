@@ -8,7 +8,7 @@
 <br/>自动渲染图片，发到群中，通过群消息发送指令审核
 <br/>自动发送到qq空间。
 <br/>附加功能：
-<br/>校园群大语言模型智能助手
+<br/>[校园群大语言模型智能助手](./README_Chatbot.md)
 
 本系统专注于“墙”本身，适用于用户量5k以下的情况，致力于给用户提供QQ校园墙的无感的交互
 <br/>微信短时间内不会支持，因为没有找到linux能用的，好用的api。
@@ -31,41 +31,28 @@
 <br/>首先需要你有一个校园墙主账号
 <br/>主账号作为群主创建一个群聊，把墙管理员拉进来，并设定为群管理员。
 <br/>目前仅在x64 archlinux上进行过测试，其他系统要用的话可能要修改一些东西（你最好有基础的bash和python编写能力）
-#### arm用户请阅读:[Arm安装指南](README_ARM.md)
+#### arm用户请阅读: [Arm安装指南](README_ARM.md)
 #### 低性能用户请阅读：[性能优化指南](README_performance.md)
+#### 启用ChatBot请阅读: [校园群大语言模型智能助手](./README_Chatbot.md)
 <br/>请先安装QQ，napcat无头ntqq框架或者LLonebot框架,google-chrome和chrome-drive，jq, python3，dotnet框架,ImageMagick(某些发行版[deb系]这个玩意默认没法处理pdf,需要调整policy配置，自己搜索怎么搞)
 
-napcat官方文档:https://napneko.github.io/zh-CN/
+[napcat官方文档](https://napneko.github.io/zh-CN/)
 <br/>对于rpm/deb系,你们可以通过执行
 ```
 curl -o napcat.sh https://fastly.jsdelivr.net/gh/NapNeko/NapCat-Installer@master/script/install.sh && sudo bash napcat.sh
 ```
 来进行一键安装qq和snapcat
-<br/>对于arch,请手动执行以下内容(napcat这破玩意官网没写手动安装教程妈的):
-安装aur/linuxqq
-下载最新release,然后
-```
-mkdir ./NapCat/
-mkdir ./tmp/
-unzip -q -o -d ./tmp NapCat.shell.zip
-target_folder="/opt/QQ/resources/app/app_launcher"
-default_file="NapCat.shell.zip"
-sudo cp -r -f ./tmp/NapCat.shell.x64/* "$target_folder/napcat/"
-sudo chmod -R 777 "$target_folder/napcat/"
-sudo mv -f "$target_folder/index.js" "$target_folder/index.js.bak"
-output_index_js=$(echo -e "const path = require('path');\nconst CurrentPath = path.dirname(__filename)\nconst hasNapcatParam = process.argv.includes('--no-sandbox');\nif (hasNapcatParam) {\n    (async () => {\n        await import(\\\"file://\\\" + path.join(CurrentPath, './napcat/napcat.mjs'));\n    })();\n} else {\n    require('./launcher.node').load('external_index', module);\n}")
-```
-通过xvfb-run -a qq --no-sandbox -q
-<br/>或者xvfb-run -a linuxqq --no-sandbox -q
-<br/>启动napcat框架和qq,并扫码登陆
+<br/>更多安安装方式请参考[napcat官方文档](https://napneko.github.io/zh-CN/)
+
+然后启动napcat,扫码登陆主账号，最好勾选下次无需扫码
 
 然后请参考napcat或LLonebot的官方文档,设定http监听端口8083,http-post端口8082
+
 注:你可能需要自己debug一下napcat才能用,你可以在填写完OQQWall配置文件(见下文)之后单独启动serv.py和napcat来监测
-注:如果你想要使用LLonebot,请修改是./qqBot/startd.sh,删除整个wile true,加上qq
-注：想要换端口，请到文件夹内所有的.sh和.py文件中，用文本编辑器进行查找替换
+<br/>注：想要换端口，请到文件夹内所有的.sh和.py文件中，用文本编辑器进行查找替换
 
 注：如果你要使用LLOneBot,请在config中设定use_LLOnebot=true
-注：如果你内存紧张想使用Lagrange,请自行调整startd.sh中的内容，然后把config中的use_lite_tag_generator设定为true
+<br/>注：如果你内存紧张想使用Lagrange,请自行调整startd.sh中的内容，然后把config中的use_lite_tag_generator设定为true
 
 接下来,克隆项目到任意位置，最好是用户文件夹中的某处，确保权限够用
 
@@ -76,13 +63,7 @@ python -m venv ./venv/
 source ./venv/bin/activate
 pip install --upgrade pip
 pip install dashscope selenium re101 bs4
-#with-ai-agents仅在需要使用群ChatBot功能时需要安装
-pip install with-ai-agents
-
 ```
-<br/>启动napcat
-<br/>扫码登陆主账号，最好勾选下次无需扫码
-<br/>关闭或者不关闭随意,不关的话注意不要不小心给终端关了
 
 
 参考此文章，获取qwen api-key
@@ -115,7 +96,7 @@ apikey="sk-"
 #sk-xxxxxx,"sk"也要填进来
 
 communicate-group="xxx"
-这是ChatBot运行的群号
+这是ChatBot运行的群号,不需要chaatbot功能请不要填写,留一个空的引号在那即可
 use_lite_tag_generator=true/false
 #是否使用轻量编号算法,启用后系统启动时的编号校准将使用本地文件而非selenium在线获取
 disable_qzone_autologin=false
@@ -125,6 +106,7 @@ use_LLOnebot=true/false
 max_attempts_qzone_autologin=3
 #最大qq空间发送尝试次数,自动登录超过次数限制后将切换为手动登陆
 ```
+**注意,oqqwall.config文件务必不能留空行**
 
 启动主程序
 <br/>打开QQ,登陆主账号
@@ -139,11 +121,13 @@ max_attempts_qzone_autologin=3
 <br/>校园墙：[图片]
 <br/>校园墙：[图片]
 <br/>校园墙：348 请发送指令
-<br/>管理员需要发送如下的命令信息
+
+管理员需要发送如下的命令信息
 <br/>@主账号 编号 指令
-<br/>注:你可以发送 @主账号 帮助 来获取指令帮助
+<br/>**注:你可以发送 @主账号 帮助 来获取指令帮助**
 <br/>“编号”是一个数字，这是机器人发来的说说编号，也是你想要处理的编号，注意，你不能对已经发送或丢弃的帖子进行操作。
-<br/>指令有以下几种：
+
+指令有以下几种：
 <br/>是：发送,系统会给稿件发送者发送成功提示
 <br/>否：机器跳过此条，人工去处理（常用于机器分段错误或者匿名判断失败，或是内容有视频的情况）
 <br/>匿:切换匿名状态,用于在机器判断失误时使用
@@ -162,7 +146,7 @@ max_attempts_qzone_autologin=3
 <br/>从系统中删掉这个人的消息记录,人工前往处理
 
 QQ空间重新登陆:
-<br/>注:v0.2之后不再需要重新登录
+<br/>启用自动重新登录之后系统会尝试自动登录qq空间
 <br/>机器人会在qq空间发送失败时(大多数时候是cookies过期)发<br/>送消息到群中要求重新登录
 <br/>此时,发送指令 '@主账号 relogin 是'
 <br/>机器人会发送一张二维码到群中,请用用来发送空间的账号扫码登陆

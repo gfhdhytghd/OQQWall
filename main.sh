@@ -35,6 +35,12 @@ if [ ! -f "./getmsgserv/all/commugroup.txt" ]; then
     touch ./getmsgserv/all/commugroup.txt
     echo "已创建文件: ./getmsgserv/all/commugroup.txt"
 fi
+
+#写入whitelist
+group_id="group_${commgroup_id}"
+jq --arg group_id "$group_id" '.["access-control"].whitelist = [$group_id]' "./qqBot/QChatGPT/data/config/pipeline.json" > temp.json && mv temp.json "./qqBot/QChatGPT/data/config/pipeline.json"
+jq --arg apikey "$apikey" '.keys.openai = [$apikey]' ./qqBot/QChatGPT/data/config/provider.json > tmp.json && mv tmp.json ./qqBot/QChatGPT/data/config/provider.json
+
 touch ./numfinal.txt
 pkill startd.sh
 # Activate virtual environment
