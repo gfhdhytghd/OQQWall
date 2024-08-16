@@ -117,9 +117,13 @@ apikey="sk-"
 communicate-group="xxx"
 这是ChatBot运行的群号
 use_lite_tag_generator=true/false
-#是否使用轻量编号算法,开启后将使用本地算法替代资源要求极大的selenium方法。代价是不能实现qq空间发件的自动登录，并且有时会编号不准
+#是否使用轻量编号算法,启用后系统启动时的编号校准将使用本地文件而非selenium在线获取
+disable_qzone_autologin=false
+#是否允许自动登录,启用后系统将在说说发送错误时尝试自动登录
 use_LLOnebot=true/false
-是否使用LLOnebot而非napcat
+#是否使用LLOnebot而非napcat
+max_attempts_qzone_autologin=3
+#最大qq空间发送尝试次数,自动登录超过次数限制后将切换为手动登陆
 ```
 
 启动主程序
@@ -137,6 +141,7 @@ use_LLOnebot=true/false
 <br/>校园墙：348 请发送指令
 <br/>管理员需要发送如下的命令信息
 <br/>@主账号 编号 指令
+<br/>注:你可以发送 @主账号 帮助 来获取指令帮助
 <br/>“编号”是一个数字，这是机器人发来的说说编号，也是你想要处理的编号，注意，你不能对已经发送或丢弃的帖子进行操作。
 <br/>指令有以下几种：
 <br/>是：发送,系统会给稿件发送者发送成功提示
