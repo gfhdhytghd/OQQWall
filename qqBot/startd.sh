@@ -29,11 +29,13 @@ fi
 
 if [ -n "$commgroup_id" ]; then 
     echo "commgroup_id不为空,chatbot启动" 
-    if pgrep -f "./qqBot/QChatGPT/main.py" > /dev/null;then
+    if pgrep -f "./main.py" > /dev/null;then
             echo "ChatBot is already running"
         else
             source ./venv/bin/activate
-            python3 ./qqBot/QChatGPT/main.py &
+            cd ./qqBot/QChatGPT/
+            python3 ./main.py &
+            cd -
             echo "OneBot starting"
     fi
 fi
