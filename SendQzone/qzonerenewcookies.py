@@ -1,62 +1,49 @@
-import time
+import asyncio
 import json
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
+import httpx
+from httpx import Cookies
 
-def connect_to_chrome():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:39222")
-    browser = webdriver.Chrome(options=chrome_options)
-    return browser
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
 
-# Log in to QQ Zone
-def login(browser, my_qq):
-    browser.get('https://i.qq.com/')
-    browser.switch_to.frame("login_frame")
-    time.sleep(2)
-    try:
-        find = browser.find_element(By.ID, f'img_out_{my_qq}')
-        find.click()
-        time.sleep(3)
-    except Exception as error:
-        print(f'Log Error! {error}')
-    else:
-        print("Successfully Logged!")
-        browser.switch_to.default_content()
+async def get_clientkey(uin: str) -> str:
+    local_key_url = "https://xui.ptlogin2.qq.com/cgi-bin/xlogin?s_url=https%3A%2F%2Fhuifu.qq.com%2Findex.html&style=20&appid=715021417" \
+                    "&proxy_url=https%3A%2F%2Fhuifu.qq.com%2Fproxy.html"
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(local_key_url, headers={"User-Agent": UA})
+        pt_local_token = resp.cookies["pt_local_token"]
+        client_key_url = f"https://localhost.ptlogin2.qq.com:4301/pt_get_st?clientuin={uin}&callback=ptui_getst_CB&r=0.7284667321181328&pt_local_tk={pt_local_token}"
+        resp = await client.get(client_key_url, headers={"User-Agent": UA, "Referer": "https://ssl.xui.ptlogin2.qq.com/"}, cookies=resp.cookies)
+        if resp.status_code == 400:
+            raise Exception(f"获取clientkey失败: {resp.text}")
+        clientKey = resp.cookies["clientkey"]
+        return clientKey
 
-    try:
-        cookies = browser.get_cookies()
-        cookies_dict = {cookie['name']: cookie['value'] for cookie in cookies}
-        with open("cookies.json", "w") as f:
-            json.dump(cookies_dict, f, indent=4)
-    except Exception as error:
-        print(f'Cookies Save Error! {error}')
-    else:
-        print("Successfully Saved Cookies!")
-        browser.switch_to.default_content()
+async def get_cookies(uin: str, clientkey: str) -> dict:
+    login_url = f"https://ssl.ptlogin2.qq.com/jump?ptlang=1033&clientuin={uin}&clientkey={clientkey}" \
+        f"&u1=https%3A%2F%2Fuser.qzone.qq.com%2F{uin}%2Finfocenter&keyindex=19"
+    async with httpx.AsyncClient(timeout=15.0) as client:   
+        resp = await client.get(login_url, headers={"User-Agent": UA}, follow_redirects=False)
+        resp = await client.get(resp.headers["Location"], headers={"User-Agent": UA, "Referer": "https://ssl.ptlogin2.qq.com/"}, cookies=resp.cookies, follow_redirects=False)
+        cookies = {cookie.name: cookie.value for cookie in resp.cookies.jar}
+        return cookies
 
-def read_config(file_path):
-    config = {}
-    with open(file_path, 'r') as f:
-        for line in f:
-            key, value = line.strip().split('=')
-            config[key.strip()] = value.strip().strip('"')
-    return config
+async def save_cookies_to_file(cookies: dict, file_path: str):
+    with open(file_path, "w") as f:
+        json.dump(cookies, f, indent=4)
+    print(f"Cookies saved to {file_path}")
 
-def main():
-    # Read configuration and connect to Chrome
-    config = read_config('oqqwall.config')
-    my_qq = config.get('mainqq-id')
-
-    # Connect to the Chrome instance running in the daemon
-    browser = connect_to_chrome()
+async def main():
+    # 从配置文件读取 QQ 号码
+    uin = "1050373508"
     
-    # Log in and save cookies
-    login(browser, my_qq)
-    browser.quit()
+    # 获取 clientkey
+    clientkey = await get_clientkey(uin)
+    
+    # 获取 cookies
+    cookies = await get_cookies(uin, clientkey)
+    
+    # 保存 cookies 到文件
+    await save_cookies_to_file(cookies, "cookies.json")
 
-if __name__ == '__main__':
-    main()
+# 运行主函数
+asyncio.run(main())

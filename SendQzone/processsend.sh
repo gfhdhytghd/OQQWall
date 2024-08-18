@@ -2,7 +2,8 @@ groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
-litegettag=$(grep 'use_lite_tag_generator' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+use_selenium_to_generate_qzone_cookies=$(grep 'use_selenium_to_generate_qzone_cookies' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+disable_qzone_autologin=$(grep 'disable_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 
 waitforfilechange(){
@@ -140,12 +141,7 @@ askforintro(){
 postqzone(){
     if [ ! -f "./cookies.json" ]; then
         echo "Cookies file does not exist. Executing relogin script."
-        python3 SendQzone/send.py relogin &
-        sleep 2
-        sendmsggroup 请立即扫描二维码
-        sendmsggroup "[CQ:image,file=$(pwd)/qrcode.png]"
-        eval $command
-        sleep 120
+        renewqzoneloginauto
     else
         echo "Cookies file exists. No action needed."
     fi
@@ -200,13 +196,23 @@ postqzone(){
 renewqzoneloginauto(){
     rm ./cookies.json
     rm ./qrcode.png
-    python3 ./SendQzone/qzonerenewcookies.py
+    if [[ use_selenium_to_generate_qzone_cookies == false]]; then
+        python3 ./SendQzone/qzonerenewcookies.py
+    else
+        python3 ./SendQzone/qzonerenewcookies-selenium.py
+    fi
 }
 
 renewqzonelogin(){
     rm ./cookies.json
     rm ./qrcode.png
-    postqzone &
+    python3 SendQzone/send.py relogin &
+        sleep 2
+        sendmsggroup 请立即扫描二维码
+        sendmsggroup "[CQ:image,file=$(pwd)/qrcode.png]"
+        eval $command
+        sleep 120
+    postqzone
     sleep 2
     sleep 60
 }
@@ -217,6 +223,14 @@ sendmsggroup(){
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
     cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
+    echo $cmd
+    eval $cmd
+}
+sendmsgcommugroup(){
+    msg=$1
+    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
+    # 构建 curl 命令，并发送编码后的消息
+    cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$commgroup_id&message=$encoded_msg\""
     echo $cmd
     eval $cmd
 }

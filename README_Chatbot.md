@@ -36,6 +36,13 @@ python3 ./main.py
 ```
 "model": "qwen2-72b-instruct",
 ```
+编辑./qqBot/QChatGPT/data/config/pipeline.json
+修改文件前几行access-control下的mode为whitelist
+```
+  "access-control": {
+        "mode": "whitelist",
+  }
+```
 编辑./qqBot/QChatGPT/data/config/platform.json
 将"adapter": "aiocqhttp"下同一组的enable设定为true
 

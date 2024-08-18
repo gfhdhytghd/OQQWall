@@ -13,7 +13,6 @@ def connect_to_chrome():
     chrome_options = Options()
     chrome_options.add_argument("--headless")
     chrome_options.add_argument('--disable-gpu')
-    chrome_options.add_experimental_option("debuggerAddress", "127.0.0.1:39222")
     browser = webdriver.Chrome(options=chrome_options)
     return browser
 

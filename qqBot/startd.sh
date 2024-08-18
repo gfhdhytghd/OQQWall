@@ -40,14 +40,6 @@ if [ -n "$commgroup_id" ]; then
     fi
 fi
 
-if pgrep -f "./SendQzone/chromed.py" > /dev/null;then
-        echo "Chrome daemon is already running"
-    else
-        source ./venv/bin/activate
-        python3 ./SendQzone/chromed.py &
-        echo "Chrome daemon starting"
-fi
-
 while true; do
     # 获取当前小时和分钟
     current_time=$(date +"%H:%M")

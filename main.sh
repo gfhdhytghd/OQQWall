@@ -3,12 +3,11 @@ qqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-litegettag=$(grep 'use_lite_tag_generator' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+enable_selenium_autocorrecttag_onstartup=$(grep 'enable_selenium_autocorrecttag_onstartup' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 DIR="./getmsgserv/rawpost/"
 check_variable() {
     var_name=$1
     var_value=$2
-
     if [ -z "$var_value" ] || [ "$var_value" == "xxx" ]; then
         echo "变量 $var_name 未正确设置。请参考OQQWall文档设定初始变量。"
         exit 1
@@ -47,6 +46,9 @@ pkill startd.sh
 source ./venv/bin/activate
 # start startd
 ./qqBot/startd.sh &
+child_pid=$!
+trap "kill $child_pid" EXIT
+
 echo 等待启动十秒
 sleep 10
 waitforfilechange(){
@@ -124,7 +126,9 @@ DIR="./getmsgserv/rawpost/"
 # 获取初始文件列表
 initial_files=$(ls "$DIR")
 echo 初始化编号...
-getnumnext-startup
+if [[ enable_selenium_autocorrecttag_onstartup == true ]];then
+    getnumnext-startup
+    fi
 sendmsggroup 机器人已启动
 echo 启动系统主循环
 while true; do
