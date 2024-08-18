@@ -125,8 +125,8 @@ waitforprivmsg(){
 DIR="./getmsgserv/rawpost/"
 # 获取初始文件列表
 initial_files=$(ls "$DIR")
-echo 初始化编号...
-if [[ enable_selenium_autocorrecttag_onstartup == true ]];then
+if [[ "$enable_selenium_autocorrecttag_onstartup" == true ]]; then
+    echo 初始化编号...
     getnumnext-startup
     fi
 sendmsggroup 机器人已启动

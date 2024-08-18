@@ -112,6 +112,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             if (group_id == groupid and sender.get('role') == 'admin' and raw_message.startswith(f"[CQ:at,qq={qqid}")):
                 print("serv:有指令消息")
                 command_text = re.sub(r'\[.*?\]', '', raw_message).strip()
+                print("指令:",command_text)
                 command_script_path = './getmsgserv/command.sh'
                 try:
                     subprocess.run([command_script_path, command_text], check=True)

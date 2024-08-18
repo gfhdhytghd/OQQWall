@@ -76,7 +76,7 @@ askforintro(){
                     numfinal=$(cat ./numfinal.txt)
                     numfinal=$((numfinal + 1))
                     echo $numfinal > ./numfinal.txt
-                    结束发件流程,是
+                    echo 结束发件流程,是
                     ;;
                 否)
                     postcmd="false"
@@ -119,7 +119,7 @@ askforintro(){
                     askforintro
                     ;;
                 *)
-                    sendmsggroup 没有此指令,请查看说明
+                    sendmsggroup 没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助
                     askforintro
                     ;;
                 esac
@@ -165,7 +165,7 @@ postqzone(){
             
             if [ $attempt -eq $max_attempts ]; then
                 sendmsggroup "空间发送错误，可能需要重新登陆,也可能是文件错误"
-                sendmsggroup "发送\"@本账号 relogin 是\"以手动重新登陆"
+                sendmsggroup "发送\"@本账号 手动重新登陆\"以手动重新登陆",完毕后请重新发送审核指令
                 askforintro
             fi
         else
@@ -196,7 +196,7 @@ postqzone(){
 renewqzoneloginauto(){
     rm ./cookies.json
     rm ./qrcode.png
-    if [[ use_selenium_to_generate_qzone_cookies == false]]; then
+    if [ "$use_selenium_to_generate_qzone_cookies" == "false" ]; then
         python3 ./SendQzone/qzonerenewcookies.py
     else
         python3 ./SendQzone/qzonerenewcookies-selenium.py
@@ -258,7 +258,7 @@ processsend(){
             echo "File exists, continuing..."
             break
         else
-            echo "File not found, running Python script..."
+            echo "File not found, running Python LM script..."
             python3 ./getmsgserv/LM_work/sendtoLM.py "${id}" "${numnext}"
         fi
 
@@ -296,7 +296,7 @@ processsend(){
     content=$(<"$id_file")
     sendmsggroup "原始信息: $content"
     sendimagetoqqgroup
-    sendmsggroup $numnext
+    sendmsggroup 内部编号$numnext，外部编号$numfinal
     echo askforgroup...
     askforintro
 }

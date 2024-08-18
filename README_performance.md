@@ -3,9 +3,9 @@
 只要能把这玩意装上并启动的机器，运行中它的CPU就基本不可能吃满，主要问题出在内存。
 <br/>内存需求大概是这样的：
 <br/>桌面环境:20～500m
-<br/>使用全功能：500m～800m
-<br/>使用次等编号算法：200m（此时可以转为使用Lagrange而非QQNT+napcat/LLOnebot）
-<br/>收发件瞬间:+150m（chrome+selenium）
+<br/>使用默认配置：300m
+<br/>启用任何selenium相关功能：+300m（此时可以转为使用Lagrange而非QQNT+napcat/LLOnebot）
+<br/>收发件瞬间:+150m（chrome --print-to-pdf和magick convert）
 <br/>虽然内存不太可能吃满，但是Linux下如果留给cache的空间不足，是会非常卡顿的。
 
 ### 优化可以通过以下几个方面进行：
@@ -13,13 +13,21 @@
 #### 桌面环境：
 <br/>本系统不要求桌面环境,删掉即可
 
-#### 使用轻量编号算法：
-config文件中把use_lite_tag_generator设定为true
+#### 停用所有selenium：
+设定config:
+```
+enable_selenium_autocorrecttag_onstartup=false
+use_selenium_to_generate_qzone_cookies=false
+```
 <br/>保存关闭
 
-<br/>注.如果你想使用轻量编号算法,那么相比云服务器,我更推荐把他部署到你家路由器上,还能省点钱。
-<br/>注：轻量编号算法后不支持自动获取空间cookies,需要手动扫码登陆qq空间
-<br/>注：使用轻量编号算法后不要求qq官方客户端开启，所以你可以切换到lagrange作为后端,这可以省下大量资源，部署lagrange并修改startd.sh来切换到lagrange
+QQ onebot实现:
+你可以切换到lagrange来降低内存消耗
+暂时没有实现改配置直接切换lagrange,目前,如果你要用的话，也可以，把Lagrange的http端口设定为8083,http-post端口设定为8082，并允许本地访问。
+<br/>注：切换到lagrange之后不支持自动登录空间,所以建议:
+```
+disable_qzone_autologin=true
+```
 
 #### Python运行时：
 <br/>你可以尝试使用cython编译代码中的各个python脚本，这大概可以给你省下不到100m的内存,并减轻发件时的CPU占用

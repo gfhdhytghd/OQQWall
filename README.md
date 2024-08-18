@@ -16,10 +16,10 @@
 本系统的技术实现方式不是很优雅，创建过程大量使用chatgpt编写实现小功能的脚本，并最终由一个bash把所有东西都串起来，不过他确实能跑起来。
 <br/>编写和测试平台是阿里云的ubuntu 22.04 x64 UEFI版本。
 
-本系统性能极差，处理不了任何并发，在管理员秒回的情况下平均5分钟能处理一条消息。
+本系统拥有处理并发的能力，允许的最小投稿时间间隔是1秒（你可以修改main.sh下的waitforprivmsg中的sleep后面的秒数来修改），最大并行处理能力取决于你的电脑内存大小和管理员响应速度。平均一个稿件从收到首条消息到发出要三分钟。
 
 已知问题如下：
-<br/>发送程序完全单线程处理且人在回路，管理不在线会导致帖子积压
+<br/>发件流程人在回路，管理不在线会导致帖子积压
 <br/>稿件过多容易超出系统承载能力
 <br/>使用qwen大语言模型的情况下，处理不了太长的帖子
 <br/>无法审核图片内容
@@ -62,7 +62,11 @@ curl -o napcat.sh https://fastly.jsdelivr.net/gh/NapNeko/NapCat-Installer@master
 python -m venv ./venv/
 source ./venv/bin/activate
 pip install --upgrade pip
-pip install dashscope selenium re101 bs4
+pip install dashscope re101 bs4
+```
+如果你想要使用selenium,你还需要
+```
+pip install selenium
 ```
 
 
@@ -78,15 +82,13 @@ pip install dashscope selenium re101 bs4
 <br/>如果此帐号之前就是使用 #数字 方式进行编号，或者设定了使用轻量编号系统，不需要进行这一步
 
 打开程序文件夹下的oqqwall.config,按说明填入数据
+**⚠️注意，配置文件不可以留空行或者加注释⚠️**
 <br/>说明:
 ```
 #所有东西请填到双引号里
 
 mainqq-id="xxx"
 #填入校园墙主账号qq号
-
-secondaryqq-id="xxx"
-#填入校园墙辅账号qq号(目前已经弃用,只是没来得及删,不用填写)
 
 management-group-id="xxx"
 #填入管理群群号
@@ -95,22 +97,24 @@ apikey="sk-"
 #填入qwen api key
 #sk-xxxxxx,"sk"也要填进来
 
-communicate-group="xxx"
+communicate-group=""
 这是ChatBot运行的群号,不需要chaatbot功能请不要填写,留一个空的引号在那即可
-use_lite_tag_generator=true/false
-#是否使用轻量编号算法,启用后系统启动时的编号校准将使用本地文件而非selenium在线获取
 disable_qzone_autologin=false
 #是否允许自动登录,启用后系统将在说说发送错误时尝试自动登录
+enable_selenium_autocorrecttag_onstartup=true/false
+是否在启动时使用selenium获取空间中的说说以校准编号，建议false
+use_selenium_to_generate_qzone_cookies=true/false
+是否使用selenium获取qq空间cookies，无特殊需求不建议启用
 use_LLOnebot=true/false
 #是否使用LLOnebot而非napcat
 max_attempts_qzone_autologin=3
 #最大qq空间发送尝试次数,自动登录超过次数限制后将切换为手动登陆
 ```
-**注意,oqqwall.config文件务必不能留空行**
 
 启动主程序
 <br/>打开QQ,登陆主账号
 <br/>终端输入./main.sh 
+<br/>如果你的墙之前发的稿件带有编号的话，请打开./numfinal.txt，然后在里面输入下一条稿件的编号。如果不进行这一步，系统发出的第一条稿件会从编号#1开始。
 <br/>然后，理论上，应该就可以用了。
 <br/>注意ctrl+c关闭程序时,qq和serv.py不会一并关闭,需要手动终止进程
 

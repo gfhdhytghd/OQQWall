@@ -18,13 +18,18 @@ renewqzonelogin(){
     postqzone &
     python3 SendQzone/send.py relogin &
     sleep 2
-    sendmsggroup 请立即扫描二维码
+    sendmsggroup 请立即扫描二维码,扫描登陆完毕后请直接重新发送审核指令
     sendmsggroup "[CQ:image,file=$(pwd)/qrcode.png]"
 }
+
 renewqzoneloginauto(){
     rm ./cookies.json
     rm ./qrcode.png
-    python3 ./SendQzone/qzonerenewcookies.py
+    if [ "$use_selenium_to_generate_qzone_cookies" == "false" ]; then
+        python3 ./SendQzone/qzonerenewcookies.py
+    else
+        python3 ./SendQzone/qzonerenewcookies-selenium.py
+    fi
 }
 echo 收到指令:$1
 object=$(echo $1 | awk '{print $1}')
@@ -44,20 +49,23 @@ case $object in
             sendmsggroup '没有可执行的对象,请检查,发送 @本账号 帮助 以查看帮助'
         fi
         ;;
-    "手动重新登陆")
+    "手动重新登录")
         renewqzonelogin
         ;;
-    "自动重新登陆")
+    "自动重新登录")
         renewqzoneloginauto
-        sendmsggroup 尝试完毕
+        sendmsggroup 自动登录QQ空间尝试完毕
         ;;
     "帮助")
         help='全局指令:
+语法: @本账号 指令
 (可以在任何时刻@本账号调用的指令)
-手动重新登陆:扫码登陆QQ空间
+手动重新登录:扫码登陆QQ空间
 自动重新登录:尝试自动登录qq空间
+(请注意是登录不是登陆)
 帮助:查看这个帮助列表
 审核指令:
+语法: @本账号 内部编号 指令
 (仅在稿件审核流程要求您发送指令时可用的指令)
 是：发送,系统会给稿件发送者发送成功提示
 否：机器跳过此条，人工去处理（常用于机器分段错误或者匿名判断失败，或是内容有视频的情况）

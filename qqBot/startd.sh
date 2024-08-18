@@ -12,7 +12,7 @@ else
 fi
 
 # Check if the OneBot server process is running
-if pgrep -fx "qq" > /dev/null
+if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null
 then
     echo "OneBot is already running"
 else
