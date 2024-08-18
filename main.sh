@@ -9,7 +9,7 @@ check_variable() {
     var_name=$1
     var_value=$2
     if [ -z "$var_value" ] || [ "$var_value" == "xxx" ]; then
-        echo "变量 $var_name 未正确设置。请参考OQQWall文档设定初始变量。"
+        echo "变量 $var_name 未正确设置。请参考OQQWall文档设定初始变量,如果你刚刚进行了更新,请删除现有oqqwall.config中的所有内容,到github仓库复制oqqwall.config到你现有的oqqwall.config文件中,并填写。"
         exit 1
     fi
 }

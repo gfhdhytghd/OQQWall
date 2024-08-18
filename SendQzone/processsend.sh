@@ -194,16 +194,16 @@ postqzone(){
 }
 
 renewqzoneloginauto(){
-    if [[ "$disable_qzone_autologin" == "false" ]]; then
+    if [[ "$disable_qzone_autologin" == "true" ]]; then
+        renewqzonelogin
+    else
         rm ./cookies.json
         rm ./qrcode.png
-        if [[ "$use_selenium_to_generate_qzone_cookies" == "false" ]]; then
-            python3 ./SendQzone/qzonerenewcookies.py
-        else
+        if [[ "$use_selenium_to_generate_qzone_cookies" == "true" ]]; then
             python3 ./SendQzone/qzonerenewcookies-selenium.py
+        else
+            python3 ./SendQzone/qzonerenewcookies.py
         fi
-    else
-        renewqzonelogin
     fi
 }
 
