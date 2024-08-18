@@ -60,3 +60,5 @@ python3 ./main.py
 ```
 注:url和群号白名单,会在main.sh启动时自动由oqqwall.config同步过去
 然后杀死并重新启动main.sh
+
+### QChatGPT的更多玩法请参考[QChatGPT DOC](https://qchatgpt.rockchin.top/posts/config/)
