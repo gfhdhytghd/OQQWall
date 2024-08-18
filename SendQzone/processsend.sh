@@ -104,6 +104,9 @@ askforintro(){
                     sendmsgpriv $id '你的稿件被拒绝,请尝试修改后重新投稿'
                     echo 结束发件流程,拒
                     ;;
+                拉黑)
+                    sendmsggroup 不再接收来自$id的投稿
+                    ;;
                 匿)
                     sendmsggroup 尝试切换匿名状态...
                     file="./getmsgserv/post-step2/$numnext.json"
