@@ -115,21 +115,20 @@ html_template = """
         </div>
     </div>
     <script>
-        document.addEventListener('DOMContentLoaded', function() {{
+        window.onload = function() {{
             const container = document.querySelector('.container');
             const contentHeight = container.scrollHeight;
-            const pageHeight4in = 364; // 4 feet in pixels (96px per inch, 12 inches per foot)
-            const pageWidth = 4; // 4 feet in pixels
-    
+            const pageHeight4in = 364; // 4 inches in pixels (96px per inch)
+        
             let pageSize = '';
-    
+        
             if (contentHeight <= pageHeight4in) {{
-                pageSize = '4in 4in'; // Use 4ft x 4ft if content fits
+                pageSize = '4in 4in'; // Use 4in x 4in if content fits
             }} else {{
-                const containerHeightIninch = (contentHeight / 96 + 0.25);
-                pageSize = `4in ${{containerHeightIninch}}in`; // Set height to container's height
+                const containerHeightInInches = (contentHeight / 96 + 0.1);
+                pageSize = `4in ${{containerHeightInInches}}in`; // Set height to container's height
             }}
-    
+        
             // Dynamically apply the @page size
             const style = document.createElement('style');
             style.innerHTML = `
@@ -139,8 +138,8 @@ html_template = """
                 }}
             `;
             document.head.appendChild(style);
-        }});
-    </script>
+        }};
+    </script>  
 </body>
 </html>
 """

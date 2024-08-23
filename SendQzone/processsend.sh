@@ -55,16 +55,16 @@ askforintro(){
     # 初始化文件的上次修改时间
     waitforfilechange "./qqBot/command/commands.txt"
     sendmsggroup 已收到指令
-    
+
     while true; do
         mapfile -t lines < "$command_file"
         found=false
-        
+
         for (( i=${#lines[@]}-1 ; i>=0 ; i-- )); do
             line=${lines[i]}
             number=$(echo $line | awk '{print $1}')
             status=$(echo $line | awk '{print $2}')
-            
+
             if [[ $number -eq $numnext ]]; then
                 sed -i "${i}d" "$command_file"
                 found=true
@@ -72,10 +72,8 @@ askforintro(){
                 case $status in
                 是)
                     postcmd="true"
-                    postqzone
                     numfinal=$(cat ./numfinal.txt)
-                    numfinal=$((numfinal + 1))
-                    echo $numfinal > ./numfinal.txt
+                    postqzone
                     echo 结束发件流程,是
                     ;;
                 否)
@@ -85,6 +83,7 @@ askforintro(){
                     numfinal=$(cat ./numfinal.txt)
                     numfinal=$((numfinal + 1))
                     echo $numfinal > ./numfinal.txt
+                    sendmsgpriv $id "你的稿件已转交人工处理"
                     echo 结束发件流程,否
                     ;;
                 等)
@@ -165,7 +164,7 @@ postqzone(){
             if [ $attempt -eq 1 ]; then
                 renewqzoneloginauto
             fi
-            
+
             if [ $attempt -eq $max_attempts ]; then
                 sendmsggroup "空间发送错误，可能需要重新登陆,也可能是文件错误"
                 sendmsggroup "发送\"@本账号 手动重新登陆\"以手动重新登陆",完毕后请重新发送审核指令
@@ -175,9 +174,10 @@ postqzone(){
             echo 发送完毕
             sendmsgpriv $id "$numfinal 已发送(系统自动发送，请勿回复)"
             sendmsggroup 已发送
+            numfinal=$((numfinal + 1))
+            echo $numfinal > ./numfinal.txt
             break
         fi
-
         attempt=$((attempt+1))
     done
     current_mod_time_id=$(stat -c %Y "$id_file")
@@ -303,6 +303,7 @@ processsend(){
     content=$(<"$id_file")
     sendmsggroup "原始信息: $content"
     sendimagetoqqgroup
+    numfinal=$(cat ./numfinal.txt)
     sendmsggroup 内部编号$numnext，外部编号$numfinal
     echo askforgroup...
     askforintro
@@ -310,6 +311,6 @@ processsend(){
 
 id=$1
 numnext=$2
-echo "开始处理来自$id的消息,内部编号$numnext"
+echo "开始处理来自$id的消息, 内部编号$numnext"
 processsend
-echo "来自$id的消息,内部编号$numnext处理完毕"
+echo "来自$id的消息,内部编号$numnext 处理完毕"
