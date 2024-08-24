@@ -257,8 +257,10 @@ processsend(){
     id_file=./getmsgserv/rawpost/$id.json
     last_mod_time_id=$(stat -c %Y "$id_file")
     echo $id
+    echo process-json...
+    ./getmsgserv/LM_work/progress-lite-json.sh ${id} ${numnext}
     echo 'wait-for-LM...'
-    python3 ./getmsgserv/LM_work/sendtoLM.py ${id} ${numnext}
+    python3 ./getmsgserv/LM_work/sendtoLM.py ${numnext}
     for i in {1..3}
     do
         if [ -f "./getmsgserv/post-step2/${numnext}.json" ]; then
@@ -266,7 +268,7 @@ processsend(){
             break
         else
             echo "File not found, running Python LM script..."
-            python3 ./getmsgserv/LM_work/sendtoLM.py "${id}" "${numnext}"
+            python3 ./getmsgserv/LM_work/sendtoLM.py "${numnext}"
         fi
 
         if [ "$i" -eq 3 ] && [ ! -f "./getmsgserv/post-step2/${numnext}.json" ]; then

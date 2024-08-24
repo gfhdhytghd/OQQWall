@@ -19,6 +19,7 @@ check_variable "apikey" "$apikey"
 check_variable "mainqq-id" "$qqid"
 # 初始化目录和文件
 mkdir ./getmsgserv/rawpost
+mkdir ./getmsgserv/post-step1
 mkdir ./getmsgserv/post-step2
 mkdir ./getmsgserv/post-step3
 mkdir ./getmsgserv/post-step4

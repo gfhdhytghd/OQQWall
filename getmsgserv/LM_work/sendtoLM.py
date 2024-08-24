@@ -13,46 +13,60 @@ def read_config(file_path):
     
 config = read_config('oqqwall.config')
 dashscope.api_key=config.get('apikey')
-
-if len(sys.argv) != 3:
-    print("Usage: python3 test.py <input> <output>")
-    sys.exit(1)
     
 input = sys.argv[1]
-output = sys.argv[2]
+output = sys.argv[1]
 
 # 文件路径
-input_file_path = f'./getmsgserv/rawpost/{input}.json'
+input_file_path = f'./getmsgserv/post-step1/{input}.json'
 output_file_path = f'./getmsgserv/post-step2/{output}.json'
 
-# 读取JSON文件内容
+
+def read_config(file_path):
+    config = {}
+    with open(file_path, 'r') as f:
+        for line in f:
+            key, value = line.strip().split('=')
+            config[key.strip()] = value.strip().strip('"')
+    return config
+
+config = read_config('oqqwall.config')
+input = sys.argv[1]
+output = sys.argv[1]
+# Read JSON file content
 with open(input_file_path, 'r', encoding='utf-8') as infile:
     data = json.load(infile)
 
-# 遍历数据，删除无意义数据
-cleaned_data = []
+# Process the "messages" field without deleting "sender" and "notregular"
+cleaned_messages = []
 fields_to_remove = ['message_id', 'file', 'subType', 'file_id', 'file_size']
 
-for item in data:
-    # 删除顶层的字段
+# Access the list under "messages"
+for item in data.get('messages', []):
+    # Remove top-level fields from each message
     for field in fields_to_remove:
         if field in item:
             del item[field]
 
-    # 检查并删除嵌套在 "message" 列表中的字段
-    if 'message' in item:
+    # Process the "message" field if it exists and is a list
+    if 'message' in item and isinstance(item['message'], list):
         for message in item['message']:
-            if 'data' in message:
+            if 'data' in message and isinstance(message['data'], dict):
                 for field in fields_to_remove:
                     if field in message['data']:
                         del message['data'][field]
-    
-    cleaned_data.append(item)
 
+    cleaned_messages.append(item)
+
+# Combine the cleaned "messages" with the original "sender" and "notregular"
+output_data = {
+    "sender": data.get("sender"),
+    "notregular": data.get("notregular"),
+    "messages": cleaned_messages
+}
 
 # 将清理后的数据转换为字符串
-input_content = json.dumps(cleaned_data, ensure_ascii=False, indent=4)
-
+input_content = json.dumps(output_data, ensure_ascii=False, indent=4)
 timenow =  time.time()
 
 # 构造提示词
@@ -76,9 +90,7 @@ prompt = (
     "  \"isover\": \"true\"/\"false\",\n"
     "  # 判断他有没有说完，通常通过用语义来判断，检查记录中是否有“没发完”“发完了”一类的语句，判断已经发来的内容是否构成一个完整的稿件,也可以通过time判断,在最后一条消息的time距离timenow很久远的情况下可以判断为完整稿件,只有在非常肯定他发完了的情况下才为true\n"
     "  \"notregular\": \"true/false\",\n"
-    "  # 判断这条信息是否需要非常规,规则如下"
-    "  #任何一个\"message\" [\"type\"的值,\"text\"/\"image\"的为常规,其他的,比如含有video,record,poke等的即为非常规"
-    "  #内容中要求对之前发送的稿件进行修改或撤回等操作的为非常规"
+    "  # 直接抄写即可"
     "  \"messages\": [\n"
     "    # 接下来输出分好组的message信息\n"
     "    {\n"
