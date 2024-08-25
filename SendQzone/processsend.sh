@@ -33,14 +33,14 @@ sendimagetoqqgroup() {
     fi
 
     find "$folder_path" -maxdepth 1 -type f | sort | while IFS= read -r file_path; do
-    echo "发送文件: $file_path"
-    msg=[CQ:image,file=file://$file_path]
-    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-    # 构建 curl 命令，并发送编码后的消息
-    cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-    echo $cmd
-    eval $cmd
-    sleep 1  # 添加延时以避免过于频繁的请求
+        echo "发送文件: $file_path"
+        msg=[CQ:image,file=file://$file_path]
+        encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
+        # 构建 curl 命令，并发送编码后的消息
+        cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
+        echo $cmd
+        eval $cmd
+        sleep 1  # 添加延时以避免过于频繁的请求
     done
     echo "所有文件已发送"
 }
@@ -260,7 +260,7 @@ processsend(){
     echo process-json...
     ./getmsgserv/LM_work/progress-lite-json.sh ${id} ${numnext}
     echo 'wait-for-LM...'
-    python3 ./getmsgserv/LM_work/sendtoLM.py ${numnext}
+    python3 ./getmsgserv/LM_work/sendtoLM-MTP.py ${numnext}
     for i in {1..3}
     do
         if [ -f "./getmsgserv/post-step2/${numnext}.json" ]; then
@@ -268,7 +268,7 @@ processsend(){
             break
         else
             echo "File not found, running Python LM script..."
-            python3 ./getmsgserv/LM_work/sendtoLM.py "${numnext}"
+            python3 ./getmsgserv/LM_work/sendtoLM-MTP.py "${numnext}"
         fi
 
         if [ "$i" -eq 3 ] && [ ! -f "./getmsgserv/post-step2/${numnext}.json" ]; then

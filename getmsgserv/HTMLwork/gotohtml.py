@@ -124,6 +124,8 @@ html_template = """
         
             if (contentHeight <= pageHeight4in) {{
                 pageSize = '4in 4in'; // Use 4in x 4in if content fits
+            }} else if (contentHeight >= 2304){{
+                pageSize = '4in 24in'
             }} else {{
                 const containerHeightInInches = (contentHeight / 96 + 0.1);
                 pageSize = `4in ${{containerHeightInInches}}in`; // Set height to container's height

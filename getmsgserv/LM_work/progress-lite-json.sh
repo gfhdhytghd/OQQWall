@@ -39,17 +39,23 @@ jq -c '.[] | select(.message != null) | .message[] | select(.type == "image")' "
     
     # 下载文件并命名
     local_file="$folder/$input-$next_file_index.png"
-    curl -o "$local_file" "$url"
 
-    # 使用 jq 替换 URL 为本地文件路径（file://$(pwd)/）
-    jq --arg old_url "$url" --arg new_url "file://$pwd_path/getmsgserv/post-step1/${input}/$(basename "$local_file")" \
-       'map(
-          if .message then
-            .message |= map(if .type == "image" and .data.url == $old_url then .data.url = $new_url else . end)
-          else
-            .
-          end
-        )' "$temp_json" > "$temp_json.tmp" && mv "$temp_json.tmp" "$temp_json"
+    # 检查文件是否已经存在
+    if [ -f "$local_file" ]; then
+        echo "文件 $local_file 已存在，跳过下载。"
+    else
+        curl -o "$local_file" "$url"
+
+        # 使用 jq 替换 URL 为本地文件路径（file://$(pwd)/）
+        jq --arg old_url "$url" --arg new_url "file://$pwd_path/getmsgserv/post-step1/${input}/$(basename "$local_file")" \
+           'map(
+              if .message then
+                .message |= map(if .type == "image" and .data.url == $old_url then .data.url = $new_url else . end)
+              else
+                .
+              end
+            )' "$temp_json" > "$temp_json.tmp" && mv "$temp_json.tmp" "$temp_json"
+    fi
 
     # 增加文件索引
     next_file_index=$((next_file_index + 1))
