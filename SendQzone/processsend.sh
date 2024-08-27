@@ -65,7 +65,7 @@ askforintro(){
             number=$(echo $line | awk '{print $1}')
             status=$(echo $line | awk '{print $2}')
 
-            if [[ $number -eq $numnext ]]; then
+            if [[ "$number" -eq "$numnext" ]]; then
                 sed -i "${i}d" "$command_file"
                 found=true
                 numfinal=$(cat ./numfinal.txt)
