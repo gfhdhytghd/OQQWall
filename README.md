@@ -34,7 +34,7 @@
 #### arm用户请阅读: [Arm安装指南](README_ARM.md)
 #### 低性能用户请阅读：[性能优化指南](README_performance.md)
 #### 启用ChatBot请阅读: [校园群智能助手](./README_Chatbot.md)
-<br/>请先安装QQ，napcat无头ntqq框架或者LLonebot框架,google-chrome和chrome-drive，jq, python3，dotnet框架,ImageMagick(某些发行版[deb系]这个玩意默认没法处理pdf,需要调整policy配置，自己搜索怎么搞)
+<br/>请先安装QQ，napcat无头ntqq框架或者LLonebot框架,google-chrome，jq, python3，dotnet框架,ImageMagick(某些发行版[deb系]这个玩意默认没法处理pdf,需要调整policy配置，自己搜索怎么搞)
 
 [napcat官方文档](https://napneko.github.io/zh-CN/)
 <br/>对于rpm/deb系,你们可以通过执行
