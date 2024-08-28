@@ -37,14 +37,14 @@ python3 ./main.py
 "model": "qwen2-72b-instruct",
 ```
 编辑./qqBot/QChatGPT/data/config/pipeline.json
-修改文件前几行access-control下的mode为whitelist
+<br/> 修改文件前几行access-control下的mode为whitelist
 ```
   "access-control": {
         "mode": "whitelist",
   }
 ```
 编辑./qqBot/QChatGPT/data/config/platform.json
-将"adapter": "aiocqhttp"下同一组的enable设定为true
+<br/>将"adapter": "aiocqhttp"下同一组的enable设定为true
 
 启动一下QChatGPT,等到他提示初始化平台适配器后,关掉
 
@@ -59,6 +59,7 @@ python3 ./main.py
 },
 ```
 注:url和群号白名单,会在main.sh启动时自动由oqqwall.config同步过去
-然后杀死并重新启动main.sh
+<br/>然后杀死并重新启动main.sh
+<br/>如果你想将更多项目加入白名单，请在oqqwall.caonfig中关闭auto_sync_communicate_group_id,然后参考QChatGPT DOC编辑QChatGPT自己的配置文件修改白名单
 
 ### QChatGPT的更多玩法请参考[QChatGPT DOC](https://qchatgpt.rockchin.top/posts/config/)

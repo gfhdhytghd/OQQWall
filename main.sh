@@ -3,6 +3,7 @@ qqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+auto_sync_communicate_group_id=$(grep 'auto_sync_communicate_group_id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 enable_selenium_autocorrecttag_onstartup=$(grep 'enable_selenium_autocorrecttag_onstartup' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 DIR="./getmsgserv/rawpost/"
 check_variable() {
@@ -35,11 +36,18 @@ if [ ! -f "./getmsgserv/all/commugroup.txt" ]; then
     touch ./getmsgserv/all/commugroup.txt
     echo "已创建文件: ./getmsgserv/all/commugroup.txt"
 fi
+#目前只作为一个log文件
+
 
 #写入whitelist
-group_id="group_${commgroup_id}"
-jq --arg group_id "$group_id" '.["access-control"].whitelist = [$group_id]' "./qqBot/QChatGPT/data/config/pipeline.json" > temp.json && mv temp.json "./qqBot/QChatGPT/data/config/pipeline.json"
-jq --arg apikey "$apikey" '.keys.openai = [$apikey]' ./qqBot/QChatGPT/data/config/provider.json > tmp.json && mv tmp.json ./qqBot/QChatGPT/data/config/provider.json
+if [ -n "$commgroup_id" ]; then 
+    if [[ "$enable_selenium_autocorrecttag_onstartup" == true ]]; then
+        echo 同步校群id...
+        group_id="group_${commgroup_id}"
+        jq --arg group_id "$group_id" '.["access-control"].whitelist = [$group_id]' "./qqBot/QChatGPT/data/config/pipeline.json" > temp.json && mv temp.json "./qqBot/QChatGPT/data/config/pipeline.json"
+    fi
+    jq --arg apikey "$apikey" '.keys.openai = [$apikey]' ./qqBot/QChatGPT/data/config/provider.json > tmp.json && mv tmp.json ./qqBot/QChatGPT/data/config/provider.json
+fi
 
 touch ./numfinal.txt
 pkill startd.sh
@@ -74,13 +82,9 @@ getnumnext(){
     echo "numnext=$numnext"
 }
 getnumnext-startup(){
-    if [[ "$litegettag" == false ]]; then
-        echo 使用主算法...
-        getnumcmd='python3 ./SendQzone/qzonegettag-headless.py'
-        output=$(eval $getnumcmd)
-    else
-        output="Log Error!"
-    fi
+    echo 使用selenium校准编号...
+    getnumcmd='python3 ./SendQzone/qzonegettag-headless.py'
+    output=$(eval $getnumcmd)
     echo $output
     if echo "$output" | grep -q "Log Error!"; then
         numnow=$( cat ./numfinal.txt )

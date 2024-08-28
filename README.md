@@ -96,6 +96,8 @@ apikey="sk-"
 
 communicate-group=""
 这是ChatBot运行的群号,不需要chaatbot功能请不要填写,留一个空的引号在那即可
+auto_sync_communicate_group_id=true/false
+是否自动同步communicate-group群号到QChatGPT,在你需要添加多于一项到白名单的情况下需要关闭此功能
 disable_qzone_autologin=false
 #是否允许自动登录,启用后系统将在说说发送错误时尝试自动登录
 enable_selenium_autocorrecttag_onstartup=true/false
