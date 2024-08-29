@@ -1,4 +1,5 @@
 import time
+import sys
 import json
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -48,7 +49,7 @@ def read_config(file_path):
 def main():
     # Read configuration and connect to Chrome
     config = read_config('oqqwall.config')
-    my_qq = config.get('mainqq-id')
+    my_qq = sys.argv[1]
 
     # Connect to the Chrome instance running in the daemon
     browser = connect_to_chrome()

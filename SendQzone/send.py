@@ -283,18 +283,19 @@ class QzoneAPI:
 
 
 async def main():
-    if len(sys.argv) > 3:
-        print("Usage: python3 test.py <message> <image_directory>")
+    if len(sys.argv) > 4:
+        print("Usage: python3 test.py <message> <image_directory> <id>")
         return
 
     message = sys.argv[1]
+    self_id = sys.argv[3]
     try:
         image_directory = sys.argv[2]
     except:
         image_directory='./getmsgserv/post-step5'
 
     try:
-        with open('./cookies.json', 'r') as f:
+        with open('./cookies-{self_id}.json', 'r') as f:
             cookies = json.load(f)
     except:
         cookies = None
@@ -309,7 +310,7 @@ async def main():
         try:
             cookies = await login.login_via_qrcode(qrcode_callback)
             print("Cookies after login:", cookies)
-            with open('cookies.json', 'w') as f:
+            with open('cookies-{self_id}.json', 'w') as f:
                 json.dump(cookies, f)
             os.remove('./qrcode.png')
         except Exception as e:
@@ -328,7 +329,7 @@ async def main():
         try:
             cookies = await login.login_via_qrcode(qrcode_callback)
             print("Cookies after login:", cookies)
-            with open('cookies.json', 'w') as f:
+            with open('cookies-{self_id}.json', 'w') as f:
                 json.dump(cookies, f)
             os.remove('./qrcode.png')
         except Exception as e:

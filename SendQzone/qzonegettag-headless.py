@@ -1,6 +1,7 @@
 import time
 import json
 import re
+import sys
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -79,7 +80,7 @@ def read_config(file_path):
 def main():
     # 读取配置并连接到Chrome
     config = read_config('oqqwall.config')
-    my_qq = config.get('mainqq-id')
+    my_qq = sys.argv[1]
 
     # 连接到守护进程中的Chrome实例
     browser = connect_to_chrome()

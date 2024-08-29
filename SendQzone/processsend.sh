@@ -1,11 +1,17 @@
 groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+mainqqid=$(grep 'mainqqid' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+minorqqid=$(grep 'minorqqid' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
 use_selenium_to_generate_qzone_cookies=$(grep 'use_selenium_to_generate_qzone_cookies' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 disable_qzone_autologin=$(grep 'disable_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-
+goingtosendid=("$mainqqid")
+IFS=',' read -ra minorqqids <<< "$minorqqid"
+for qqid in "${minorqqids[@]}"; do
+    goingtosendid+=("$qqid")
+done
 waitforfilechange(){
         last_mod_time_cmd=$(stat -c %Y "$1")
 
@@ -137,13 +143,10 @@ askforintro(){
     done
 }
 
-
-
-
-postqzone(){
-    if [ ! -f "./cookies.json" ]; then
+postprocess(){
+    if [ ! -f "./cookies-$1.json" ]; then
         echo "Cookies file does not exist. Executing relogin script."
-        renewqzoneloginauto
+        renewqzoneloginauto $1
     else
         echo "Cookies file exists. No action needed."
     fi
@@ -151,10 +154,11 @@ postqzone(){
     need_priv=$(jq -r '.needpriv' "$json_path")
     # 检查 need_priv 的值并执行相应的命令
     if [ "$need_priv" == "true" ]; then
-        postcommand="python3 ./SendQzone/send.py '#$numfinal' ./getmsgserv/post-step5/$numnext/"
+        message='#$numfinal'
     else
-        postcommand="python3 ./SendQzone/send.py '#$numfinal @{uin:$id,nick:,who:1}' ./getmsgserv/post-step5/$numnext/"
+        massege='#$numfinal @{uin:$id,nick:,who:1}'
     fi
+    postcommand="python3 ./SendQzone/send.py $massege ./getmsgserv/post-step5/$numnext/" $mainqqid
     output=$(eval $postcommand)
     attempt=1
     while [ $attempt -le $max_attempts ]; do
@@ -162,24 +166,33 @@ postqzone(){
 
         if echo "$output" | grep -q "Failed to publish."; then
             if [ $attempt -eq 1 ]; then
-                renewqzoneloginauto
+                renewqzoneloginauto $1
             fi
 
             if [ $attempt -eq $max_attempts ]; then
-                sendmsggroup "空间发送错误，可能需要重新登陆,也可能是文件错误"
-                sendmsggroup "发送\"@本账号 手动重新登陆\"以手动重新登陆",完毕后请重新发送审核指令
+                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1"
+                sendmsggroup "发送\"@出错账号 手动重新登陆\"以手动重新登陆",完毕后请重新发送审核指令
                 askforintro
             fi
         else
-            echo 发送完毕
-            sendmsgpriv $id "$numfinal 已发送(系统自动发送，请勿回复)"
-            sendmsggroup 已发送
-            numfinal=$((numfinal + 1))
-            echo $numfinal > ./numfinal.txt
+            goingtosendid=("${goingtosendid[@]/$qqid}")
+            echo $1发送完毕
+            sendmsggroup $1已发送
             break
         fi
         attempt=$((attempt+1))
     done
+}
+
+postqzone(){
+    sendqueue=("${goingtosendid[@]}")
+    for qqid in "${sendqueue[@]}"; do
+        echo "Sending qzone use id: $qqid"
+        postprocess $qqid
+    done
+    sendmsgpriv $id "$numfinal 已发送(系统自动发送，请勿回复)"
+    numfinal=$((numfinal + 1))
+    echo $numfinal > ./numfinal.txt
     current_mod_time_id=$(stat -c %Y "$id_file")
     current_mod_time_privmsg=$(stat -c %Y "./getmsgserv/all/priv_post.json")
     echo "'current-mod-time-id:'$current_mod_time_id"
@@ -198,14 +211,14 @@ postqzone(){
 
 renewqzoneloginauto(){
     if [[ "$disable_qzone_autologin" == "true" ]]; then
-        renewqzonelogin
+        renewqzonelogin $1
     else
         rm ./cookies.json
         rm ./qrcode.png
         if [[ "$use_selenium_to_generate_qzone_cookies" == "true" ]]; then
-            python3 ./SendQzone/qzonerenewcookies-selenium.py
+            python3 ./SendQzone/qzonerenewcookies-selenium.py $1
         else
-            python3 ./SendQzone/qzonerenewcookies.py
+            python3 ./SendQzone/qzonerenewcookies.py $1
         fi
     fi
 }
@@ -213,11 +226,10 @@ renewqzoneloginauto(){
 renewqzonelogin(){
     rm ./cookies.json
     rm ./qrcode.png
-    python3 SendQzone/send.py relogin &
+    python3 SendQzone/send.py relogin $1 &
         sleep 2
         sendmsggroup 请立即扫描二维码
         sendmsggroup "[CQ:image,file=$(pwd)/qrcode.png]"
-        eval $command
         sleep 120
     postqzone
     sleep 2
@@ -246,14 +258,14 @@ sendmsgpriv(){
     msg=$2
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
-    cmd="curl \"http://127.0.0.1:8083/send_private_msg?user_id=$1&message=$encoded_msg\""
+    cmd="curl \"http://127.0.0.1:$port/send_private_msg?user_id=$1&message=$encoded_msg\""
     echo $cmd
     eval $cmd
 }
 
 processsend(){
     echo waitingforsender...
-    sleep 120
+    sleep 20
     id_file=./getmsgserv/rawpost/$id.json
     last_mod_time_id=$(stat -c %Y "$id_file")
     echo $id
@@ -311,8 +323,18 @@ processsend(){
     askforintro
 }
 
-id=$1
+mixid=$1
+id="${mixid%-*}"
+self_id="${mixid#*-}"
 numnext=$2
-echo "开始处理来自$id的消息, 内部编号$numnext"
+echo "开始处理来自$id的消息, 账号$self_id,内部编号$numnext"
+if [[ "$id" == "$mainqqid" ]]; then
+    port=8083
+elif [[ "$id" == "$minorqqid" ]]; then
+    port=8084
+else
+    echo 消息来自未配置的qq账户，请编辑oqqwall.config或检查当前onebot server登录的账号，稿件处理进程即将退出
+    exit
+fi
 processsend
 echo "来自$id的消息,内部编号$numnext 处理完毕"

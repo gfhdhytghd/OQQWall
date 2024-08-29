@@ -54,10 +54,11 @@ class RequestHandler(BaseHTTPRequestHandler):
     
     def handle_friend_recall(self, data):
         user_id = data.get('user_id')
+        self_id = data.get('self_id')
         message_id = data.get('message_id')
 
         if user_id and message_id:
-            file_path = os.path.join(RAWPOST_DIR, f'{user_id}.json')
+            file_path = os.path.join(RAWPOST_DIR, f'{user_id}-{self_id}.json')
             if os.path.exists(file_path):
                 with open(file_path, 'r', encoding='utf-8') as f:
                     existing_data = json.load(f)
@@ -108,8 +109,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             group_id = int(data.get('group_id'))
             sender = data.get('sender', {})
             raw_message = data.get('raw_message', '')
+            self_id = data.get('self_id')
             
-            if (group_id == groupid and sender.get('role') == 'admin' and raw_message.startswith(f"[CQ:at,qq={qqid}")):
+            if (group_id == groupid and sender.get('role') == 'admin' and raw_message.startswith(f"[CQ:at,qq={self_id}")):
                 print("serv:有指令消息")
                 command_text = re.sub(r'\[.*?\]', '', raw_message).strip()
                 print("指令:",command_text)
@@ -130,6 +132,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         message_type = data.get('message_type')
         post_type = data.get('post_type')
         user_id = data.get('user_id')
+        self_id = data.get('self_id')
         timestamp = data.get('time')
 
         if message_type == 'private' and post_type != 'message_sent' and user_id and timestamp is not None:
@@ -139,7 +142,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "time": data.get("time")
             }
 
-            file_path = os.path.join(RAWPOST_DIR, f'{user_id}.json')
+            file_path = os.path.join(RAWPOST_DIR, f'{user_id}-{self_id}.json')
             if os.path.exists(file_path):
                 with open(file_path, 'r', encoding='utf-8') as f:
                     existing_data = json.load(f)
