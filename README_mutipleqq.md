@@ -2,6 +2,7 @@
 ## 简介
 OQQWall系统在0.6.0版本加入了对于多账号协同运营的支持，可以实现从多个账号接收投稿信息，并在审核完毕后发送投稿到多个账户的qq空间。
 <br/>**目前仅支持配置一个副账号**
+<br/>暂时不支持启动main.sh时自动拉起副号onebot，你需要在启动main.sh之后，在另一个console中手动启动副号的onebot服务。
 ## 配置
 ### OQQWall.config配置
 在OQQWall.config中将副号qqid填入minorqq-id后面的双引号中
