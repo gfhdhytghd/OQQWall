@@ -205,7 +205,8 @@ postqzone(){
         goingtosendid=("$mainqqid")
         IFS=',' read -ra minorqqids <<< "$minorqqid"
         for qqid in "${minorqqids[@]}"; do
-        goingtosendid+=("$qqid")
+            goingtosendid+=("$qqid")
+        done
         getnumnext
         processsend
     fi
