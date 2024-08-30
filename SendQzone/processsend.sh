@@ -1,6 +1,6 @@
 groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-mainqqid=$(grep 'mainqqid' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-minorqqid=$(grep 'minorqqid' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+mainqqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+minorqqid=$(grep 'minorqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
@@ -44,7 +44,6 @@ sendimagetoqqgroup() {
         encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
         # 构建 curl 命令，并发送编码后的消息
         cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-        echo $cmd
         eval $cmd
         sleep 1  # 添加延时以避免过于频繁的请求
     done
@@ -84,7 +83,7 @@ askforintro(){
                     ;;
                 否)
                     postcmd="false"
-                    rm ./getmsgserv/rawpost/$id.json
+                    rm $id_file
                     rm -rf ./getmsgserv/post-step5/$numnext
                     numfinal=$(cat ./numfinal.txt)
                     numfinal=$((numfinal + 1))
@@ -99,12 +98,12 @@ askforintro(){
                     ;;
                 删)
                     postcmd="del"
-                    rm ./getmsgserv/rawpost/$id.json
+                    rm $id_file
                     rm -rf ./getmsgserv/post-step5/$numnext
                     ;;
                 拒)
                     postcmd="ref"
-                    rm ./getmsgserv/rawpost/$id.json
+                    rm $id_file
                     rm -rf ./getmsgserv/post-step5/$numnext
                     sendmsgpriv $id '你的稿件被拒绝,请尝试修改后重新投稿'
                     echo 结束发件流程,拒
@@ -127,7 +126,7 @@ askforintro(){
                     askforintro
                     ;;
                 *)
-                    sendmsggroup 没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助
+                    sendmsggroup "没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助"
                     askforintro
                     ;;
                 esac
@@ -154,18 +153,18 @@ postprocess(){
     need_priv=$(jq -r '.needpriv' "$json_path")
     # 检查 need_priv 的值并执行相应的命令
     if [ "$need_priv" == "true" ]; then
-        message='#$numfinal'
+        massege="#$numfinal"
     else
-        massege='#$numfinal @{uin:$id,nick:,who:1}'
+        massege="#$numfinal @{uin:$id,nick:,who:1}"
     fi
-    postcommand="python3 ./SendQzone/send.py $massege ./getmsgserv/post-step5/$numnext/" $mainqqid
-    output=$(eval $postcommand)
+    postcommand="python3 ./SendQzone/send.py \"$massege\" ./getmsgserv/post-step5/$numnext/ $1"
+    echo $postcommand
     attempt=1
     while [ $attempt -le $max_attempts ]; do
         output=$(eval $postcommand)
 
         if echo "$output" | grep -q "Failed to publish."; then
-            if [ $attempt -eq 1 ]; then
+            if [ $attempt -lt 1 ]; then
                 renewqzoneloginauto $1
             fi
 
@@ -173,6 +172,7 @@ postprocess(){
                 sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1"
                 sendmsggroup "发送\"@出错账号 手动重新登陆\"以手动重新登陆",完毕后请重新发送审核指令
                 askforintro
+                break
             fi
         else
             goingtosendid=("${goingtosendid[@]/$qqid}")
@@ -199,7 +199,7 @@ postqzone(){
     echo "'last-mod-time-id:'$last_mod_time_id"
     if [ "$current_mod_time_id" -eq "$last_mod_time_id" ]; then
         echo "过程中此人无新消息，删除此人记录"
-        rm ./getmsgserv/rawpost/$id.json
+        rm $id_file
         rm -rf ./getmsgserv/post-step5/$numnext
     else
         rm -rf ./getmsgserv/post-step5/$numnext
@@ -213,7 +213,7 @@ renewqzoneloginauto(){
     if [[ "$disable_qzone_autologin" == "true" ]]; then
         renewqzonelogin $1
     else
-        rm ./cookies.json
+        rm ./cookies-$self_id.json
         rm ./qrcode.png
         if [[ "$use_selenium_to_generate_qzone_cookies" == "true" ]]; then
             python3 ./SendQzone/qzonerenewcookies-selenium.py $1
@@ -224,7 +224,7 @@ renewqzoneloginauto(){
 }
 
 renewqzonelogin(){
-    rm ./cookies.json
+    rm ./cookies-$self_id.json
     rm ./qrcode.png
     python3 SendQzone/send.py relogin $1 &
         sleep 2
@@ -242,7 +242,6 @@ sendmsggroup(){
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
     cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-    echo $cmd
     eval $cmd
 }
 sendmsgcommugroup(){
@@ -250,7 +249,6 @@ sendmsgcommugroup(){
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
     cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$commgroup_id&message=$encoded_msg\""
-    echo $cmd
     eval $cmd
 }
 
@@ -259,18 +257,17 @@ sendmsgpriv(){
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
     cmd="curl \"http://127.0.0.1:$port/send_private_msg?user_id=$1&message=$encoded_msg\""
-    echo $cmd
     eval $cmd
 }
 
 processsend(){
     echo waitingforsender...
-    sleep 20
-    id_file=./getmsgserv/rawpost/$id.json
+    sleep 120
+    id_file=./getmsgserv/rawpost/$id-$self_id.json
     last_mod_time_id=$(stat -c %Y "$id_file")
     echo $id
     echo process-json...
-    ./getmsgserv/LM_work/progress-lite-json.sh ${id} ${numnext}
+    ./getmsgserv/LM_work/progress-lite-json.sh "${id}-${self_id}" ${numnext}
     echo 'wait-for-LM...'
     python3 ./getmsgserv/LM_work/sendtoLM-MTP.py ${numnext}
     for i in {1..3}
@@ -328,9 +325,9 @@ id="${mixid%-*}"
 self_id="${mixid#*-}"
 numnext=$2
 echo "开始处理来自$id的消息, 账号$self_id,内部编号$numnext"
-if [[ "$id" == "$mainqqid" ]]; then
+if [[ "$self_id" == "$mainqqid" ]]; then
     port=8083
-elif [[ "$id" == "$minorqqid" ]]; then
+elif [[ "$self_id" == "$minorqqid" ]]; then
     port=8084
 else
     echo 消息来自未配置的qq账户，请编辑oqqwall.config或检查当前onebot server登录的账号，稿件处理进程即将退出

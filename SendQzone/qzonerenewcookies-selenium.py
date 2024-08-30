@@ -30,7 +30,7 @@ def login(browser, my_qq):
     try:
         cookies = browser.get_cookies()
         cookies_dict = {cookie['name']: cookie['value'] for cookie in cookies}
-        with open("cookies.json", "w") as f:
+        with open(f"./cookies-{self_id}.json", "w") as f:
             json.dump(cookies_dict, f, indent=4)
     except Exception as error:
         print(f'Cookies Save Error! {error}')

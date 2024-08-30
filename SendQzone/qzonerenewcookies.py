@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 import httpx
 from httpx import Cookies
 
@@ -33,8 +34,8 @@ async def save_cookies_to_file(cookies: dict, file_path: str):
     print(f"Cookies saved to {file_path}")
 
 async def main():
-    # 从配置文件读取 QQ 号码
-    uin = "1050373508"
+    # 读取 QQ 号码
+    uin = sys.argv[1]
     
     # 获取 clientkey
     clientkey = await get_clientkey(uin)
@@ -43,7 +44,7 @@ async def main():
     cookies = await get_cookies(uin, clientkey)
     
     # 保存 cookies 到文件
-    await save_cookies_to_file(cookies, "cookies.json")
+    await save_cookies_to_file(cookies, f"cookies-{uin}.json")
 
 # 运行主函数
 asyncio.run(main())

@@ -1,11 +1,11 @@
 #!/bin/bash
 groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-mainqqid=$(grep 'mainqqid' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+mainqqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
 litegettag=$(grep 'use_lite_tag_generator' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-self_id=$1
+self_id=$2
 sendmsggroup(){
     msg=$1
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
@@ -43,10 +43,11 @@ flag=$(echo $1 | awk '{print $3}')
 echo obj:$object
 echo cmd:$command
 echo flag:$flag
+echo self_id:$self_id
 
 case $object in
     [0-9]*)
-        if [[ $self_id == $mainqqid ]]; then
+        if [[ "$self_id" == "$mainqqid" ]]; then
             if [ -d "./getmsgserv/post-step5/$object" ]; then
                 echo $1 >> qqBot/command/commands.txt
                 echo "指令已保存到 qqBot/command/commands.txt"

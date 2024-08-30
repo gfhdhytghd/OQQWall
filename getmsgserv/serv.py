@@ -110,6 +110,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             sender = data.get('sender', {})
             raw_message = data.get('raw_message', '')
             self_id = data.get('self_id')
+            self_id = str(self_id)
             
             if (group_id == groupid and sender.get('role') == 'admin' and raw_message.startswith(f"[CQ:at,qq={self_id}")):
                 print("serv:有指令消息")
@@ -117,7 +118,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 print("指令:",command_text)
                 command_script_path = './getmsgserv/command.sh'
                 try:
-                    subprocess.run([command_script_path, command_text], check=True)
+                    subprocess.run([command_script_path, command_text] + [self_id], check=True)
                 except subprocess.CalledProcessError as e:
                     print(f"Command execution failed: {e}")
 

@@ -295,7 +295,7 @@ async def main():
         image_directory='./getmsgserv/post-step5'
 
     try:
-        with open('./cookies-{self_id}.json', 'r') as f:
+        with open(f"./cookies-{self_id}.json", 'r') as f:
             cookies = json.load(f)
     except:
         cookies = None
@@ -310,7 +310,7 @@ async def main():
         try:
             cookies = await login.login_via_qrcode(qrcode_callback)
             print("Cookies after login:", cookies)
-            with open('cookies-{self_id}.json', 'w') as f:
+            with open(f"./cookies-{self_id}.json", 'w') as f:
                 json.dump(cookies, f)
             os.remove('./qrcode.png')
         except Exception as e:
@@ -329,7 +329,7 @@ async def main():
         try:
             cookies = await login.login_via_qrcode(qrcode_callback)
             print("Cookies after login:", cookies)
-            with open('cookies-{self_id}.json', 'w') as f:
+            with open(f"./cookies-{self_id}.json", 'w') as f:
                 json.dump(cookies, f)
             os.remove('./qrcode.png')
         except Exception as e:
