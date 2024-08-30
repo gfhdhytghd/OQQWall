@@ -68,6 +68,7 @@ askforintro(){
             line=${lines[i]}
             number=$(echo $line | awk '{print $1}')
             status=$(echo $line | awk '{print $2}')
+            flag=$(echo $line | awk '{print $3}')
 
             if [[ "$number" -eq "$numnext" ]]; then
                 sed -i "${i}d" "$command_file"
@@ -124,6 +125,19 @@ askforintro(){
                     echo askforgroup...
                     askforintro
                     ;;
+                评论)
+                    if [ "$need_priv" == "true" ]; then
+                        massege="#$numfinal"
+                    else
+                        massege="#$numfinal @{uin:$id,nick:,who:1}"
+                    fi
+                    if [ -n "$flag" ]; then
+                        massege="${massege}"$'\n'"${flag}"
+                        sendmsggroup "增加评论后的文本：\n $massege"
+                        askforintro
+                    else
+                        sendmsggroup "没有找到评论内容，发送 @本账号 帮助 以查看帮助"
+                    ;;
                 *)
                     sendmsggroup "没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助"
                     askforintro
@@ -149,12 +163,6 @@ postprocess(){
     fi
     json_path="./getmsgserv/post-step2/$numnext.json"
     need_priv=$(jq -r '.needpriv' "$json_path")
-    # 检查 need_priv 的值并执行相应的命令
-    if [ "$need_priv" == "true" ]; then
-        massege="#$numfinal"
-    else
-        massege="#$numfinal @{uin:$id,nick:,who:1}"
-    fi
     postcommand="python3 ./SendQzone/send.py \"$massege\" ./getmsgserv/post-step5/$numnext/ $1"
     echo $postcommand
     attempt=1
@@ -324,6 +332,12 @@ elif [[ "$self_id" == "$minorqqid" ]]; then
 else
     echo 消息来自未配置的qq账户，请编辑oqqwall.config或检查当前onebot server登录的账号，稿件处理进程即将退出
     exit
+fi
+初步处理文本消息
+if [ "$need_priv" == "true" ]; then
+    massege="#$numfinal"
+else
+    massege="#$numfinal @{uin:$id,nick:,who:1}"
 fi
 processsend
 echo "来自$id的消息,内部编号$numnext,处理完毕"
