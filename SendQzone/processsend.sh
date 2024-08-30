@@ -164,11 +164,9 @@ postprocess(){
         output=$(eval $postcommand)
 
         if echo "$output" | grep -q "Failed to publish."; then
-            if [ $attempt -lt 1 ]; then
+            if [ $attempt -lt $max_attempts ]; then
                 renewqzoneloginauto $1
-            fi
-
-            if [ $attempt -eq $max_attempts ]; then
+            else
                 sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1"
                 sendmsggroup "发送\"@出错账号 手动重新登陆\"以手动重新登陆",完毕后请重新发送审核指令
                 askforintro
