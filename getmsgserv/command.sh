@@ -66,6 +66,15 @@ case $object in
         renewqzoneloginauto $self_id
         sendmsggroup 自动登录QQ空间尝试完毕
         ;;
+    "设定编号")
+        if [[ $command =~ ^[0-9]+$ ]]; then
+            echo $command > ./numfinal.txt
+            sendmsggroup 外部编号已设定为$command
+        else
+            echo "Error: arg is not a pure number."
+            sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
+        fi
+        ;;
     "帮助")
         help='全局指令:
 语法: @本账号/次要账号 指令
@@ -73,6 +82,8 @@ case $object in
 手动重新登录:扫码登陆QQ空间
 自动重新登录:尝试自动登录qq空间
 (请注意是登录不是登陆)
+设定编号
+用法：设定编号 xxx （xxx是你希望下一条说说带有的外部编号，必须是纯数字）
 帮助:查看这个帮助列表
 审核指令:
 语法: @本账号 内部编号 指令
