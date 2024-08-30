@@ -27,7 +27,6 @@ waitforfilechange(){
         fi
     done
 }
-
 sendimagetoqqgroup() {
     # 设置文件夹路径
     folder_path="$(pwd)/getmsgserv/post-step5/$numnext"
@@ -141,7 +140,6 @@ askforintro(){
         sleep 5
     done
 }
-
 postprocess(){
     if [ ! -f "./cookies-$1.json" ]; then
         echo "Cookies file does not exist. Executing relogin script."
@@ -181,7 +179,6 @@ postprocess(){
         attempt=$((attempt+1))
     done
 }
-
 postqzone(){
     sendqueue=("${goingtosendid[@]}")
     for qqid in "${sendqueue[@]}"; do
@@ -211,7 +208,6 @@ postqzone(){
         processsend
     fi
 }
-
 renewqzoneloginauto(){
     if [[ "$disable_qzone_autologin" == "true" ]]; then
         renewqzonelogin $1
@@ -225,7 +221,6 @@ renewqzoneloginauto(){
         fi
     fi
 }
-
 renewqzonelogin(){
     rm ./cookies-$self_id.json
     rm ./qrcode.png
@@ -238,8 +233,6 @@ renewqzonelogin(){
     sleep 2
     sleep 60
 }
-
-
 sendmsggroup(){
     msg=$1
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
@@ -254,7 +247,6 @@ sendmsgcommugroup(){
     cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$commgroup_id&message=$encoded_msg\""
     eval $cmd
 }
-
 sendmsgpriv(){
     msg=$2
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
@@ -262,7 +254,6 @@ sendmsgpriv(){
     cmd="curl \"http://127.0.0.1:$port/send_private_msg?user_id=$1&message=$encoded_msg\""
     eval $cmd
 }
-
 processsend(){
     echo waitingforsender...
     sleep 120
@@ -308,26 +299,24 @@ processsend(){
     else
         sendmsggroup 有需要审核的消息
     fi
-
+    content=$(<"$id_file")
+    sendmsggroup "原始信息: $content"
     if [ "$safemsg" = "true" ]; then
         sendmsggroup AI审核判定安全
     elif [ "$safemsg" = "false" ]; then
         sendmsggroup AI审核判定不安全
     fi
-    content=$(<"$id_file")
-    sendmsggroup "原始信息: $content"
     sendimagetoqqgroup
     numfinal=$(cat ./numfinal.txt)
     sendmsggroup 内部编号$numnext，外部编号$numfinal
     echo askforgroup...
     askforintro
 }
-
 mixid=$1
 id="${mixid%-*}"
 self_id="${mixid#*-}"
 numnext=$2
-echo "开始处理来自$id的消息, 账号$self_id,内部编号$numnext"
+echo "开始处理来自$id的消息,账号$self_id,内部编号$numnext"
 if [[ "$self_id" == "$mainqqid" ]]; then
     port=8083
 elif [[ "$self_id" == "$minorqqid" ]]; then
@@ -337,4 +326,4 @@ else
     exit
 fi
 processsend
-echo "来自$id的消息,内部编号$numnext 处理完毕"
+echo "来自$id的消息,内部编号$numnext,处理完毕"
