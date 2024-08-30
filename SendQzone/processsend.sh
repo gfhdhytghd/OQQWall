@@ -191,8 +191,8 @@ postqzone(){
     sendmsgpriv $id "$numfinal 已发送(系统自动发送，请勿回复)"
     numfinal=$((numfinal + 1))
     echo $numfinal > ./numfinal.txt
+    id_file=./getmsgserv/rawpost/$id-$self_id.json
     current_mod_time_id=$(stat -c %Y "$id_file")
-    current_mod_time_privmsg=$(stat -c %Y "./getmsgserv/all/priv_post.json")
     echo "'current-mod-time-id:'$current_mod_time_id"
     echo "'last-mod-time-id:'$last_mod_time_id"
     if [ "$current_mod_time_id" -eq "$last_mod_time_id" ]; then
@@ -202,6 +202,10 @@ postqzone(){
     else
         rm -rf ./getmsgserv/post-step5/$numnext
         echo "过程中有新消息:needreprocess:$id"
+        goingtosendid=("$mainqqid")
+        IFS=',' read -ra minorqqids <<< "$minorqqid"
+        for qqid in "${minorqqids[@]}"; do
+        goingtosendid+=("$qqid")
         getnumnext
         processsend
     fi
