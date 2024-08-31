@@ -75,6 +75,19 @@ case $object in
             sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
         fi
         ;;
+    "待处理")
+        numbpending=$(find ./getmsgserv/post-step5 -mindepth 1 -maxdepth 1 -type d -exec basename {} \;)
+        if [ -z $numbpending ]; then
+            sendmsggroup 没有待处理项目
+        else
+            sendmsggroup "待处理项目:
+$numbpending"
+        fi
+        ;;
+    "删除待处理")
+        rm -rf ./getmsgserv/post-step5/*
+        sendmsggroup 已清空待处理列表
+        ;;
     "帮助")
         help='全局指令:
 语法: @本账号/次要账号 指令
@@ -82,6 +95,10 @@ case $object in
 手动重新登录:扫码登陆QQ空间
 自动重新登录:尝试自动登录qq空间
 (请注意是登录不是登陆)
+待处理：检查当前等待处理的投稿
+（此方法通过监测待处理列表中的文件夹实现，如果你在存在待处理项目的情款下重启了系统，则待处理会回应但是你实际上无法对这些项目进行操作，此时建议使用"删除待处理"指令来清空待处理列表，然后手动处理这些未发送的稿件，再执行"设定编号"）
+删除待处理：
+清空待处理列表，相当于对列表中的所有项目执行"删"审核指令
 设定编号
 用法：设定编号 xxx （xxx是你希望下一条说说带有的外部编号，必须是纯数字）
 帮助:查看这个帮助列表
