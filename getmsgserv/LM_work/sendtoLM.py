@@ -39,7 +39,7 @@ with open(input_file_path, 'r', encoding='utf-8') as infile:
 
 # Process the "messages" field without deleting "sender" and "notregular"
 cleaned_messages = []
-fields_to_remove = ['message_id', 'file', 'subType', 'file_id', 'file_size']
+fields_to_remove = ['message_id', 'file', 'file_id', 'file_size']
 
 # Access the list under "messages"
 for item in data.get('messages', []):

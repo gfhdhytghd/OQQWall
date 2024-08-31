@@ -13,7 +13,7 @@ for ((i=0; i<$pages; i++)); do
 done
 existing_files=$(ls "$folder" | wc -l)
 next_file_index=$existing_files
-jq -r '.messages[].message[] | select(.type=="image") | .data.url' "$jsonfile" | while read -r url; do
+jq -r '.messages[].message[] | select(.type == "image" and .data.subType != 1) | .data.url' "$jsonfile" | while read -r url; do
     # 下载文件并命名
     formatted_index=$(printf "%02d" $next_file_index)
     curl -o "$folder/$input-${formatted_index}" "$url"

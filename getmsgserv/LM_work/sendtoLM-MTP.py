@@ -94,7 +94,7 @@ def main():
 
     # Process the input data and remove unwanted fields
     cleaned_messages = []
-    fields_to_remove = ['message_id', 'file', 'subType', 'file_id', 'file_size']
+    fields_to_remove = ['message_id', 'file', 'file_id', 'file_size']
 
     for item in data.get('messages', []):
         for field in fields_to_remove:

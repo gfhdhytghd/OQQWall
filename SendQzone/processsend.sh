@@ -120,23 +120,38 @@ askforintro(){
                     python3 ./getmsgserv/HTMLwork/gotohtml.py "$numnext"
                     ./getmsgserv/HTMLwork/gotopdf.sh "$numnext"
                     ./getmsgserv/HTMLwork/gotojpg.sh "$numnext"
+                    json_path="./getmsgserv/post-step2/$numnext.json"
+                    need_priv=$(jq -r '.needpriv' "$json_path")
+                    numfinal=$(cat ./numfinal.txt)
+                    if [[ "$need_priv" == "false" ]]; then
+                        massege="#$numfinal @{uin:$id,nick:,who:1}"
+                    else
+                        massege="#$numfinal"
+                    fi
                     sendimagetoqqgroup
                     sendmsggroup $numnext
                     echo askforgroup...
                     askforintro
                     ;;
                 评论)
-                    if [ "$need_priv" == "true" ]; then
-                        massege="#$numfinal"
-                    else
+                    if [[ "$need_priv" == "false" ]]; then
                         massege="#$numfinal @{uin:$id,nick:,who:1}"
+                    else
+                        massege="#$numfinal"
                     fi
                     if [ -n "$flag" ]; then
                         massege="${massege}"$'\n'"${flag}"
                         sendmsggroup "增加评论后的文本：\n $massege"
                         askforintro
                     else
-                        sendmsggroup "没有找到评论内容，发送 @本账号 帮助 以查看帮助"
+                        if [[ "$need_priv" == "false" ]]; then
+                            massege="#$numfinal @{uin:$id,nick:,who:1}"
+                        else
+                            massege="#$numfinal"
+                        fi
+                        sendmsggroup "没有找到评论内容，文本内容已还原"
+                        sendmsggroup "当前文本：\n $massege"
+                    fi
                     ;;
                 *)
                     sendmsggroup "没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助"
@@ -333,11 +348,14 @@ else
     echo 消息来自未配置的qq账户，请编辑oqqwall.config或检查当前onebot server登录的账号，稿件处理进程即将退出
     exit
 fi
-初步处理文本消息
-if [ "$need_priv" == "true" ]; then
-    massege="#$numfinal"
-else
+#初步处理文本消息
+json_path="./getmsgserv/post-step2/$numnext.json"
+need_priv=$(jq -r '.needpriv' "$json_path")
+numfinal=$(cat ./numfinal.txt)
+if [[ "$need_priv" == "false" ]]; then
     massege="#$numfinal @{uin:$id,nick:,who:1}"
+else
+     massege="#$numfinal"
 fi
 processsend
 echo "来自$id的消息,内部编号$numnext,处理完毕"
