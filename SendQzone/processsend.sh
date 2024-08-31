@@ -58,7 +58,6 @@ askforintro(){
     sendmsggroup 请发送指令
     # 初始化文件的上次修改时间
     waitforfilechange "./qqBot/command/commands.txt"
-    sendmsggroup 已收到指令
 
     while true; do
         mapfile -t lines < "$command_file"
@@ -71,6 +70,7 @@ askforintro(){
             flag=$(echo $line | awk '{print $3}')
 
             if [[ "$number" -eq "$numnext" ]]; then
+                sendmsggroup 已收到指令
                 sed -i "${i}d" "$command_file"
                 found=true
                 numfinal=$(cat ./numfinal.txt)
@@ -301,6 +301,14 @@ processsend(){
             sendmsggroup LLM处理错误，请检查相关信息
         fi
     done
+    json_path="./getmsgserv/post-step2/$numnext.json"
+    need_priv=$(jq -r '.needpriv' "$json_path")
+    numfinal=$(cat ./numfinal.txt)
+    if [[ "$need_priv" == "false" ]]; then
+        massege="#$numfinal @{uin:$id,nick:,who:1}"
+    else
+        massege="#$numfinal"
+    fi
     echo LM-workdone
     json_file=./getmsgserv/post-step2/${numnext}.json
     isover=$(jq -r '.isover' "$json_file")
@@ -323,7 +331,7 @@ processsend(){
         sendmsggroup 有需要审核的消息
     fi
     content=$(<"$id_file")
-    sendmsggroup "原始信息: $content"
+    sendmsggroup "原始信息: $content /n $numnext"
     if [ "$safemsg" = "true" ]; then
         sendmsggroup AI审核判定安全
     elif [ "$safemsg" = "false" ]; then
@@ -349,13 +357,5 @@ else
     exit
 fi
 #初步处理文本消息
-json_path="./getmsgserv/post-step2/$numnext.json"
-need_priv=$(jq -r '.needpriv' "$json_path")
-numfinal=$(cat ./numfinal.txt)
-if [[ "$need_priv" == "false" ]]; then
-    massege="#$numfinal @{uin:$id,nick:,who:1}"
-else
-     massege="#$numfinal"
-fi
 processsend
 echo "来自$id的消息,内部编号$numnext,处理完毕"
