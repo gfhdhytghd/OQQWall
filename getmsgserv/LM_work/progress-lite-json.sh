@@ -19,7 +19,7 @@ jq --arg pwd_path "$pwd_path" 'map(
             {
               type: "text",
               data: { 
-                text: ("<img src=\"file://\($pwd_path)/getmsgserv/LM_work/face/s" + .data.id + ".png\" alt=\"cqface:" + .data.id + "\" class=\"cqface\">")
+                text: ("<img src=\"file://\($pwd_path)/getmsgserv/LM_work/face/" + .data.id + ".png\"class=\"cqface\">")
               }
             }
           else
