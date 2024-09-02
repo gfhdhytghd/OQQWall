@@ -24,12 +24,13 @@ if json_data.get("needpriv") == "true" and json_data.get("safemsg") == "true":
 
 # 生成 HTML 内容
 html_template = """
+
 <!DOCTYPE html>
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{nickname}</title>
+    <title>朔望月</title>
     <style>
         @page {{
           margin: 0!important;
@@ -82,17 +83,27 @@ html_template = """
             display: block;
             background-color: #ffffff;
             border-radius: 10px;
-            padding: 10px;
+            padding: 7px;
             margin-bottom: 10px;
             word-break: break-word;
             max-width: fit-content;
+            line-height: 1.5;
+        }}
+        .cqface {{
+            vertical-align: middle; 
+            width: 20px; 
+            height: 20px;
+            margin: 0 0 0 0px!important;
+            display: inline!important;
+            padding:0px!important;
+            transform: translateY(-0.1em);
         }}
         .content img, .content video {{
             display: block;
             border-radius: 10px;
             padding: 0px;
-            margin-top: 10px !important;
-            margin-bottom: 10px !important;
+            margin-top: 10px;
+            margin-bottom: 10px;
             max-width: 50%;
             max-height: 300px; 
         }}

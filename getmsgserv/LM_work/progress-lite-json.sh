@@ -9,11 +9,24 @@ temp_json=./getmsgserv/post-step1/temp_${input}.json
 # 创建目标文件夹
 rm -rf "$folder"
 mkdir -p "$folder"
+pwd_path=$(pwd)
 
-# 第一步：处理 JSON，删除不符合条件的类型，并合并 text 类型的数据
-jq 'map(
-      if .message then
-        .message |= map(select(.type == "text" or .type == "image" or .type == "video")) |
+# 处理 JSON，删除不符合条件的类型，并合并 text 类型的数据
+jq --arg pwd_path "$pwd_path" 'map(
+       if .message then
+        .message |= map(
+          if .type == "face" then
+            {
+              type: "text",
+              data: { 
+                text: ("<img src=\"file://\($pwd_path)/getmsgserv/LM_work/face/s" + .data.id + ".png\" alt=\"cqface:" + .data.id + "\" class=\"cqface\">")
+              }
+            }
+          else
+            .
+          end
+        ) |
+        .message |= map(select(.type == "text" or .type == "image" or .type == "video" )) |
         .message |= if all(.type == "text") then
                       [{data: {text: (map(.data.text) | join(""))}, type: "text"}]
                     else
@@ -24,14 +37,13 @@ jq 'map(
         .
       end
     )' "$jsonfile" > "$temp_json"
-
 # 判断是否有不符合要求的消息类型
-has_irregular_types=$(jq '[.[] | select(.message != null) | .message[].type] | any(. != "text" and . != "image" and . != "video")' "$jsonfile")
+has_irregular_types=$(jq '[.[] | select(.message != null) | .message[].type] | any(. != "text" and . != "image" and . != "video" and . != "face")' "$jsonfile")
 
 # 获取当前工作目录
 pwd_path=$(pwd)
 
-# 第二步：从处理后的 JSON 文件中读取 URL，并下载文件，同时替换 URL 为本地路径
+# 从处理后的 JSON 文件中读取 URL，并下载文件，同时替换 URL 为本地路径
 next_file_index=1
 jq -c '.[] | select(.message != null) | .message[] | select(.type == "image")' "$temp_json" | while read -r image_item; do
     # 提取 URL
@@ -61,7 +73,7 @@ jq -c '.[] | select(.message != null) | .message[] | select(.type == "image")' "
     next_file_index=$((next_file_index + 1))
 done
 
-# 第三步：输出最终处理结果到指定文件
+# 输出最终处理结果到指定文件
 jq --arg notregular "$([ "$has_irregular_types" == "true" ] && echo "true" || echo "false")" \
    '{ sender: .[0].sender, notregular: $notregular, messages: map(select(.message != null)) }' "$temp_json" > "$output"
 rm $temp_json
