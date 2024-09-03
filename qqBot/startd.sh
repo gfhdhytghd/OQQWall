@@ -48,7 +48,9 @@ while true; do
     if [ "$current_time" == "07:00" ]; then
         # 运行 Python 脚本
         python3 ./qqBot/likeeveryday.py
-
+        pkill -g $(pgrep -f "python3 ./getmsgserv/serv.py") 
+        python3 ./getmsgserv/serv.py &
+        echo serv.py 已重启
         # 等待 24 小时，直到第二天的 7 点
         sleep 86340
     else

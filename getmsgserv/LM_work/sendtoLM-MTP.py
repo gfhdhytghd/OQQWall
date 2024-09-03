@@ -25,49 +25,50 @@ def fetch_response_in_parts(prompt, max_rounds=5):
     full_response = ""
     round_count = 0
     is_complete = False
+    previous_output = ""
 
     while not is_complete and round_count < max_rounds:
         # Generate a random seed
-        #seed = random.randint(1, 10000)
-        seed = 1234
+        seed = 4726
         print(f"Round {round_count + 1} - Using seed: {seed}")
 
         response = Generation.call(
             model='qwen2-72b-instruct',
             messages=messages,
-            seed=1234,
+            seed=seed,
             result_format='message',  # Return response in "message" format
-            max_tokens=3000,
+            max_tokens=2500,
             temperature=0.50,
             repetition_penalty=1.0
         )
 
         if response.status_code == HTTPStatus.OK:
             output_content = response.output.get('choices', [])[0].get('message', {}).get('content', '')
-
-            if round_count > 0:
-                # Only process the output content from the second round onwards
-                start_index = output_content.find("```json")
+            print(output_content)
+            if previous_output:
+                # Get the last 100 characters of the previous output
+                overlap_content = previous_output[-100:]
+                # Search for these 100 characters within the first 500 characters of the current output
+                start_index = output_content[:500].find(overlap_content)
                 if start_index != -1:
-                    end_index = start_index
-                    while end_index < len(output_content):
-                        if '\u4e00' <= output_content[end_index] <= '\u9fff':  # Check for Chinese characters
-                            break
-                        end_index += 1
-                    output_content = output_content[:start_index] + output_content[end_index:]
+                    # If found, remove everything before this occurrence
+                    output_content = output_content[start_index + len(overlap_content):]
 
+            # Update the full response
             full_response += output_content
+            previous_output = output_content
 
             # Check if the response contains the ending indicator '\n```'
             if output_content.endswith('\n```'):
                 is_complete = True
             else:
-                # Add the last response as assistant message and prompt the model to continue
+                # Truncate the last 100 characters before adding to messages
+                truncated_output = output_content[:-100] if len(output_content) > 100 else output_content
                 messages.append({
                     'role': Role.ASSISTANT,
-                    'content': output_content
+                    'content': truncated_output
                 })
-                # This is the key part that explicitly prompts the model to continue
+                # Prompt the model to continue without repeating content
                 messages.append({'role': Role.USER, 'content': '接着上次停下的地方继续输出，不要重复之前的内容，不要重复sender和needpriv等内容，不要在开头重复一遍```json {"time": },{"message": [{"type": ,"data": {，不要在开头重复任何格式内容，直接接着上次结束的那个字继续'})
         else:
             print(f"Error in API call: {response.status_code}, {response.message}")
@@ -76,6 +77,34 @@ def fetch_response_in_parts(prompt, max_rounds=5):
         round_count += 1
 
     return full_response
+
+
+def insert_missing_commas(json_like_string):
+    # Regular expressions to detect where commas are likely missing
+    missing_comma_pattern = re.compile(r'(\})(\s*[\{\[])')
+    
+    # Insert commas where they are likely missing
+    corrected_json = missing_comma_pattern.sub(r'\1,\2', json_like_string)
+    
+    return corrected_json
+
+def clean_json_output(output_content):
+    try:
+        # Attempt to parse the JSON to ensure it's valid
+        parsed_output = json.loads(output_content)
+        # If the JSON is valid, reformat it to correct any issues with brackets
+        clean_output = json.dumps(parsed_output, ensure_ascii=False, indent=4)
+        return clean_output
+    except json.JSONDecodeError:
+        # If there's a decoding error, attempt to correct missing commas
+        corrected_json = insert_missing_commas(output_content)
+        try:
+            # Attempt to parse again after correction
+            parsed_output = json.loads(corrected_json)
+            return json.dumps(parsed_output, ensure_ascii=False, indent=4)
+        except json.JSONDecodeError:
+            # If it still fails, return the corrected string for manual inspection
+            return corrected_json
 
 def main():
     # Load the config and set up paths
@@ -87,6 +116,7 @@ def main():
 
     input_file_path = f'./getmsgserv/post-step1/{input_file}.json'
     output_file_path = f'./getmsgserv/post-step2/{output_file}.json'
+    output_file_path_error = f'./getmsgserv/post-step2/{output_file}_error.json'
 
     # Read input JSON file
     with open(input_file_path, 'r', encoding='utf-8') as infile:
@@ -151,7 +181,7 @@ def main():
         "      ],\n"
         "      \"time\": \n"
         "    }\n"
-        "  ]\n"
+        "  ],\n"
         "  \"why\": {\n"
         "  #在此填写你分段和填写各项目的依据与理由和原因\n"
         "   }\n"
@@ -160,7 +190,7 @@ def main():
 
     # Fetch the response in multiple rounds
     final_response = fetch_response_in_parts(prompt)
-
+    final_response = clean_json_output(final_response)
     # Parse and save the final response as JSON
     try:
         formatted_data = json.loads(final_response.strip('```json\n').strip('\n```'))
@@ -169,7 +199,9 @@ def main():
         print("处理完成，输出已保存到:", output_file_path)
     except json.JSONDecodeError as e:
         print(f"JSON解析错误: {e}\n返回内容: {final_response}")
-
+        with open(output_file_path_error, 'w', encoding='utf-8') as errorfile:
+            errorfile.write(final_response)
+        print("错误的JSON已保存到:", output_file_path_error)
 
 if __name__ == '__main__':
     main()

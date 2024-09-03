@@ -110,6 +110,7 @@ askforintro(){
                     ;;
                 拉黑)
                     sendmsggroup 不再接收来自$id的投稿
+                    rm -rf ./getmsgserv/post-step5/$numnext
                     ;;
                 匿)
                     sendmsggroup 尝试切换匿名状态...
