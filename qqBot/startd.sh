@@ -7,6 +7,7 @@ if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null
 then
     echo "serv.py is already running"
 else
+    source ./venv/bin/activate
     python3 ./getmsgserv/serv.py &
     echo "serv.py started"
 fi
@@ -46,9 +47,10 @@ while true; do
 
     # 检查是否为早上7点
     if [ "$current_time" == "07:00" ]; then
+        source ./venv/bin/activate
         # 运行 Python 脚本
         python3 ./qqBot/likeeveryday.py
-        pkill -g $(pgrep -f "python3 ./getmsgserv/serv.py") 
+        pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
         python3 ./getmsgserv/serv.py &
         echo serv.py 已重启
         # 等待 24 小时，直到第二天的 7 点
