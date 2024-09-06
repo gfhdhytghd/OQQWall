@@ -16,7 +16,7 @@ check_variable() {
 }
 # 检查关键变量是否设置
 check_variable "apikey" "$apikey"
-
+http-serv-port
 # 定义 JSON 文件名
 json_file="AcountGroupcfg.json"
 errors=()  # 用于存储所有错误信息

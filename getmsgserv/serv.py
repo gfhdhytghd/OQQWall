@@ -177,7 +177,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             with open(priv_post_path, 'w', encoding='utf-8') as f:
                 json.dump(priv_post_data, f, ensure_ascii=False, indent=4)
 
-def run(server_class=HTTPServer, handler_class=RequestHandler, port=8082):
+def run(server_class=HTTPServer, handler_class=RequestHandler):
+    port=int(config.get('http-serv-port'))
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
     print(f'Starting httpd server on port {port}...')
