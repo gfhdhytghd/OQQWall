@@ -49,7 +49,7 @@ curl -o napcat.sh https://fastly.jsdelivr.net/gh/NapNeko/NapCat-Installer@master
 
 然后启动napcat,扫码登陆主账号，最好勾选下次无需扫码
 
-然后请参考napcat或LLonebot的官方文档,设定http监听端口8083,http-post端口8082
+然后请参考napcat或LLonebot的官方文档,开启http和http-post通讯，设定http监听端口和http-post端口
 
 注:你可能需要自己debug一下napcat才能用,你可以在填写完OQQWall配置文件(见下文)之后单独启动serv.py和napcat来监测
 <br/>注：想要换端口，请到文件夹内所有的.sh和.py文件中，用文本编辑器进行查找替换
@@ -86,24 +86,11 @@ pip install selenium
 <br/>说明:
 ```
 #所有东西请填到双引号里
-
-mainqq-id="xxx"
-#填入校园墙主账号qq号
-
-minorqq-id=""
-#在此填写你的副号的qq号，不需要多账号协同运营则留空
-
-management-group-id="xxx"
-#填入管理群群号
-
+http-serv-port=
+#填入你为onebot设定的http-post端口
 apikey="sk-"
 #填入qwen api key
 #sk-xxxxxx,"sk"也要填进来
-
-communicate-group=""
-这是ChatBot运行的群号,不需要chaatbot功能请不要填写,留一个空的引号在那即可
-auto_sync_communicate_group_id=true/false
-是否自动同步communicate-group群号到QChatGPT,在你需要添加多于一项到白名单的情况下需要关闭此功能
 disable_qzone_autologin=false
 #是否允许自动登录,启用后系统将在说说发送错误时尝试自动登录
 enable_selenium_autocorrecttag_onstartup=true/false

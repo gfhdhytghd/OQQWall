@@ -1,7 +1,10 @@
 #!/bin/bash
 LLonebot=$(grep 'use_LLOnebot' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-mainqqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+#commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+#mainqqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+json_content=$(cat ./AcountGroupcfg.json)
+runidlist=($(echo "$json_content" | jq -r '.[] | .mainqqid, .minorqqid[]'))
+
 
 if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null
 then
@@ -15,10 +18,13 @@ fi
 # Check if the OneBot server process is running
 if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null
 then
-    echo "OneBot is already running"
+    pkill qq
 else
     if [[ "$LLonebot" == false ]]; then
-    nohup xvfb-run -a qq --no-sandbox -q $mainqqid &
+    for qqid in "${runidlist[@]}"; do
+        echo "Starting QQ process for ID: $qqid"
+        xvfb-run -a qq --no-sandbox -q "$qqid" &
+    done
     echo "OneBot starting"
     elif [[ "$LLonebot" == true ]]; then
     nohup qq &
@@ -28,18 +34,18 @@ else
     fi
 fi
 
-if [ -n "$commgroup_id" ]; then 
-    echo "commgroup_id不为空,chatbot启动" 
-    if pgrep -f "./main.py" > /dev/null;then
-            echo "ChatBot is already running"
-        else
-            source ./venv/bin/activate
-            cd ./qqBot/QChatGPT/
-            python3 ./main.py &
-            cd -
-            echo "OneBot starting"
-    fi
-fi
+#if [ -n "$commgroup_id" ]; then 
+#    echo "commgroup_id不为空,chatbot启动" 
+#    if pgrep -f "./main.py" > /dev/null;then
+#            echo "ChatBot is already running"
+#        else
+#            source ./venv/bin/activate
+#            cd ./qqBot/QChatGPT/
+#            python3 ./main.py &
+#            cd -
+#            echo "OneBot starting"
+#    fi
+#fi
 
 while true; do
     # 获取当前小时和分钟
@@ -49,7 +55,10 @@ while true; do
     if [ "$current_time" == "07:00" ]; then
         source ./venv/bin/activate
         # 运行 Python 脚本
-        python3 ./qqBot/likeeveryday.py
+        for qqid in "${runidlist[@]}"; do
+            echo "Like everyone with ID: $qqid"
+            python3 ./qqBot/likeeveryday.py $qqid
+        done
         pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
         python3 ./getmsgserv/serv.py &
         echo serv.py 已重启

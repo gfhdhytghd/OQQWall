@@ -1,3 +1,4 @@
+#!python3
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 import subprocess
@@ -47,8 +48,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         # 处理不同类型的通知
         if data.get('notice_type') == 'friend_recall':
             self.handle_friend_recall(data)
-        elif data.get('notice_type') == 'group_increase':
-            self.handle_group_increase(data)
+        #elif data.get('notice_type') == 'group_increase':
+        #    self.handle_group_increase(data)
         else:
             self.handle_default(data)
     
@@ -70,18 +71,17 @@ class RequestHandler(BaseHTTPRequestHandler):
                 
                 print('已删除')
 
-    def handle_group_increase(self, data):
-        user_id = data.get('user_id')
-        group_id = data.get('group_id')
-        commugroupid = int(config.get('communicate-group'))
-        group_id = int(group_id)
-
-        if group_id == commugroupid:
-            print ("serv:是社交群，LLM发送欢迎消息")
-            commu_text = '欢迎新成员入群'
-            commu_file_path = os.path.join(COMMU_DIR, 'commugroup.txt')
-            with open(commu_file_path, 'a', encoding='utf-8') as f:
-                f.write(commu_text + '\n')
+    #def handle_group_increase(self, data):
+    #    user_id = data.get('user_id')
+    #    group_id = data.get('group_id')
+    #    commugroupid = int(config.get('communicate-group'))
+    #    group_id = int(group_id)
+    #    if group_id == commugroupid:
+    #        print ("serv:是社交群，LLM发送欢迎消息")
+    #        commu_text = '欢迎新成员入群'
+    #        commu_file_path = os.path.join(COMMU_DIR, 'commugroup.txt')
+    #        with open(commu_file_path, 'a', encoding='utf-8') as f:
+    #            f.write(commu_text + '\n')
 
     def handle_default(self, data):
         # 记录到 ./all 文件夹
@@ -103,16 +103,21 @@ class RequestHandler(BaseHTTPRequestHandler):
     def record_group_command(self, data):
         message_type = data.get('message_type')
         if message_type == 'group':
-            groupid = int(config.get('management-group-id'))
-            commugroupid = int(config.get('communicate-group'))
-            qqid = config.get('mainqq-id')
-            group_id = int(data.get('group_id'))
+            #groupid = int(config.get('management-group-id'))
+            # 弃用
+            #commugroupid = int(config.get('communicate-group'))
+            # 读取JSON文件
+            with open('./AcountGroupcfg.json', 'r') as file:
+                cfgdata = json.load(file)
+            # 提取所有的mangroupid
+            mangroupid_list = [group['mangroupid'] for group in cfgdata.values()]
+            group_id = str(data.get('group_id'))
             sender = data.get('sender', {})
             raw_message = data.get('raw_message', '')
             self_id = data.get('self_id')
             self_id = str(self_id)
             
-            if (group_id == groupid and sender.get('role') == 'admin' and raw_message.startswith(f"[CQ:at,qq={self_id}")):
+            if (group_id in mangroupid_list and sender.get('role') == 'admin' and raw_message.startswith(f"[CQ:at,qq={self_id}")):
                 print("serv:有指令消息")
                 command_text = re.sub(r'\[.*?\]', '', raw_message).strip()
                 print("指令:",command_text)
@@ -122,12 +127,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                 except subprocess.CalledProcessError as e:
                     print(f"Command execution failed: {e}")
 
-            if (group_id == commugroupid and raw_message.startswith(f"[CQ:at,qq={qqid}")):
-                print("serv:有LLM问答消息")
-                commu_text = re.sub(r'\[.*?\]', '', raw_message).strip()
-                commu_file_path = os.path.join(COMMU_DIR, 'commugroup.txt')
-                with open(commu_file_path, 'a', encoding='utf-8') as f:
-                    f.write('\n' + commu_text)
+            #已删除此功能
+            #if (group_id == commugroupid and raw_message.startswith(f"[CQ:at,qq={qqid}")):
+            #    print("serv:有LLM问答消息")
+            #    commu_text = re.sub(r'\[.*?\]', '', raw_message).strip()
+            #    commu_file_path = os.path.join(COMMU_DIR, 'commugroup.txt')
+            #    with open(commu_file_path, 'a', encoding='utf-8') as f:
+            #        f.write('\n' + commu_text)
 
     def record_private_message(self, data):
         message_type = data.get('message_type')

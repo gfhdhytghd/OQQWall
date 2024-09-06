@@ -1,13 +1,55 @@
-groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-mainqqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-minorqqid=$(grep 'minorqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
 use_selenium_to_generate_qzone_cookies=$(grep 'use_selenium_to_generate_qzone_cookies' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 disable_qzone_autologin=$(grep 'disable_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+mixid=$1
+id="${mixid%-*}"
+self_id="${mixid#*-}"
+numnext=$2
+# 输入参数ID
+input_id="${mixid#*-}"
+# JSON 文件路径
+json_file="./AcountGroupcfg.json"
+# 检查输入是否为空
+if [ -z "$input_id" ]; then
+  echo "请提供mainqqid或minorqqid。"
+  exit 1
+fi
+# 使用 jq 查找输入ID所属的组信息
+group_info=$(jq -r --arg id "$input_id" '
+  .[] | select(.mainqqid == $id or (.minorqqid[]? == $id))
+' "$json_file")
+# 检查是否找到了匹配的组
+if [ -z "$group_info" ]; then
+  echo "未找到ID为 $input_id 的相关信息。"
+  exit 1
+fi
+# 提取各项信息并存入变量
+groupid=$(echo "$group_info" | jq -r '.mangroupid')
+mainqqid=$(echo "$group_info" | jq -r '.mainqqid')
+minorqqid=$(echo "$group_info" | jq -r '.minorqqid[]')
+mainqq_http_port=$(echo "$group_info" | jq -r '.mainqq_http_port')
+minorqq_http_ports=$(echo "$group_info" | jq -r '.minorqq_http_port[]')
+# 初始化端口变量
+port=""
+# 检查输入ID是否为mainqqid
+if [ "$input_id" == "$mainqqid" ]; then
+  port=$mainqq_http_port
+else
+  # 遍历 minorqqid 数组并找到对应的端口
+  i=0
+  for minorqqid in $minorqqid; do
+    if [ "$input_id" == "$minorqqid" ]; then
+      port=$(echo "$minorqq_http_ports" | sed -n "$((i+1))p")
+      break
+    fi
+    ((i++))
+  done
+fi
 goingtosendid=("$mainqqid")
+# 将minorqqid解析为数组并添加到goingtosendid
 IFS=',' read -ra minorqqids <<< "$minorqqid"
 for qqid in "${minorqqids[@]}"; do
     goingtosendid+=("$qqid")
@@ -223,6 +265,7 @@ postqzone(){
     else
         rm -rf ./getmsgserv/post-step5/$numnext
         echo "过程中有新消息:needreprocess:$id"
+        goingtosendid=""
         goingtosendid=("$mainqqid")
         IFS=',' read -ra minorqqids <<< "$minorqqid"
         for qqid in "${minorqqids[@]}"; do
@@ -344,19 +387,7 @@ processsend(){
     echo askforgroup...
     askforintro
 }
-mixid=$1
-id="${mixid%-*}"
-self_id="${mixid#*-}"
-numnext=$2
 echo "开始处理来自$id的消息,账号$self_id,内部编号$numnext"
-if [[ "$self_id" == "$mainqqid" ]]; then
-    port=8083
-elif [[ "$self_id" == "$minorqqid" ]]; then
-    port=8084
-else
-    echo 消息来自未配置的qq账户，请编辑oqqwall.config或检查当前onebot server登录的账号，稿件处理进程即将退出
-    exit
-fi
 #初步处理文本消息
 processsend
 echo "来自$id的消息,内部编号$numnext,处理完毕"

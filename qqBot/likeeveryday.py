@@ -1,7 +1,7 @@
 import requests
-
+port = sys.argv[1]
 # 请求 URL
-url = "http://127.0.0.1:8083"
+url = "http://127.0.0.1:port"
 
 # 获取好友列表
 response = requests.post(f"{url}/get_friend_list")
@@ -11,7 +11,7 @@ if friend_list["status"] == "ok" and friend_list["retcode"] == 0:
     for friend in friend_list["data"]:
         user_id = friend["user_id"]
         
-        # 为每个好友发送10个赞
+        # 为每个好友发送20个赞
         like_payload = {
             "user_id": user_id,
             "times": 20
