@@ -102,6 +102,30 @@ use_LLOnebot=true/false
 max_attempts_qzone_autologin=3
 #最大qq空间发送尝试次数,自动登录超过次数限制后将切换为手动登陆
 ```
+打开程序文件夹下的AcountGroupcfg.json,按说明填入数据
+**⚠️注意，配置文件不可以留空行或者加注释⚠️**
+```
+{
+  "MethGroup": {
+  #默认组名，可以改成你喜欢的
+    "mangroupid":"xxx",
+    #管理群群号
+    "mainqqid": "",
+    #主账号QQ号
+    "mainqq_http_port":"xxx",
+    #主账号http端口
+    "minorqqid": [
+      ""
+    ],
+    副账号qq号（不需要的留空即可）
+    "minorqq_http_port":[
+      "xxx"
+    ]
+    副账号http端口（不需要的留空即可）
+  }
+}
+```
+如果你需要更多账号组和多账号协同运营功能，请查看：[多账号协同运营](./README_mutipleqq.md)
 
 启动主程序
 <br/>打开QQ,登陆主账号

@@ -9,6 +9,10 @@ OQQWall系统在0.7.0版本加入了对于完整账号组配置协同运营的�
 AcountGroupcfg.json遵守标准json语法
 想要增加更多副号，你需要填写minorqq_http_port，你可以在一个账号组中添加多个副号，中间用逗号隔开即可
 想要增加一个组，你只需要多写一个Group表（注意每个组的名字不能相同），然后添上不同的qqid和port
+minorqq_http_port与minorqqid按照填写顺序对应，需要保证数量一致，顺序正确
+
+例子：
+```
 {
     "MethGroup": {
       "mangroupid":"12345678",
@@ -30,11 +34,12 @@ AcountGroupcfg.json遵守标准json语法
         “45678909876”
       ],
       "minorqq_http_port":[
-        "8086"
+        "8086"，
+        “8087”
       ]
     }，
 }
-
+```
 ## 其他使用提示
 无论哪个账号接受到投稿消息，投稿审核消息都将由主账号发送到群中
 审核指令只能通过 @主账号 来发送
