@@ -1,0 +1,13 @@
+{
+    "MethGroup": {
+      "mangroupid":"",
+      "mainqqid": "",
+      "mainqq_http_port":"",
+      "minorqqid": [
+        ""
+      ],
+      "minorqq_http_port":[
+        ""
+      ]
+    }
+}
