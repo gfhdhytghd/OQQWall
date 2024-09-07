@@ -28,11 +28,11 @@ if [ -z "$group_info" ]; then
 fi
 # 提取各项信息并存入变量
 groupname=$(echo "$group_info" | jq -r '.key')
-groupid=$(echo "$group_info" | jq -r '.mangroupid')
-mainqqid=$(echo "$group_info" | jq -r '.mainqqid')
-minorqqid=$(echo "$group_info" | jq -r '.minorqqid[]')
-mainqq_http_port=$(echo "$group_info" | jq -r '.mainqq_http_port')
-minorqq_http_ports=$(echo "$group_info" | jq -r '.minorqq_http_port[]')
+groupid=$(echo "$group_info" | jq -r '.value.mangroupid')
+mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
+minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
+mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
+minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
 # 初始化端口变量
 port=""
 # 检查输入ID是否为mainqqid

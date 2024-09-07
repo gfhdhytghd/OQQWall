@@ -57,8 +57,8 @@ if [ -z "$group_info" ]; then
   exit 1
 fi
 groupname=$(echo "$group_info" | jq -r '.key')
-groupid=$(echo "$group_info" | jq -r '.mangroupid')
-mainqqid=$(echo "$group_info" | jq -r '.mainqqid')
+groupid=$(echo "$group_info" | jq -r '.value.mangroupid')
+mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
 case $object in
     [0-9]*)
         if [[ "$self_id" == "$mainqqid" ]]; then
