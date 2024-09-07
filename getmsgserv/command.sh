@@ -1,7 +1,4 @@
 #!/bin/bash
-groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-mainqqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
 litegettag=$(grep 'use_lite_tag_generator' oqqwall.config | cut -d'=' -f2 | tr -d '"')
@@ -44,7 +41,24 @@ echo obj:$object
 echo cmd:$command
 echo flag:$flag
 echo self_id:$self_id
-
+input_id="$self_id"
+json_file="./AcountGroupcfg.json"
+if [ -z "$input_id" ]; then
+  echo "请提供mainqqid或minorqqid。"
+  exit 1
+fi
+# 使用 jq 查找输入ID所属的组信息
+group_info=$(jq -r --arg id "$input_id" '
+  to_entries[] | select(.value.mainqqid == $id or (.value.minorqqid[]? == $id))
+' "$json_file")
+# 检查是否找到了匹配的组
+if [ -z "$group_info" ]; then
+  echo "未找到ID为 $input_id 的相关信息。"
+  exit 1
+fi
+groupname=$(echo "$group_info" | jq -r '.key')
+groupid=$(echo "$group_info" | jq -r '.mangroupid')
+mainqqid=$(echo "$group_info" | jq -r '.mainqqid')
 case $object in
     [0-9]*)
         if [[ "$self_id" == "$mainqqid" ]]; then
@@ -68,7 +82,7 @@ case $object in
         ;;
     "设定编号")
         if [[ $command =~ ^[0-9]+$ ]]; then
-            echo $command > ./numfinal.txt
+            echo $command > ./"$groupname"_numfinal.txt
             sendmsggroup 外部编号已设定为$command
         else
             echo "Error: arg is not a pure number."

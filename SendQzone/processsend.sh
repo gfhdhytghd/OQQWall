@@ -19,7 +19,7 @@ if [ -z "$input_id" ]; then
 fi
 # 使用 jq 查找输入ID所属的组信息
 group_info=$(jq -r --arg id "$input_id" '
-  .[] | select(.mainqqid == $id or (.minorqqid[]? == $id))
+  to_entries[] | select(.value.mainqqid == $id or (.value.minorqqid[]? == $id))
 ' "$json_file")
 # 检查是否找到了匹配的组
 if [ -z "$group_info" ]; then
@@ -27,6 +27,7 @@ if [ -z "$group_info" ]; then
   exit 1
 fi
 # 提取各项信息并存入变量
+groupname=$(echo "$group_info" | jq -r '.key')
 groupid=$(echo "$group_info" | jq -r '.mangroupid')
 mainqqid=$(echo "$group_info" | jq -r '.mainqqid')
 minorqqid=$(echo "$group_info" | jq -r '.minorqqid[]')
@@ -94,7 +95,7 @@ getnumnext(){
     numnow=$(cat ./numb.txt)
     numnext=$((numnow + 1))
     echo "$numnext" > ./numb.txt
-    echo "numnext=$numnext"
+    echo "$numnext=$numnext"
 }
 askforintro(){
     sendmsggroup 请发送指令
@@ -115,11 +116,11 @@ askforintro(){
                 sendmsggroup 已收到指令
                 sed -i "${i}d" "$command_file"
                 found=true
-                numfinal=$(cat ./numfinal.txt)
+                numfinal=$(cat ./"$groupname"_numfinal.txt)
                 case $status in
                 是)
                     postcmd="true"
-                    numfinal=$(cat ./numfinal.txt)
+                    numfinal=$(cat ./"$groupname"_numfinal.txt)
                     postqzone
                     echo 结束发件流程,是
                     ;;
@@ -127,9 +128,9 @@ askforintro(){
                     postcmd="false"
                     rm $id_file
                     rm -rf ./getmsgserv/post-step5/$numnext
-                    numfinal=$(cat ./numfinal.txt)
+                    numfinal=$(cat ./"$groupname"_numfinal.txt)
                     numfinal=$((numfinal + 1))
-                    echo $numfinal > ./numfinal.txt
+                    echo $numfinal > ./"$groupname"_numfinal.txt
                     sendmsgpriv $id "你的稿件已转交人工处理"
                     echo 结束发件流程,否
                     ;;
@@ -165,7 +166,7 @@ askforintro(){
                     ./getmsgserv/HTMLwork/gotojpg.sh "$numnext"
                     json_path="./getmsgserv/post-step2/$numnext.json"
                     need_priv=$(jq -r '.needpriv' "$json_path")
-                    numfinal=$(cat ./numfinal.txt)
+                    numfinal=$(cat ./"$groupname"_numfinal.txt)
                     if [[ "$need_priv" == "false" ]]; then
                         massege="#$numfinal @{uin:$id,nick:,who:1}"
                     else
@@ -253,7 +254,7 @@ postqzone(){
     done
     sendmsgpriv $id "$numfinal 已发送(系统自动发送，请勿回复)"
     numfinal=$((numfinal + 1))
-    echo $numfinal > ./numfinal.txt
+    echo $numfinal > ./"$groupname"_numfinal.txt
     id_file=./getmsgserv/rawpost/$id-$self_id.json
     current_mod_time_id=$(stat -c %Y "$id_file")
     echo "'current-mod-time-id:'$current_mod_time_id"
@@ -347,7 +348,7 @@ processsend(){
     done
     json_path="./getmsgserv/post-step2/$numnext.json"
     need_priv=$(jq -r '.needpriv' "$json_path")
-    numfinal=$(cat ./numfinal.txt)
+    numfinal=$(cat ./"$groupname"_numfinal.txt)
     if [[ "$need_priv" == "false" ]]; then
         massege="#$numfinal @{uin:$id,nick:,who:1}"
     else
@@ -382,7 +383,7 @@ processsend(){
         sendmsggroup AI审核判定不安全
     fi
     sendimagetoqqgroup
-    numfinal=$(cat ./numfinal.txt)
+    numfinal=$(cat ./"$groupname"_numfinal.txt)
     sendmsggroup 内部编号$numnext，外部编号$numfinal
     echo askforgroup...
     askforintro
