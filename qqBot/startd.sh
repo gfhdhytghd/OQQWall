@@ -16,23 +16,23 @@ else
 fi
 
 # Check if the OneBot server process is running
-if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null
-then
+if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null; then
     pkill qq
-else
-    if [[ "$LLonebot" == false ]]; then
-    for qqid in "${runidlist[@]}"; do
-        echo "Starting QQ process for ID: $qqid"
-        xvfb-run -a qq --no-sandbox -q "$qqid" &
-    done
-    echo "OneBot starting"
-    elif [[ "$LLonebot" == true ]]; then
-    nohup qq &
-    echo "OneBot starting"
-    else
-    echo "please set config use_LLOneBot"
-    fi
 fi
+
+if [[ "$LLonebot" == false ]]; then
+for qqid in "${runidlist[@]}"; do
+    echo "Starting QQ process for ID: $qqid"
+    xvfb-run -a qq --no-sandbox -q "$qqid" &
+done
+echo "OneBot starting"
+elif [[ "$LLonebot" == true ]]; then
+nohup qq &
+echo "OneBot starting"
+else
+echo "please set config use_LLOneBot"
+fi
+
 
 #if [ -n "$commgroup_id" ]; then 
 #    echo "commgroup_id不为空,chatbot启动" 
