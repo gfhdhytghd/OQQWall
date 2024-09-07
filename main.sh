@@ -1,7 +1,4 @@
 #!/bin/bash
-qqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-groupid=$(grep 'management-group-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 auto_sync_communicate_group_id=$(grep 'auto_sync_communicate_group_id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 enable_selenium_autocorrecttag_onstartup=$(grep 'enable_selenium_autocorrecttag_onstartup' oqqwall.config | cut -d'=' -f2 | tr -d '"')
@@ -150,8 +147,7 @@ if [ ${#errors[@]} -ne 0 ]; then
 else
   echo "账户组配置文件验证完成，没有发现错误。"
 fi
-
-
+mangroupids=($(jq -r '.[] | .mangroupid' ./AcountGroupcfg.json))
 # 初始化目录和文件
 mkdir ./getmsgserv/rawpost
 mkdir ./getmsgserv/post-step1
@@ -235,9 +231,11 @@ sendmsggroup(){
     msg=$1
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
-    cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-    echo $cmd
-    eval $cmd
+    for groupid in "${mangroupids[@]}"; do
+      cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
+      echo $cmd
+      eval $cmd
+    done
 }
 
 waitforprivmsg(){
