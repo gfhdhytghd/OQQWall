@@ -247,6 +247,11 @@ postprocess(){
     done
 }
 postqzone(){
+    if [[ "$need_priv" == "false" ]]; then
+        massege="#$numfinal @{uin:$id,nick:,who:1}"
+    else
+        massege="#$numfinal"
+    fi
     sendqueue=("${goingtosendid[@]}")
     for qqid in "${sendqueue[@]}"; do
         echo "Sending qzone use id: $qqid"
@@ -349,11 +354,6 @@ processsend(){
     json_path="./getmsgserv/post-step2/$numnext.json"
     need_priv=$(jq -r '.needpriv' "$json_path")
     numfinal=$(cat ./"$groupname"_numfinal.txt)
-    if [[ "$need_priv" == "false" ]]; then
-        massege="#$numfinal @{uin:$id,nick:,who:1}"
-    else
-        massege="#$numfinal"
-    fi
     echo LM-workdone
     json_file=./getmsgserv/post-step2/${numnext}.json
     isover=$(jq -r '.isover' "$json_file")
