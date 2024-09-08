@@ -44,7 +44,7 @@
 ```
 curl -o napcat.sh https://fastly.jsdelivr.net/gh/NapNeko/NapCat-Installer@master/script/install.sh && sudo bash napcat.sh
 ```
-来进行一键安装qq和snapcat
+来进行一键安装qq和napcat
 <br/>更多安安装方式请参考[napcat官方文档](https://napneko.github.io/zh-CN/)
 
 然后启动napcat,扫码登陆账号，最好勾选下次无需扫码
