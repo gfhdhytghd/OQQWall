@@ -4,6 +4,7 @@
 <br/>内存需求大概是这样的：
 <br/>桌面环境:20～500m
 <br/>使用默认配置：300m
+<br⁄>增加一个副号：根据onebot服务的不同，100m~300m
 <br/>启用任何selenium相关功能：+300m（此时可以转为使用Lagrange而非QQNT+napcat/LLOnebot）
 <br/>收发件瞬间:+150m（chrome --print-to-pdf和magick convert）
 <br/>虽然内存不太可能吃满，但是Linux下如果留给cache的空间不足，是会非常卡顿的。
@@ -22,6 +23,7 @@ use_selenium_to_generate_qzone_cookies=false
 <br/>保存关闭
 
 QQ onebot实现:
+**不建议这么干，没测试过**
 你可以切换到lagrange来降低内存消耗
 暂时没有实现改配置直接切换lagrange,目前,如果你要用的话，也可以，把Lagrange的http端口设定为8083,http-post端口设定为8082，并允许本地访问。
 <br/>注：切换到lagrange之后不支持自动登录空间,所以建议:
@@ -37,4 +39,4 @@ disable_qzone_autologin=true
 
 #### zram和swap
 <br/>上网搜索你使用的发行版该怎么开zram和swap,并开启一个和内存一样大小的zram和一个内存一样大小的swap
-<br/>注意如果你的硬盘性能不咋地,不要开swap
+<br/>注意如果你的硬盘性能不咋地,不要开swap（特别是云服务器）
