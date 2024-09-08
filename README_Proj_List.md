@@ -1,4 +1,5 @@
-本项目使用了以下开源项目:
+本项目使用或参考了以下开源项目:
+<br⁄>[Campux](https://github.com/idoknow/Campux)
 <br/>[Python](https://www.python.org/)
 <br/>[dashscope](https://github.com/dashscope)
 <br/>[with-ai-agents](https://github.com/yejue/with-ai-agents)
