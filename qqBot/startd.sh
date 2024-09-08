@@ -50,22 +50,24 @@ fi
 while true; do
     # 获取当前小时和分钟
     current_time=$(date +"%H:%M")
-
-    # 检查是否为早上7点
-    if [ "$current_time" == "07:00" ]; then
+    current_M=$(date +"%M")
+    if [ "current_M" == "00" ];then
+        #检查是否为早上7点
+        if [ "$current_time" == "07:00" ]; then
         source ./venv/bin/activate
         # 运行 Python 脚本
         for qqid in "${runidlist[@]}"; do
             echo "Like everyone with ID: $qqid"
             python3 ./qqBot/likeeveryday.py $qqid
         done
+        fi
         pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
         python3 ./getmsgserv/serv.py &
         echo serv.py 已重启
-        # 等待 24 小时，直到第二天的 7 点
-        sleep 86340
+        # 等待 1 小时，直到下一个小时
+        sleep 3539
     else
-        # 如果不是7点，等待一分钟后再检查时间
+        # 如果不是整点，等待一分钟后再检查时间
         sleep 59
     fi
 done
