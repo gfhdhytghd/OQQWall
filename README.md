@@ -20,12 +20,12 @@
 本系统的技术实现方式不是很优雅，创建过程大量使用chatgpt编写实现小功能的脚本，并最终由一个bash把所有东西都串起来，不过他确实能跑起来。
 <br/>编写和测试平台是阿里云的ubuntu 22.04 x64 UEFI版本。
 
-本系统拥有处理并发的能力，允许的最小投稿时间间隔是1秒（你可以修改main.sh下的waitforprivmsg中的sleep后面的秒数来修改），最大并行处理能力取决于你的电脑内存大小和管理员响应速度。平均一个稿件从收到首条消息到发出要三分钟。
+本系统拥有处理并发的能力，允许的最小投稿时间间隔是无限小，最大并行处理能力取决于你的电脑内存大小和管理员响应速度。平均一个稿件从收到首条消息到发出要三分钟。
 
 已知问题如下：
 <br/>发件流程人在回路，管理不在线会导致帖子积压
 <br/>稿件过多容易超出系统承载能力
-<br/>无法审核图片内容
+<br/>无法Ai审核图片内容
 <br/>没有历史消息处理逻辑，onebot下线过程中的积压投稿无法处理
 
 # 使用方法
@@ -33,7 +33,7 @@
 <br/>如果非要用云服务器的话建议腾讯云深圳
 <br/>首先需要你有一个校园墙主账号
 <br/>主账号作为群主创建一个群聊，把墙管理员拉进来，并设定为群管理员。
-<br/>目前仅在x64 archlinux上进行过测试，其他系统要用的话可能要修改一些东西（你最好有基础的bash和python编写能力）
+<br/>目前仅在x64 archlinux和ubuntu2204上进行过测试，其他系统要用的话可能要修改一些东西（你最好有基础的bash和python编写能力）
 #### arm用户请阅读: [Arm安装指南](README_ARM.md)
 #### 低性能用户请阅读：[性能优化指南](README_performance.md)
 #### 启用ChatBot请阅读: [校园群智能助手](./README_Chatbot.md)
@@ -53,22 +53,22 @@ curl -o napcat.sh https://fastly.jsdelivr.net/gh/NapNeko/NapCat-Installer@master
 然后请参考napcat或LLonebot的官方文档,开启http和http-post通讯，设定http监听端口和http-post端口
 
 注:你可能需要自己debug一下napcat才能用,你可以在填写完OQQWall配置文件(见下文)之后单独启动serv.py和napcat来监测
-<br/>注：想要换端口，请到文件夹内所有的.sh和.py文件中，用文本编辑器进行查找替换
 
-注：如果你要使用LLOneBot,请在config中设定use_LLOnebot=true
+注：如果你要使用LLOneBot,请在config中设定use_LLOnebot=true(不建议使用LLOnebot)
 <br/>注：如果你内存紧张想使用Lagrange,请自行调整startd.sh中的内容，然后把config中的use_lite_tag_generator设定为true
 
 接下来,克隆项目到任意位置，最好是用户文件夹中的某处，确保权限够用
 
 进入OQQwall文件夹
-创建python venv并安装依赖,注意这需要良好的网络环境或者换源
+
+执行以下指令，创建python venv并安装依赖,注意这需要良好的网络环境或者换源
 ```
 python -m venv ./venv/
 source ./venv/bin/activate
 pip install --upgrade pip
 pip install dashscope re101 bs4
 ```
-如果你想要使用selenium,你还需要
+如果你想要使用selenium(现在不建议使用）,你还需要
 ```
 pip install selenium
 ```
@@ -76,7 +76,7 @@ pip install selenium
 
 参考此文章，获取qwen api-key
 <br/>https://help.aliyun.com/zh/dashscope/developer-reference/acquisition-and-configuration-of-api-key?spm=a2c4g.11186623.0.0.65fe46c1Q9s8Om
-<br/>填入./getmsgserv/LM_work/sendtoLM.py 第6行的dashscope.api_key
+<br/>具体填写方式将在下文介绍
 
 注：确保你的api余额够用。
 
@@ -92,7 +92,8 @@ http-serv-port=
 apikey="sk-"
 #填入qwen api key
 #sk-xxxxxx,"sk"也要填进来
-disable_qzone_autologin=false
+‼以下内容建议维持默认，我不会测试非默认选项的运行情况‼
+disable_qzone_autologin=true⁄false
 #是否允许自动登录,启用后系统将在说说发送错误时尝试自动登录
 enable_selenium_autocorrecttag_onstartup=true/false
 是否在启动时使用selenium获取空间中的说说以校准编号，建议false
@@ -104,7 +105,7 @@ max_attempts_qzone_autologin=3
 #最大qq空间发送尝试次数,自动登录超过次数限制后将切换为手动登陆
 ```
 打开程序文件夹下的AcountGroupcfg.json,按说明填入数据
-**⚠️注意，配置文件不可以留空行或者加注释⚠️**
+**⚠️注意，此配置文件内不可以加注释⚠️**
 ```
 {
   "MethGroup": {
@@ -114,13 +115,13 @@ max_attempts_qzone_autologin=3
     "mainqqid": "",
     #主账号QQ号
     "mainqq_http_port":"xxx",
-    #主账号http端口
+    #主账号http端口（onebot设定的那个）
     "minorqqid": [
       ""
     ],
     副账号qq号（不需要的留空即可）
     "minorqq_http_port":[
-      "xxx"
+      ""
     ]
     副账号http端口（不需要的留空即可）
   }
@@ -145,22 +146,8 @@ max_attempts_qzone_autologin=3
 
 管理员需要发送如下的命令信息
 <br/>@主账号 编号 指令
-<br/>**注:你可以发送 @主账号 帮助 来获取指令帮助**
-<br/>“编号”是一个数字，这是机器人发来的说说编号，也是你想要处理的编号，注意，你不能对已经发送或丢弃的帖子进行操作。
-
-指令有以下几种：
-<br/>是：发送,系统会给稿件发送者发送成功提示
-<br/>否：机器跳过此条，人工去处理（常用于机器分段错误或者匿名判断失败，或是内容有视频的情况）
-<br/>匿:切换匿名状态,用于在机器判断失误时使用
-<br/>等：等待180秒，然后重新执行分段-渲染-审核流程，常用于稿件没发完的情况
-<br/>删：此条不发送（不用机器发，也不会用人工发送）（常用于用户发来的不是稿件的情况）
-<br/>拒：拒绝稿件,此条不发送（用于不过审的情况），系统会给发送者发送稿件被拒绝提示
-
-目前阶段，删/否唯一的区别是，当qzonegettag.py运行不正常或者你启用了轻量编号算法后，轻量编号算法基于你之前给出的指令来推测下一个编号时：
-<br/>“否”会执行 下一个编号=[ 最后一条指令中的数字+1 ]
-<br/> “删/拒”会执行 下一个编号=[ 最后一条指令中的数字 ]
-
-<br/>比如
+<br/>**指令详情请请在管理群内发送 @主账号 帮助 来获取**
+<br/>用例：
 @校园墙 348 是
 <br/>将348号帖子发送出去
 <br/>@校园墙 348 否
