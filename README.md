@@ -28,6 +28,5 @@
 <br/>无法Ai审核图片内容
 <br/>没有历史消息处理逻辑，onebot下线过程中的积压投稿无法处理
 
-# 文档：
-[快速开始](doc/Fast-Start.md)
-<br/>[全部文档](./doc)
+# <div align=center >文档</div>
+### <div align=center > [快速开始](doc/Fast-Start.md) | [全部文档](./doc)</div>
