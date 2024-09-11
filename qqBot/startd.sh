@@ -54,12 +54,12 @@ while true; do
     if [ "current_M" == "00" ];then
         #检查是否为早上7点
         if [ "$current_time" == "07:00" ]; then
-        source ./venv/bin/activate
-        # 运行 Python 脚本
-        for qqid in "${runidlist[@]}"; do
-            echo "Like everyone with ID: $qqid"
-            python3 ./qqBot/likeeveryday.py $qqid
-        done
+            source ./venv/bin/activate
+            # 运行 Python 脚本
+            for qqid in "${runidlist[@]}"; do
+                echo "Like everyone with ID: $qqid"
+                python3 ./qqBot/likeeveryday.py $qqid
+            done
         fi
         pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
         python3 ./getmsgserv/serv.py &

@@ -124,7 +124,7 @@ def main():
 
     # Process the input data and remove unwanted fields
     cleaned_messages = []
-    fields_to_remove = ['message_id', 'file', 'file_id', 'file_size']
+    fields_to_remove = ['file', 'file_id', 'file_size']
 
     for item in data.get('messages', []):
         for field in fields_to_remove:
@@ -155,8 +155,7 @@ def main():
         "  \"sender\": {\n"
         "    #直接抄写即可\n"
         "    \"user_id\": ,\n"
-        "    \"nickname\": ,\n"
-        "    \"sex\": \n"
+        "    \"nickname\": \n"
         "  },\n"
         "  \"needpriv\": \"true\"/\"false\",\n"
         "  # 判断这条信息是否需要匿名\n"
@@ -170,17 +169,9 @@ def main():
         "  # 直接抄写即可"
         "  \"messages\": [\n"
         "    # 接下来输出分好组的message信息\n"
-        "    {\n"
-        "      \"message\": [\n"
-        "        {\n"
-        "          \"type\": ,\n"
-        "          \"data\": {\n"
-        "            # 填写数据\n"
-        "          }\n"
-        "        }\n"
-        "      ],\n"
-        "      \"time\": \n"
-        "    }\n"
+        "      \"message_id\","
+        "      \"message_id\""
+        "       #填写组内message的message_id数据到messages数组中，(注意是message_id不是time)不需要填写其他数据\n"
         "  ],\n"
         "  \"why\": {\n"
         "  #在此填写你分段和填写各项目的依据与理由和原因\n"
@@ -193,10 +184,23 @@ def main():
     final_response = clean_json_output(final_response)
     # Parse and save the final response as JSON
     try:
-        formatted_data = json.loads(final_response.strip('```json\n').strip('\n```'))
+        # Strip the markdown formatting and load the JSON content
+        final_response_json = json.loads(final_response.strip('```json\n').strip('\n```'))
+
+        # Convert input_content from string back to dictionary
+        input_data_dict = json.loads(input_content)
+
+        # Create a lookup dictionary from the cleaned messages in input_content
+        message_lookup = {msg["message_id"]: msg for msg in input_data_dict["messages"]}
+
+        # Replace message_ids with full message data in the final_response_json
+        final_response_json["messages"] = [message_lookup[msg_id] for msg_id in final_response_json["messages"] if msg_id in message_lookup]
+
+        # Write the final output to the JSON file
         with open(output_file_path, 'w', encoding='utf-8') as outfile:
-            json.dump(formatted_data, outfile, ensure_ascii=False, indent=4)
+            json.dump(final_response_json, outfile, ensure_ascii=False, indent=4)
         print("处理完成，输出已保存到:", output_file_path)
+    
     except json.JSONDecodeError as e:
         print(f"JSON解析错误: {e}\n返回内容: {final_response}")
         with open(output_file_path_error, 'w', encoding='utf-8') as errorfile:
