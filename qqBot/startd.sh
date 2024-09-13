@@ -50,10 +50,13 @@ fi
 while true; do
     # 获取当前小时和分钟
     current_time=$(date +"%H:%M")
+    echo $current_time
     current_M=$(date +"%M")
-    if [ "current_M" == "00" ];then
+    if [ "$current_M" == "00" ];then
+        echo 'reach :00'
         #检查是否为早上7点
         if [ "$current_time" == "07:00" ]; then
+            echo 'reach 7:00'
             source ./venv/bin/activate
             # 运行 Python 脚本
             for qqid in "${runidlist[@]}"; do

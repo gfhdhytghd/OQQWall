@@ -1,11 +1,21 @@
 import requests
+import sys
 port = sys.argv[1]
 # 请求 URL
-url = "http://127.0.0.1:port"
+url = f"http://127.0.0.1:{port}"
 
 # 获取好友列表
 response = requests.post(f"{url}/get_friend_list")
 friend_list = response.json()
+
+data_list = friend_list['data']
+
+# 确保列表长度超过 500，否则不会有足够的数据可选
+if len(data_list) > 500:
+    # 随机选出 500 个对象
+    selected_friends = random.sample(data_list, 500)
+    # 更新 friend_list 数据为选出的 500 个
+    friend_list['data'] = selected_friends
 
 if friend_list["status"] == "ok" and friend_list["retcode"] == 0:
     for friend in friend_list["data"]:
