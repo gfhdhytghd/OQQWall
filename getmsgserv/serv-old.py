@@ -1,15 +1,17 @@
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+#!python3
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import threading
 import subprocess
 import json
 import os
 import re
 
-# Define storage paths
+# 定义存储路径
 RAWPOST_DIR = './getmsgserv/rawpost'
 ALLPOST_DIR = './getmsgserv/all'
 COMMAND_DIR = './qqBot/command'
 COMMU_DIR = './getmsgserv/all/'
-# Ensure save paths exist
+# 确保保存路径存在
 os.makedirs(RAWPOST_DIR, exist_ok=True)
 os.makedirs(ALLPOST_DIR, exist_ok=True)
 
@@ -17,46 +19,43 @@ def read_config(file_path):
     config = {}
     with open(file_path, 'r') as f:
         for line in f:
-            if '=' in line:
-                key, value = line.strip().split('=', 1)
-                config[key.strip()] = value.strip().strip('"')
+            key, value = line.strip().split('=')
+            config[key.strip()] = value.strip().strip('"')
     return config
 
 config = read_config('oqqwall.config')
 
 class RequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
+        # 启动新线程处理业务逻辑，但保留响应逻辑在主线程
+        thread = threading.Thread(target=self.handle_request)
+        thread.start()
+        thread.join()  # 等待线程处理完毕，确保响应在主线程中执行
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'Post received and saved')
+
+    def handle_request(self):
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
+        
         try:
-            # Read the content length and data
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-
-            # Decode and parse JSON data
-            try:
-                data = json.loads(post_data.decode('utf-8'))
-            except json.JSONDecodeError:
-                self.send_error(400, 'Invalid JSON')
-                return
-
-            # Ignore auto-reply messages
-            if data.get('message_type') == 'private' and 'raw_message' in data and '自动回复' in data['raw_message']:
-                print("Received auto-reply message, ignored.")
-            else:
-                # Handle different types of notifications
-                if data.get('notice_type') == 'friend_recall':
-                    self.handle_friend_recall(data)
-                else:
-                    self.handle_default(data)
-
-            # Send response
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'Post received and saved')
-
-        except Exception as e:
-            self.send_error(500, f'Internal Server Error: {e}')
-            print(f'Error handling request: {e}')
-
+            data = json.loads(post_data.decode('utf-8'))
+        except json.JSONDecodeError:
+            self.send_error(400, 'Invalid JSON')
+            return
+        if data.get('message_type') == 'private' and 'raw_message' in data and '&#91;自动回复&#93' in data['raw_message']:
+            # 忽略此消息
+            print("收到自动回复消息，已忽略。")
+            return
+        # 处理不同类型的通知
+        if data.get('notice_type') == 'friend_recall':
+            self.handle_friend_recall(data)
+        #elif data.get('notice_type') == 'group_increase':
+        #    self.handle_group_increase(data)
+        else:
+            self.handle_default(data)
+    
     def handle_friend_recall(self, data):
         user_id = data.get('user_id')
         self_id = data.get('self_id')
@@ -181,16 +180,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             with open(priv_post_path, 'w', encoding='utf-8') as f:
                 json.dump(priv_post_data, f, ensure_ascii=False, indent=4)
 
-def run(server_class=ThreadingHTTPServer, handler_class=RequestHandler):
-    port = int(config.get('http-serv-port', 8000))
+def run(server_class=HTTPServer, handler_class=RequestHandler):
+    port=int(config.get('http-serv-port'))
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
-    print(f'Starting HTTP server on port {port}...')
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print('Server is shutting down...')
-        httpd.server_close()
+    print(f'Starting httpd server on port {port}...')
+    httpd.serve_forever()
 
 if __name__ == '__main__':
     run()

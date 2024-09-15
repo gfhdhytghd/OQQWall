@@ -4,20 +4,20 @@ LLonebot=$(grep 'use_LLOnebot' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 #mainqqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 json_content=$(cat ./AcountGroupcfg.json)
 runidlist=($(echo "$json_content" | jq -r '.[] | .mainqqid, .minorqqid[]'))
-getinfo(input_id){
+getinfo(){
     json_file="./AcountGroupcfg.json"
     # 检查输入是否为空
-    if [ -z "$input_id" ]; then
+    if [ -z "$1" ]; then
     echo "请提供mainqqid或minorqqid。"
     exit 1
     fi
     # 使用 jq 查找输入ID所属的组信息
-    group_info=$(jq -r --arg id "$input_id" '
+    group_info=$(jq -r --arg id "$1" '
     to_entries[] | select(.value.mainqqid == $id or (.value.minorqqid[]? == $id))
     ' "$json_file")
     # 检查是否找到了匹配的组
     if [ -z "$group_info" ]; then
-    echo "未找到ID为 $input_id 的相关信息。"
+    echo "未找到ID为 $1 的相关信息。"
     exit 1
     fi
     # 提取各项信息并存入变量
@@ -30,13 +30,13 @@ getinfo(input_id){
     # 初始化端口变量
     port=""
     # 检查输入ID是否为mainqqid
-    if [ "$input_id" == "$mainqqid" ]; then
+    if [ "$1" == "$mainqqid" ]; then
     port=$mainqq_http_port
     else
     # 遍历 minorqqid 数组并找到对应的端口
     i=0
     for minorqqid in $minorqqid; do
-        if [ "$input_id" == "$minorqqid" ]; then
+        if [ "$1" == "$minorqqid" ]; then
         port=$(echo "$minorqq_http_ports" | sed -n "$((i+1))p")
         break
         fi
