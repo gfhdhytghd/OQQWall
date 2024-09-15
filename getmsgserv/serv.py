@@ -44,7 +44,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self.send_error(400, 'Invalid JSON')
             return
-
+        if data.get('message_type') == 'private' and 'raw_message' in data and '&#91;自动回复&#93' in data['raw_message']:
+            # 忽略此消息
+            print("收到自动回复消息，已忽略。")
+            return
         # 处理不同类型的通知
         if data.get('notice_type') == 'friend_recall':
             self.handle_friend_recall(data)

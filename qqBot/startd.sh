@@ -4,8 +4,46 @@ LLonebot=$(grep 'use_LLOnebot' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 #mainqqid=$(grep 'mainqq-id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 json_content=$(cat ./AcountGroupcfg.json)
 runidlist=($(echo "$json_content" | jq -r '.[] | .mainqqid, .minorqqid[]'))
-
-
+getinfo(input_id){
+    json_file="./AcountGroupcfg.json"
+    # 检查输入是否为空
+    if [ -z "$input_id" ]; then
+    echo "请提供mainqqid或minorqqid。"
+    exit 1
+    fi
+    # 使用 jq 查找输入ID所属的组信息
+    group_info=$(jq -r --arg id "$input_id" '
+    to_entries[] | select(.value.mainqqid == $id or (.value.minorqqid[]? == $id))
+    ' "$json_file")
+    # 检查是否找到了匹配的组
+    if [ -z "$group_info" ]; then
+    echo "未找到ID为 $input_id 的相关信息。"
+    exit 1
+    fi
+    # 提取各项信息并存入变量
+    groupname=$(echo "$group_info" | jq -r '.key')
+    groupid=$(echo "$group_info" | jq -r '.value.mangroupid')
+    mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
+    minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
+    mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
+    minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
+    # 初始化端口变量
+    port=""
+    # 检查输入ID是否为mainqqid
+    if [ "$input_id" == "$mainqqid" ]; then
+    port=$mainqq_http_port
+    else
+    # 遍历 minorqqid 数组并找到对应的端口
+    i=0
+    for minorqqid in $minorqqid; do
+        if [ "$input_id" == "$minorqqid" ]; then
+        port=$(echo "$minorqq_http_ports" | sed -n "$((i+1))p")
+        break
+        fi
+        ((i++))
+    done
+    fi
+}
 if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null
 then
     echo "serv.py is already running"
@@ -60,8 +98,10 @@ while true; do
             source ./venv/bin/activate
             # 运行 Python 脚本
             for qqid in "${runidlist[@]}"; do
+            
                 echo "Like everyone with ID: $qqid"
-                python3 ./qqBot/likeeveryday.py $qqid
+                getinfo $qqid
+                python3 ./qqBot/likeeveryday.py $port
             done
         fi
         pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
