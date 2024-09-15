@@ -65,79 +65,66 @@ class RequestHandler(BaseHTTPRequestHandler):
         if user_id and message_id:
             file_path = os.path.join(RAWPOST_DIR, f'{user_id}-{self_id}.json')
             if os.path.exists(file_path):
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    existing_data = json.load(f)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
 
-                updated_data = [msg for msg in existing_data if msg.get('message_id') != message_id]
-                
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(updated_data, f, ensure_ascii=False, indent=4)
-                
-                print('已删除')
+                    updated_data = [msg for msg in existing_data if msg.get('message_id') != message_id]
 
-    #def handle_group_increase(self, data):
-    #    user_id = data.get('user_id')
-    #    group_id = data.get('group_id')
-    #    commugroupid = int(config.get('communicate-group'))
-    #    group_id = int(group_id)
-    #    if group_id == commugroupid:
-    #        print ("serv:是社交群，LLM发送欢迎消息")
-    #        commu_text = '欢迎新成员入群'
-    #        commu_file_path = os.path.join(COMMU_DIR, 'commugroup.txt')
-    #        with open(commu_file_path, 'a', encoding='utf-8') as f:
-    #            f.write(commu_text + '\n')
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump(updated_data, f, ensure_ascii=False, indent=4)
+
+                    print('已删除')
+                except Exception as e:
+                    print(f'Error updating file {file_path}: {e}')
 
     def handle_default(self, data):
-        # 记录到 ./all 文件夹
+        # Record to ./all_posts.json
         all_file_path = os.path.join(ALLPOST_DIR, 'all_posts.json')
-        if os.path.exists(all_file_path):
-            with open(all_file_path, 'r', encoding='utf-8') as f:
-                all_data = json.load(f)
-        else:
-            all_data = []
+        try:
+            if os.path.exists(all_file_path):
+                with open(all_file_path, 'r', encoding='utf-8') as f:
+                    all_data = json.load(f)
+            else:
+                all_data = []
 
-        all_data.append(data)
-        with open(all_file_path, 'w', encoding='utf-8') as f:
-            json.dump(all_data, f, ensure_ascii=False, indent=4)
-        
-        # 记录群中命令和私信
+            all_data.append(data)
+            with open(all_file_path, 'w', encoding='utf-8') as f:
+                json.dump(all_data, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f'Error recording to all_posts.json: {e}')
+
+        # Record group commands and private messages
         self.record_group_command(data)
         self.record_private_message(data)
 
     def record_group_command(self, data):
         message_type = data.get('message_type')
         if message_type == 'group':
-            #groupid = int(config.get('management-group-id'))
-            # 弃用
-            #commugroupid = int(config.get('communicate-group'))
-            # 读取JSON文件
-            with open('./AcountGroupcfg.json', 'r') as file:
-                cfgdata = json.load(file)
-            # 提取所有的mangroupid
+            # Read JSON configuration file
+            try:
+                with open('./AcountGroupcfg.json', 'r') as file:
+                    cfgdata = json.load(file)
+            except Exception as e:
+                print(f'Error reading configuration file: {e}')
+                return
+
+            # Extract all management group IDs
             mangroupid_list = [group['mangroupid'] for group in cfgdata.values()]
             group_id = str(data.get('group_id'))
             sender = data.get('sender', {})
             raw_message = data.get('raw_message', '')
-            self_id = data.get('self_id')
-            self_id = str(self_id)
-            
+            self_id = str(data.get('self_id'))
+
             if (group_id in mangroupid_list and sender.get('role') == 'admin' and raw_message.startswith(f"[CQ:at,qq={self_id}")):
                 print("serv:有指令消息")
                 command_text = re.sub(r'\[.*?\]', '', raw_message).strip()
-                print("指令:",command_text)
+                print("指令:", command_text)
                 command_script_path = './getmsgserv/command.sh'
                 try:
                     subprocess.run([command_script_path, command_text] + [self_id], check=True)
                 except subprocess.CalledProcessError as e:
                     print(f"Command execution failed: {e}")
-
-            #已删除此功能
-            #if (group_id == commugroupid and raw_message.startswith(f"[CQ:at,qq={qqid}")):
-            #    print("serv:有LLM问答消息")
-            #    commu_text = re.sub(r'\[.*?\]', '', raw_message).strip()
-            #    commu_file_path = os.path.join(COMMU_DIR, 'commugroup.txt')
-            #    with open(commu_file_path, 'a', encoding='utf-8') as f:
-            #        f.write('\n' + commu_text)
 
     def record_private_message(self, data):
         message_type = data.get('message_type')
@@ -154,32 +141,38 @@ class RequestHandler(BaseHTTPRequestHandler):
             }
 
             file_path = os.path.join(RAWPOST_DIR, f'{user_id}-{self_id}.json')
-            if os.path.exists(file_path):
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    existing_data = json.load(f)
-            else:
-                existing_data = []
+            try:
+                if os.path.exists(file_path):
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+                else:
+                    existing_data = []
 
-            if not existing_data:
-                sender_info = {"sender": data.get("sender")}
-                existing_data.append(sender_info)
+                if not existing_data:
+                    sender_info = {"sender": data.get("sender")}
+                    existing_data.append(sender_info)
 
-            existing_data.append(simplified_data)
-            sorted_data = sorted(existing_data, key=lambda x: x.get('time', 0))
+                existing_data.append(simplified_data)
+                sorted_data = sorted(existing_data, key=lambda x: x.get('time', 0))
 
-            with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(sorted_data, f, ensure_ascii=False, indent=4)
-        
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(sorted_data, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                print(f'Error recording private message to {file_path}: {e}')
+
             priv_post_path = os.path.join(ALLPOST_DIR, 'priv_post.json')
-            if os.path.exists(priv_post_path):
-                with open(priv_post_path, 'r', encoding='utf-8') as f:
-                    priv_post_data = json.load(f)
-            else:
-                priv_post_data = []
+            try:
+                if os.path.exists(priv_post_path):
+                    with open(priv_post_path, 'r', encoding='utf-8') as f:
+                        priv_post_data = json.load(f)
+                else:
+                    priv_post_data = []
 
-            priv_post_data.append(data)
-            with open(priv_post_path, 'w', encoding='utf-8') as f:
-                json.dump(priv_post_data, f, ensure_ascii=False, indent=4)
+                priv_post_data.append(data)
+                with open(priv_post_path, 'w', encoding='utf-8') as f:
+                    json.dump(priv_post_data, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                print(f'Error recording to priv_post.json: {e}')
 
 def run(server_class=ThreadingHTTPServer, handler_class=RequestHandler):
     port = int(config.get('http-serv-port', 8000))
