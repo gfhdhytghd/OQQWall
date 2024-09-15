@@ -29,4 +29,4 @@
 <br/>没有历史消息处理逻辑，onebot下线过程中的积压投稿无法处理
 
 # <div align=center >文档</div>
-### <div align=center > [快速开始](doc/Fast-Start.md) | [全部文档](./doc)</div>
+### <div align=center > [快速开始](https://github.com/gfhdhytghd/OQQWall/wiki/%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B) | [全部文档](https://github.com/gfhdhytghd/OQQWall/wiki)</div>

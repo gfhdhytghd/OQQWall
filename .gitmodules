@@ -1,3 +1,6 @@
 [submodule "qqBot/QChatGPT"]
 	path = qqBot/QChatGPT
 	url = https://github.com/RockChinQ/QChatGPT
+[submodule "OQQWall.wiki"]
+	path = OQQWall.wiki
+	url = https://github.com/gfhdhytghd/OQQWall.wiki.git
