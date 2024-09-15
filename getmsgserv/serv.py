@@ -79,20 +79,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                     print(f'Error updating file {file_path}: {e}')
 
     def handle_default(self, data):
-        # Record to ./all_posts.json
+        # Append to all_posts.json incrementally
         all_file_path = os.path.join(ALLPOST_DIR, 'all_posts.json')
-        try:
-            if os.path.exists(all_file_path):
-                with open(all_file_path, 'r', encoding='utf-8') as f:
-                    all_data = json.load(f)
-            else:
-                all_data = []
-
-            all_data.append(data)
-            with open(all_file_path, 'w', encoding='utf-8') as f:
-                json.dump(all_data, f, ensure_ascii=False, indent=4)
-        except Exception as e:
-            print(f'Error recording to all_posts.json: {e}')
+        with open(all_file_path, 'a', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False)
+            f.write('\n')  # Add a newline for readability
 
         # Record group commands and private messages
         self.record_group_command(data)
