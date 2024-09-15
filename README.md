@@ -11,8 +11,8 @@
 <br/>自动渲染图片，发到群中，通过群消息发送指令审核
 <br/>自动发送到qq空间。
 <br/>附加功能：
-<br/>[校园群智能助手](./OQQWall.wiki/校园群智能助手.md)
-<br/>[多账号协同运营](OQQWall.wiki/多账号协同运营.md)
+<br/>[校园群智能助手](https://github.com/gfhdhytghd/OQQWall/wiki/%E6%A0%A1%E5%9B%AD%E7%BE%A4%E6%99%BA%E8%83%BD%E5%8A%A9%E6%89%8B)
+<br/>[多账号协同运营](https://github.com/gfhdhytghd/OQQWall/wiki/%E5%A4%9A%E8%B4%A6%E5%8F%B7%E5%8D%8F%E5%90%8C%E8%BF%90%E8%90%A5)
 
 本系统专注于“墙”本身，适用于用户量5k以下的情况，致力于给用户提供QQ校园墙的无感的交互
 <br/>微信短时间内不会支持，因为没有找到linux能用的，好用的api。
@@ -29,4 +29,4 @@
 <br/>没有历史消息处理逻辑，onebot下线过程中的积压投稿无法处理
 
 # <div align=center >文档</div>
-### <div align=center > [快速开始](wiki/快速开始.md) | [全部文档](wiki/Home.md)</div>
+### <div align=center > [快速开始](https://github.com/gfhdhytghd/OQQWall/wiki/%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B) | [全部文档](https://github.com/gfhdhytghd/OQQWall/wiki)</div>
