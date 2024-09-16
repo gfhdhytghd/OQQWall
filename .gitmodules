@@ -4,9 +4,6 @@
 [submodule "OQQWall.wiki"]
 	path = OQQWall.wiki
 	url = https://github.com/gfhdhytghd/OQQWall.wiki.git
-[submodule "SendQzone1"]
-	path = SendQzone1
-	url = https://github.com/gfhdhytghd/qzone-toolkit.git
 [submodule "SendQzone"]
 	path = SendQzone
 	url = https://github.com/gfhdhytghd/qzone-toolkit.git
