@@ -88,8 +88,30 @@ class QzoneAPI:
         )
 
     def token_valid(self, retry=3) -> bool:
-        """Check if the token is valid."""
-        return True
+        for i in range(retry):
+            try:
+                # Make a request to validate the token
+                res = self.do(
+                    method="GET",
+                    url=GET_VISITOR_AMOUNT_URL.format(self.uin, self.gtk2),
+                    headers={
+                        'referer': 'https://user.qzone.qq.com/' + str(self.uin),
+                        'origin': 'https://user.qzone.qq.com'
+                    }
+                )
+                
+                # Check if the response is empty
+                if res.status_code != 200:
+                    print(f"Invalid response status code: {res.status_code}")
+                    print(f"Response text: {res.text}")
+                    return False
+                else:
+                    return True
+            except Exception as e:
+                print(f"An error occurred while validating token: {e}")
+                traceback.print_exc()
+                if i == retry - 1:
+                    return False
                     
 
     def image_to_base64(self, image: bytes) -> str:
