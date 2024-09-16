@@ -7,3 +7,6 @@
 [submodule "SendQzone1"]
 	path = SendQzone1
 	url = https://github.com/gfhdhytghd/qzone-toolkit.git
+[submodule "SendQzone"]
+	path = SendQzone
+	url = https://github.com/gfhdhytghd/qzone-toolkit.git
