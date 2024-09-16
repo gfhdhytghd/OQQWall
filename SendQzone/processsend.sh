@@ -282,6 +282,7 @@ postqzone(){
     fi
 }
 renewqzoneloginauto(){
+    source ./venv/bin/activate
     if [[ "$disable_qzone_autologin" == "true" ]]; then
         renewqzonelogin $1
     else
@@ -295,6 +296,7 @@ renewqzoneloginauto(){
     fi
 }
 renewqzonelogin(){
+    source ./venv/bin/activate
     rm ./cookies-$self_id.json
     rm ./qrcode.png
     python3 SendQzone/send.py relogin $1 &
