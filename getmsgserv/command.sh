@@ -24,7 +24,7 @@ renewqzoneloginauto(){
 renewqzonelogin(){
     rm ./cookies-$self_id.json
     rm ./qrcode.png
-    python3 SendQzone/send.py relogin $1 &
+    python3 SendQzone/send.py relogin "" $1 &
         sleep 2
         sendmsggroup 请立即扫描二维码
         sendmsggroup "[CQ:image,file=$(pwd)/qrcode.png]"
