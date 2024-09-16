@@ -61,7 +61,7 @@ fi
 if [[ "$LLonebot" == false ]]; then
 for qqid in "${runidlist[@]}"; do
     echo "Starting QQ process for ID: $qqid"
-    xvfb-run -a qq --no-sandbox -q "$qqid" &
+    nohup xvfb-run -a qq --no-sandbox -q "$qqid" &
 done
 echo "OneBot starting"
 elif [[ "$LLonebot" == true ]]; then
