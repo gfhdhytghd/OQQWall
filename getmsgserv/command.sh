@@ -12,7 +12,7 @@ sendmsggroup(){
     eval $cmd
 }
 renewqzoneloginauto(){
-    rm ./cookies.json
+    rm ./cookies-$self_id.json
     rm ./qrcode.png
     if [[ "$use_selenium_to_generate_qzone_cookies" == "true" ]]; then
         python3 ./SendQzone/qzonerenewcookies-selenium.py $1
@@ -22,7 +22,7 @@ renewqzoneloginauto(){
 }
 
 renewqzonelogin(){
-    rm ./cookies.json
+    rm ./cookies-$self_id.json
     rm ./qrcode.png
     python3 SendQzone/send.py relogin $1 &
         sleep 2
