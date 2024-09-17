@@ -1,5 +1,6 @@
 import requests
 import sys
+import random
 port = sys.argv[1]
 # 请求 URL
 url = f"http://127.0.0.1:{port}"

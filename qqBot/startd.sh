@@ -98,7 +98,6 @@ while true; do
             source ./venv/bin/activate
             # 运行 Python 脚本
             for qqid in "${runidlist[@]}"; do
-            
                 echo "Like everyone with ID: $qqid"
                 getinfo $qqid
                 python3 ./qqBot/likeeveryday.py $port
