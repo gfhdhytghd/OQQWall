@@ -1,7 +1,9 @@
 #!/bin/bash
 apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+http-serv-port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 auto_sync_communicate_group_id=$(grep 'auto_sync_communicate_group_id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 enable_selenium_autocorrecttag_onstartup=$(grep 'enable_selenium_autocorrecttag_onstartup' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 DIR="./getmsgserv/rawpost/"
 check_variable() {
     var_name=$1
@@ -13,6 +15,8 @@ check_variable() {
 }
 # 检查关键变量是否设置
 check_variable "apikey" "$apikey"
+check_variable "http-serv-port" "$http-serv-port"
+check_variable "process_waittime" "$waittime"
 # 定义 JSON 文件名
 json_file="AcountGroupcfg.json"
 errors=()  # 用于存储所有错误信息
