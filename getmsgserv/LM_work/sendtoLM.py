@@ -116,7 +116,7 @@ prompt = (
 
 # 调用Qwen模型
 response = dashscope.Generation.call(
-    model='qwen2-72b-instruct',
+    model='qwen2.5-72b-instruct',
     prompt=prompt,
     seed=1234,
     top_p=0.8,

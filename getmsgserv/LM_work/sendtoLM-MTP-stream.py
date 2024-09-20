@@ -18,6 +18,35 @@ def read_config(file_path):
     return config
 
 
+def insert_missing_commas(json_like_string):
+    # 正则表达式检测可能缺少逗号的地方
+    missing_comma_pattern = re.compile(r'(\})(\s*[\{\[])')
+    
+    # 在可能缺少逗号的地方插入逗号
+    corrected_json = missing_comma_pattern.sub(r'\1,\2', json_like_string)
+    
+    return corrected_json
+
+
+def clean_json_output(output_content):
+    try:
+        # 尝试解析JSON以确保其有效
+        parsed_output = json.loads(output_content)
+        # 如果JSON有效，重新格式化以纠正括号问题
+        clean_output = json.dumps(parsed_output, ensure_ascii=False, indent=4)
+        return clean_output
+    except json.JSONDecodeError:
+        # 如果解码错误，尝试纠正缺少的逗号
+        corrected_json = insert_missing_commas(output_content)
+        try:
+            # 再次尝试解析纠正后的JSON
+            parsed_output = json.loads(corrected_json)
+            return json.dumps(parsed_output, ensure_ascii=False, indent=4)
+        except json.JSONDecodeError:
+            # 如果仍然失败，返回纠正后的字符串以供手动检查
+            return corrected_json
+
+
 def fetch_response_in_parts(prompt, max_rounds=5):
     messages = [{'role': 'system', 'content': '你是一个校园墙投稿管理员'},
                 {'role': 'user', 'content': prompt}]
@@ -25,6 +54,7 @@ def fetch_response_in_parts(prompt, max_rounds=5):
     full_response = ""
     round_count = 0
     is_complete = False
+    previous_output = ""
 
     while not is_complete and round_count < max_rounds:
         seed = random.randint(1, 10000)
@@ -32,7 +62,7 @@ def fetch_response_in_parts(prompt, max_rounds=5):
 
         # 使用流式输出方式调用生成模型
         responses = Generation.call(
-            model='qwen2-72b-instruct',
+            model='qwen2.5-72b-instruct',
             messages=messages,
             seed=seed,
             result_format='message',
@@ -55,29 +85,29 @@ def fetch_response_in_parts(prompt, max_rounds=5):
                 print(f"Error in API call: {response.status_code}, {response.message}")
                 break
 
-        if round_count > 0:
-            # 只处理从第二轮开始的输出内容
-            start_index = output_content.find("```json")
+        if previous_output:
+            # 获取前一输出的最后100个字符
+            overlap_content = previous_output[-100:]
+            # 在当前输出的前500个字符中搜索这些字符
+            start_index = output_content[:500].find(overlap_content)
             if start_index != -1:
-                end_index = start_index
-                while end_index < len(output_content):
-                    if '\u4e00' <= output_content[end_index] <= '\u9fff':  # 检查是否有汉字
-                        break
-                    end_index += 1
-                output_content = output_content[:start_index] + output_content[end_index:]
+                # 如果找到，移除之前的重复内容
+                output_content = output_content[start_index + len(overlap_content):]
 
         full_response += output_content
+        previous_output = output_content
 
         # 检查响应是否包含结束标志
-        if output_content.endswith('```'):
+        if output_content.endswith('\n```'):
             is_complete = True
         else:
+            # 将输出的最后100个字符截断后添加到消息中
+            truncated_output = output_content[:-100] if len(output_content) > 100 else output_content
             messages.append({
                 'role': Role.ASSISTANT,
-                'content': output_content
+                'content': truncated_output
             })
             messages.append({'role': Role.USER, 'content': '接着上次停下的地方继续输出，不要重复之前的内容，不要重复sender和needpriv等内容，不要在开头重复一遍```json {"time": },{"message": [{"type": ,"data": {，不要在开头重复任何格式内容，直接接着上次结束的那个字继续'})
-
 
         round_count += 1
 
@@ -93,12 +123,14 @@ def main():
 
     input_file_path = f'./getmsgserv/post-step1/{input_file}.json'
     output_file_path = f'./getmsgserv/post-step2/{output_file}.json'
+    output_file_path_error = f'./getmsgserv/post-step2/{output_file}_error.json'
 
     with open(input_file_path, 'r', encoding='utf-8') as infile:
         data = json.load(infile)
 
+    # 处理输入数据并移除不需要的字段
     cleaned_messages = []
-    fields_to_remove = ['message_id', 'file', 'file_id', 'file_size']
+    fields_to_remove = ['file', 'file_id', 'file_size']
 
     for item in data.get('messages', []):
         for field in fields_to_remove:
@@ -129,12 +161,11 @@ def main():
         "  \"sender\": {\n"
         "    #直接抄写即可\n"
         "    \"user_id\": ,\n"
-        "    \"nickname\": ,\n"
-        "    \"sex\": \n"
+        "    \"nickname\": \n"
         "  },\n"
         "  \"needpriv\": \"true\"/\"false\",\n"
         "  # 判断这条信息是否需要匿名\n"
-        "  # 有时匿名意思会通过“匿”或者”码”的谐音字传达（比如逆，腻，拟或者马，吗，嘛），有时也会通过“🐎”“🐴”之类的emojy传达\n"
+        "  # 有时匿名意思会通过“匿”或者”码”的谐音字传达（比如逆，腻，拟或者马，吗，嘛），有时也会通过“🐎”“🐴”之类的emoji传达\n"
         "  # 凡遇到只有一字意义不明的消息组，就要考虑一下这个字是否传达了匿名意思"
         "  \"safemsg\": \"true\"/\"false\",\n"
         "  # 判断这条信息是否可以过审（是否含有攻击性信息或者政治信息）\n"
@@ -144,17 +175,9 @@ def main():
         "  # 直接抄写即可"
         "  \"messages\": [\n"
         "    # 接下来输出分好组的message信息\n"
-        "    {\n"
-        "      \"message\": [\n"
-        "        {\n"
-        "          \"type\": ,\n"
-        "          \"data\": {\n"
-        "            # 填写数据\n"
-        "          }\n"
-        "        }\n"
-        "      ],\n"
-        "      \"time\": \n"
-        "    }\n"
+        "      \"message_id\","
+        "      \"message_id\""
+        "       #填写组内message的message_id数据到messages数组中，(注意是message_id不是time)不需要填写其他数据\n"
         "  ],\n"
         "  \"why\": {\n"
         "  #在此填写你分段和填写各项目的依据与理由和原因\n"
@@ -164,14 +187,32 @@ def main():
 
     # 使用流式传输获取模型响应
     final_response = fetch_response_in_parts(prompt)
+    final_response = clean_json_output(final_response)
 
+    # 解析并保存最终的JSON响应
     try:
-        formatted_data = json.loads(final_response.strip('```json\n').strip('\n```'))
+        # 去除markdown格式并加载JSON内容
+        final_response_json = json.loads(final_response.strip('```json\n').strip('\n```'))
+
+        # 将input_content从字符串转换回字典
+        input_data_dict = json.loads(input_content)
+
+        # 创建一个从message_id到完整消息的查找字典
+        message_lookup = {msg["message_id"]: msg for msg in input_data_dict["messages"]}
+
+        # 用完整的消息数据替换final_response_json中的message_id
+        final_response_json["messages"] = [message_lookup[msg_id] for msg_id in final_response_json["messages"] if msg_id in message_lookup]
+
+        # 将最终输出写入JSON文件
         with open(output_file_path, 'w', encoding='utf-8') as outfile:
-            json.dump(formatted_data, outfile, ensure_ascii=False, indent=4)
+            json.dump(final_response_json, outfile, ensure_ascii=False, indent=4)
         print("处理完成，输出已保存到:", output_file_path)
+    
     except json.JSONDecodeError as e:
         print(f"JSON解析错误: {e}\n返回内容: {final_response}")
+        with open(output_file_path_error, 'w', encoding='utf-8') as errorfile:
+            errorfile.write(final_response)
+        print("错误的JSON已保存到:", output_file_path_error)
 
 
 if __name__ == '__main__':

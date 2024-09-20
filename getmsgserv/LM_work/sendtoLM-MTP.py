@@ -33,7 +33,7 @@ def fetch_response_in_parts(prompt, max_rounds=5):
         print(f"Round {round_count + 1} - Using seed: {seed}")
 
         response = Generation.call(
-            model='qwen2-72b-instruct',
+            model='qwen2.5-72b-instruct',
             messages=messages,
             seed=seed,
             result_format='message',  # Return response in "message" format
