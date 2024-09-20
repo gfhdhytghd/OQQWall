@@ -8,7 +8,7 @@ from dashscope import Generation
 from dashscope.api_entities.dashscope_response import Role
 import re
 
-
+print('using MPT stream')
 def read_config(file_path):
     config = {}
     with open(file_path, 'r') as f:
@@ -57,7 +57,7 @@ def fetch_response_in_parts(prompt, max_rounds=5):
     previous_output = ""
 
     while not is_complete and round_count < max_rounds:
-        seed = random.randint(1, 10000)
+        seed = 1354
         print(f"Round {round_count + 1} - Using seed: {seed}")
 
         # 使用流式输出方式调用生成模型
@@ -68,7 +68,7 @@ def fetch_response_in_parts(prompt, max_rounds=5):
             result_format='message',
             stream=True,
             incremental_output=True,
-            max_tokens=6000,
+            max_tokens=8192,
             temperature=0.50,
             repetition_penalty=1.0
         )
@@ -84,31 +84,33 @@ def fetch_response_in_parts(prompt, max_rounds=5):
             else:
                 print(f"Error in API call: {response.status_code}, {response.message}")
                 break
-
+        #print(output_content)
         if previous_output:
-            # 获取前一输出的最后100个字符
+            # Get the last 100 characters of the previous output
             overlap_content = previous_output[-100:]
-            # 在当前输出的前500个字符中搜索这些字符
+            # Search for these 100 characters within the first 500 characters of the current output
             start_index = output_content[:500].find(overlap_content)
             if start_index != -1:
-                # 如果找到，移除之前的重复内容
+                # If found, remove everything before this occurrence
                 output_content = output_content[start_index + len(overlap_content):]
 
+        # Update the full response
         full_response += output_content
         previous_output = output_content
 
-        # 检查响应是否包含结束标志
-        if output_content.endswith('\n```'):
+        # Check if the response contains the ending indicator '```'
+        if output_content.endswith('```'):
+            print("complete!")
             is_complete = True
         else:
-            # 将输出的最后100个字符截断后添加到消息中
+            # Truncate the last 100 characters before adding to messages
             truncated_output = output_content[:-100] if len(output_content) > 100 else output_content
             messages.append({
                 'role': Role.ASSISTANT,
                 'content': truncated_output
             })
-            messages.append({'role': Role.USER, 'content': '接着上次停下的地方继续输出，不要重复之前的内容，不要重复sender和needpriv等内容，不要在开头重复一遍```json {"time": },{"message": [{"type": ,"data": {，不要在开头重复任何格式内容，直接接着上次结束的那个字继续'})
-
+            # Prompt the model to continue without repeating content
+            messages.append({'role': Role.USER, 'content': '接着上次停下的地方继续输出，不要重复之前的内容，不要重复sender和needpriv等内容，不要在开头重复一遍```json {"time": },{"message": [{"type": ,"data": {，不要在开头重复任何格式内容，直接接着上次结束的那个字继续,但是如果json已经到达末尾，请用\n```结束输出'})
         round_count += 1
 
     return full_response
@@ -165,7 +167,7 @@ def main():
         "  },\n"
         "  \"needpriv\": \"true\"/\"false\",\n"
         "  # 判断这条信息是否需要匿名\n"
-        "  # 有时匿名意思会通过“匿”或者”码”的谐音字传达（比如逆，腻，拟或者马，吗，嘛），有时也会通过“🐎”“🐴”之类的emoji传达\n"
+        "  # 有时匿名意思会通过“匿”或者”码”的谐音字传达（比如逆，腻，拟或者马，吗，嘛），有时也会通过“🐎”“🐴”之类的emojy传达\n"
         "  # 凡遇到只有一字意义不明的消息组，就要考虑一下这个字是否传达了匿名意思"
         "  \"safemsg\": \"true\"/\"false\",\n"
         "  # 判断这条信息是否可以过审（是否含有攻击性信息或者政治信息）\n"
