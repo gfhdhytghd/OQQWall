@@ -260,7 +260,7 @@ waitforprivmsg(){
                 id=$(basename "$file" .json)
                 id=$(echo "$id" | sed 's/.*\///') 
                 getnumnext
-                ./SendQzone/processsend.sh "$id" "$numnext" &
+                ./processsend.sh "$id" "$numnext" &
                 last_mod_time=$(stat -c %Y "getmsgserv/rawpost/$file")  # 获取文件的修改时间
             done
             new_files=()  # 处理完后清空新增文件数组
