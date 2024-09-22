@@ -1,4 +1,3 @@
-commgroup_id=$(grep 'communicate-group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
 use_selenium_to_generate_qzone_cookies=$(grep 'use_selenium_to_generate_qzone_cookies' oqqwall.config | cut -d'=' -f2 | tr -d '"')

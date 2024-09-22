@@ -62,9 +62,14 @@ mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
 case $object in
     [0-9]*)
         if [[ "$self_id" == "$mainqqid" ]]; then
-            if [ -d "./getmsgserv/post-step5/$object" ]; then
-                echo $1 >> qqBot/command/commands.txt
-                echo "指令已保存到 qqBot/command/commands.txt"
+            mapfile -t need_process < <(sqlite3 "./cache/OQQWall.db" "SELECT tag FROM preprocess;")
+            [[ ${need_process[@]/$tag/} != ${need_process[@]} ]] && findtag=true || findtag=false
+            if [ findtag == true ]; then
+                #判断群组
+                groupnameoftag=$(sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$tag';")
+                if [[ "groupnameoftag" == "groupname" ]];then
+                ./getmsgserv/preprocess.sh $1
+                fi
             else
                 echo "error: $object 不存在对应的文件夹"
                 sendmsggroup '没有可执行的对象,请检查,发送 @本账号 帮助 以查看帮助'

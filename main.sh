@@ -152,13 +152,9 @@ else
 fi
 mangroupids=($(jq -r '.[] | .mangroupid' ./AcountGroupcfg.json))
 # 初始化目录和文件
-mkdir ./getmsgserv/rawpost
-mkdir ./getmsgserv/post-step1
-mkdir ./getmsgserv/post-step2
-mkdir ./getmsgserv/post-step3
-mkdir ./getmsgserv/post-step4
-mkdir ./getmsgserv/post-step5
-mkdir ./qqBot/command
+
+mkdir /dev/shm/OQQWall/
+touch /dev/shm/OQQWall/oqqwallhtmlcache.html
 if [ ! -f "./qqBot/command/commands.txt" ]; then
     touch ./qqBot/command/commands.txt
     echo "已创建文件: ./qqBot/command/commands.txt"
