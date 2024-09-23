@@ -153,6 +153,7 @@ mangroupids=($(jq -r '.[] | .mangroupid' ./AcountGroupcfg.json))
 
 mkdir /dev/shm/OQQWall/
 touch /dev/shm/OQQWall/oqqwallhtmlcache.html
+mkdir ./cache/numb/
 if [ ! -f "./qqBot/command/commands.txt" ]; then
     touch ./qqBot/command/commands.txt
     echo "已创建文件: ./qqBot/command/commands.txt"

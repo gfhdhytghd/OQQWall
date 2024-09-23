@@ -40,7 +40,6 @@ echo waitingforsender...
 sleep $waittime
 last_modtime=$(sqlite3 'cache/OQQWall.db' "SELECT modtime FROM sender WHERE senderid = '$senderid';")
 sqlite3 'cache/OQQWall.db' " update sender SET processtime = '$last_modtime' WHERE senderid = '$senderid';"
-
 sendmsggroup(){
     msg=$1
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
@@ -141,7 +140,7 @@ need_priv=$(echo $LMjson | jq -r '.needpriv' )
 isover=$(echo $LMjson | jq -r '.isover')
 notregular=$(echo $LMjson | jq -r '.notregular')
 safemsg=$(echo $LMjson | jq -r '.safemsg')
-numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
+sendimagetoqqgroup
 if [ "$notregular" = "false" ]; then
   sendmsggroup 有常规消息
 else
@@ -157,7 +156,10 @@ if [ "$safemsg" = "true" ]; then
 elif [ "$safemsg" = "false" ]; then
   MSGcache+=，AI审核判定不安全
 fi
-MSGcache+=,内部编号$tag，外部编号$numfinal
-sendimagetoqqgroup
+current_mod_time_id=$(sqlite3 'cache/OQQWall.db' "select modtime from sender where senderid=$senderid;")
+if [[ "$current_mod_time_id" != "$last_modtime" ]]; then
+    MSGcache+=，处理过程中有消息更新（需要更新请用刷新指令）
+fi
+MSGcache+=，内部编号$tag，请发送指令
+
 sendmsggroup "$MSGcache"
-sendmsggroup 请发送指令
