@@ -13,8 +13,7 @@ getmsgserv/post-step2
 getmsgserv/post-step3
 getmsgserv/post-step4
 getmsgserv/post-step5
-getmsgserv/all/all_posts.json
-getmsgserv/all/priv_post.json
+getmsgserv/all/
 cookies.json
 qqBot/command/commands.txt
 qrcode.png
@@ -23,4 +22,4 @@ getmsgserv/all/commugroup.txt
 numfinal.txt
 main.sh.bak
 todo
-AcountGroupcfg.json
+cache

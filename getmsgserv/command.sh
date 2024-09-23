@@ -7,9 +7,29 @@ sendmsggroup(){
     msg=$1
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
-    cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
+    cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
     echo $cmd
     eval $cmd
+}
+sendimagetoqqgroup() {
+    # 设置文件夹路径
+    folder_path="$(pwd)/cache/prepost/$1"
+    # 检查文件夹是否存在
+    if [ ! -d "$folder_path" ]; then
+    sendmsggroup "不存在此待处理项目"
+    exit 1
+    fi
+    find "$folder_path" -maxdepth 1 -type f | sort | while IFS= read -r file_path; do
+        echo "发送文件: $file_path"
+        msg=[CQ:image,file=file://$file_path]
+        encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
+        # 构建 curl 命令，并发送编码后的消息
+        cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
+        echo $cmd
+        eval $cmd
+        sleep 1  # 添加延时以避免过于频繁的请求
+    done
+    echo "所有文件已发送"
 }
 renewqzoneloginauto(){
     rm ./cookies-$self_id.json
@@ -37,11 +57,11 @@ echo 收到指令:$1
 object=$(echo $1 | awk '{print $1}')
 command=$(echo $1 | awk '{print $2}')
 flag=$(echo $1 | awk '{print $3}')
+input_id="$self_id"
 echo obj:$object
 echo cmd:$command
 echo flag:$flag
 echo self_id:$self_id
-input_id="$self_id"
 json_file="./AcountGroupcfg.json"
 if [ -z "$input_id" ]; then
   echo "请提供mainqqid或minorqqid。"
@@ -59,12 +79,20 @@ fi
 groupname=$(echo "$group_info" | jq -r '.key')
 groupid=$(echo "$group_info" | jq -r '.value.mangroupid')
 mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
+mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
+
 case $object in
     [0-9]*)
         if [[ "$self_id" == "$mainqqid" ]]; then
-            if [ -d "./getmsgserv/post-step5/$object" ]; then
-                echo $1 >> qqBot/command/commands.txt
-                echo "指令已保存到 qqBot/command/commands.txt"
+            #判断可执行
+             if [ -d "./cache/prepost/$object" ]; then
+            #判断权限
+                groupnameoftag=$(sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$object';")
+                if [[ "$groupnameoftag" == "$groupname" ]];then
+                    ./getmsgserv/processsend.sh "$object $command $flag"
+                else
+                    sendmsggroup '权限错误，无法对非本账号组的帖子进行操作，发送 @本账号 帮助 以查看帮助'
+                fi
             else
                 echo "error: $object 不存在对应的文件夹"
                 sendmsggroup '没有可执行的对象,请检查,发送 @本账号 帮助 以查看帮助'
@@ -82,7 +110,7 @@ case $object in
         ;;
     "设定编号")
         if [[ $command =~ ^[0-9]+$ ]]; then
-            echo $command > ./"$groupname"_numfinal.txt
+            echo $command > ./cache/numb/"$groupname"_numfinal.txt
             sendmsggroup 外部编号已设定为$command
         else
             echo "Error: arg is not a pure number."
@@ -90,7 +118,7 @@ case $object in
         fi
         ;;
     "待处理")
-        numbpending=$(find ./getmsgserv/post-step5 -mindepth 1 -maxdepth 1 -type d -exec basename {} \;)
+        numbpending=$(find ./cache/prepost -mindepth 1 -maxdepth 1 -type d -exec basename {} \;)
         if [ -z $numbpending ]; then
             sendmsggroup 没有待处理项目
         else
@@ -99,7 +127,7 @@ $numbpending"
         fi
         ;;
     "删除待处理")
-        rm -rf ./getmsgserv/post-step5/*
+        rm -rf ./cache/prepost/*
         sendmsggroup 已清空待处理列表
         ;;
     "帮助")
@@ -116,6 +144,7 @@ $numbpending"
 设定编号
 用法：设定编号 xxx （xxx是你希望下一条说说带有的外部编号，必须是纯数字）
 帮助:查看这个帮助列表
+
 审核指令:
 语法: @本账号 内部编号 指令
 (仅在稿件审核流程要求您发送指令时可用的指令)
@@ -125,9 +154,13 @@ $numbpending"
 等：等待180秒，然后重新执行分段-渲染-审核流程，常用于稿件没发完的情况，等待完毕后会再次询问指令
 删：此条不发送（不用机器发，也不会用人工发送）（常用于用户发来的不是稿件的情况）
 拒：拒绝稿件,此条不发送（用于不过审的情况），系统会给发送者发送稿件被拒绝提示
+刷新：重新进行 聊天记录->图片 的过程
 评论：在编号和@发送者的下一行增加文本评论，处理完毕后会再次询问指令
-用法：评论 xxx （xxx是你希望增加的评论）
-拉黑: 不再接收来自此人的投稿'
+用法：@本帐号 内部编号 评论 xxx （xxx是你希望增加的评论）
+回复：向投稿人发送一条信息
+用法：@本帐号 内部编号 回复 xxx （xxx是你希望回复的内容）
+展示：展示稿件的内容
+拉黑：不再接收来自此人的投稿'
         sendmsggroup "$help"
         ;;
     *)

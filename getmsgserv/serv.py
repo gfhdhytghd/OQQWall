@@ -3,6 +3,7 @@ import subprocess
 import json
 import os
 import re
+import sqlite3
 
 # Define storage paths
 RAWPOST_DIR = './getmsgserv/rawpost'
@@ -23,6 +24,19 @@ def read_config(file_path):
     return config
 
 config = read_config('oqqwall.config')
+
+# Read AcountGroupcfg.json to map self_id to ACgroup
+with open('./AcountGroupcfg.json', 'r', encoding='utf-8') as f:
+    account_group_cfg = json.load(f)
+
+self_id_to_acgroup = {}
+for group_name, group_info in account_group_cfg.items():
+    mainqqid = group_info.get('mainqqid')
+    if mainqqid:
+        self_id_to_acgroup[mainqqid] = group_name
+    minorqqid_list = group_info.get('minorqqid', [])
+    for qqid in minorqqid_list:
+        self_id_to_acgroup[qqid] = group_name
 
 class RequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -58,25 +72,36 @@ class RequestHandler(BaseHTTPRequestHandler):
             print(f'Error handling request: {e}')
 
     def handle_friend_recall(self, data):
-        user_id = data.get('user_id')
-        self_id = data.get('self_id')
+        user_id = str(data.get('user_id'))
+        self_id = str(data.get('self_id'))
         message_id = data.get('message_id')
 
         if user_id and message_id:
-            file_path = os.path.join(RAWPOST_DIR, f'{user_id}-{self_id}.json')
-            if os.path.exists(file_path):
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        existing_data = json.load(f)
+            try:
+                conn = sqlite3.connect('cache/OQQWall.db')
+                cursor = conn.cursor()
 
-                    updated_data = [msg for msg in existing_data if msg.get('message_id') != message_id]
-
-                    with open(file_path, 'w', encoding='utf-8') as f:
-                        json.dump(updated_data, f, ensure_ascii=False, indent=4)
-
-                    print('已删除')
-                except Exception as e:
-                    print(f'Error updating file {file_path}: {e}')
+                # Fetch the existing rawmsg
+                cursor.execute('SELECT rawmsg FROM sender WHERE senderid=? AND receiver=?', (user_id, self_id))
+                row = cursor.fetchone()
+                if row:
+                    rawmsg_json = row[0]
+                    try:
+                        message_list = json.loads(rawmsg_json)
+                        # Remove the message with the matching message_id
+                        message_list = [msg for msg in message_list if msg.get('message_id') != message_id]
+                        # Update the rawmsg field
+                        updated_rawmsg = json.dumps(message_list, ensure_ascii=False)
+                        cursor.execute('UPDATE sender SET rawmsg=? WHERE senderid=? AND receiver=?', (updated_rawmsg, user_id, self_id))
+                        conn.commit()
+                        print('Message deleted from rawmsg in database')
+                    except json.JSONDecodeError as e:
+                        print(f'Error decoding rawmsg JSON: {e}')
+                else:
+                    print('No existing messages found for this user and receiver.')
+                conn.close()
+            except Exception as e:
+                print(f'Error deleting message from database: {e}')
 
     def handle_default(self, data):
         # Append to all_posts.json incrementally
@@ -94,7 +119,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if message_type == 'group':
             # Read JSON configuration file
             try:
-                with open('./AcountGroupcfg.json', 'r') as file:
+                with open('./AcountGroupcfg.json', 'r', encoding='utf-8') as file:
                     cfgdata = json.load(file)
             except Exception as e:
                 print(f'Error reading configuration file: {e}')
@@ -120,8 +145,9 @@ class RequestHandler(BaseHTTPRequestHandler):
     def record_private_message(self, data):
         message_type = data.get('message_type')
         post_type = data.get('post_type')
-        user_id = data.get('user_id')
-        self_id = data.get('self_id')
+        user_id = str(data.get('user_id'))
+        self_id = str(data.get('self_id'))
+        nickname = data.get('sender', {}).get('nickname')
         timestamp = data.get('time')
 
         if message_type == 'private' and post_type != 'message_sent' and user_id and timestamp is not None:
@@ -131,26 +157,71 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "time": data.get("time")
             }
 
-            file_path = os.path.join(RAWPOST_DIR, f'{user_id}-{self_id}.json')
+            ACgroup = self_id_to_acgroup.get(self_id, 'Unknown')
+
             try:
-                if os.path.exists(file_path):
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        existing_data = json.load(f)
+                conn = sqlite3.connect('cache/OQQWall.db')
+                cursor = conn.cursor()
+
+                # Check if a record already exists for this sender and receiver
+                cursor.execute('SELECT rawmsg FROM sender WHERE senderid=? AND receiver=?', (user_id, self_id))
+                row = cursor.fetchone()
+                if row:
+                    # If exists, load the existing rawmsg and append the new message
+                    rawmsg_json = row[0]
+                    try:
+                        message_list = json.loads(rawmsg_json)
+                        if not isinstance(message_list, list):
+                            message_list = []
+                    except json.JSONDecodeError:
+                        message_list = []
+
+                    message_list.append(simplified_data)
+                    # Sort messages by time
+                    message_list = sorted(message_list, key=lambda x: x.get('time', 0))
+
+                    updated_rawmsg = json.dumps(message_list, ensure_ascii=False)
+                    cursor.execute('''
+                        UPDATE sender 
+                        SET rawmsg=?, modtime=CURRENT_TIMESTAMP 
+                        WHERE senderid=? AND receiver=?
+                    ''', (updated_rawmsg, user_id, self_id))
                 else:
-                    existing_data = []
+                    # If not exists, insert a new record with the message
+                    message_list = [simplified_data]
+                    rawmsg_json = json.dumps(message_list, ensure_ascii=False)
+                    cursor.execute('''
+                        INSERT INTO sender (senderid, receiver, ACgroup, rawmsg, modtime) 
+                        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ''', (user_id, self_id, ACgroup, rawmsg_json))
 
-                if not existing_data:
-                    sender_info = {"sender": data.get("sender")}
-                    existing_data.append(sender_info)
+                    # Check the max tag from the preprocess table
+                    cursor.execute('SELECT MAX(tag) FROM preprocess')
+                    max_tag = cursor.fetchone()[0] or 0
+                    new_tag = max_tag + 1
 
-                existing_data.append(simplified_data)
-                sorted_data = sorted(existing_data, key=lambda x: x.get('time', 0))
+                    # Insert into preprocess table
+                    cursor.execute('''
+                        INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup) 
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (new_tag, user_id, nickname, self_id, ACgroup))
 
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(sorted_data, f, ensure_ascii=False, indent=4)
+                    # Commit changes
+                    conn.commit()
+
+                    # Call the preprocess.sh script with the new tag
+                    preprocess_script_path = './getmsgserv/preprocess.sh'
+                    try:
+                        subprocess.run([preprocess_script_path, str(new_tag)], check=True)
+                    except subprocess.CalledProcessError as e:
+                        print(f"Preprocess script execution failed: {e}")
+
+                conn.commit()
+                conn.close()
             except Exception as e:
-                print(f'Error recording private message to {file_path}: {e}')
+                print(f'Error recording private message to database: {e}')
 
+            # Keep writing to priv_post.json as per original code
             priv_post_path = os.path.join(ALLPOST_DIR, 'priv_post.json')
             try:
                 if os.path.exists(priv_post_path):

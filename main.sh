@@ -152,13 +152,9 @@ else
 fi
 mangroupids=($(jq -r '.[] | .mangroupid' ./AcountGroupcfg.json))
 # 初始化目录和文件
-mkdir ./getmsgserv/rawpost
-mkdir ./getmsgserv/post-step1
-mkdir ./getmsgserv/post-step2
-mkdir ./getmsgserv/post-step3
-mkdir ./getmsgserv/post-step4
-mkdir ./getmsgserv/post-step5
-mkdir ./qqBot/command
+
+mkdir /dev/shm/OQQWall/
+touch /dev/shm/OQQWall/oqqwallhtmlcache.html
 if [ ! -f "./qqBot/command/commands.txt" ]; then
     touch ./qqBot/command/commands.txt
     echo "已创建文件: ./qqBot/command/commands.txt"
@@ -193,21 +189,7 @@ trap "kill $child_pid" EXIT
 
 echo 等待启动十秒
 sleep 10
-waitforfilechange(){
-        last_mod_time_cmd=$(stat -c %Y "$1")
 
-    while true; do
-        sleep 5
-        # 获取文件的当前修改时间
-        current_mod_time_cmd=$(stat -c %Y "$1")
-
-        # 检查文件是否已被修改
-        if [ "$current_mod_time_cmd" -ne "$last_mod_time_cmd" ]; then
-            echo 检测到指令
-            break
-        fi
-    done
-}
 getnumnext(){
     numnow=$(cat ./numb.txt)
     numnext=$((numnow + 1))
@@ -235,60 +217,105 @@ sendmsggroup(){
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
     for groupid in "${mangroupids[@]}"; do
-      cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
+      cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
       echo $cmd
       eval $cmd
     done
 }
 
-waitforprivmsg(){
-    # 获取初始文件列表
-    initial_files=$(ls "$DIR")
-    new_files=()  # 新文件数组
 
-    while true; do
-        # 获取当前文件列表
-        current_files=$(ls "$DIR")
-
-        # 比较文件列表，查找新增文件
-        for file in $current_files; do
-            if ! echo "$initial_files" | grep -q "$file"; then
-                # 将新增的文件添加到数组
-                new_files+=("$file")
-            fi
-        done
-
-        # 如果有新增文件，处理并打印
-        if [ ${#new_files[@]} -gt 0 ]; then
-            for file in "${new_files[@]}"; do
-                id=$(basename "$file" .json)
-                id=$(echo "$id" | sed 's/.*\///') 
-                getnumnext
-                ./processsend.sh "$id" "$numnext" &
-                last_mod_time=$(stat -c %Y "getmsgserv/rawpost/$file")  # 获取文件的修改时间
-            done
-            new_files=()  # 处理完后清空新增文件数组
-        fi
-
-        # 更新初始文件列表
-        initial_files=$current_files
-        sleep 1
-    done
-}
-
-
-# 监测目录
-DIR="./getmsgserv/rawpost/"
-# 获取初始文件列表
-initial_files=$(ls "$DIR")
 if [[ "$enable_selenium_autocorrecttag_onstartup" == true ]]; then
     echo 初始化编号...
     getnumnext-startup
     fi
 sendmsggroup 机器人已启动
-echo 启动系统主循环
+json_content=$(cat ./AcountGroupcfg.json)
+runidlist=($(echo "$json_content" | jq -r '.[] | .mainqqid, .minorqqid[]'))
+getinfo(){
+    json_file="./AcountGroupcfg.json"
+    # 检查输入是否为空
+    if [ -z "$1" ]; then
+    echo "请提供mainqqid或minorqqid。"
+    exit 1
+    fi
+    # 使用 jq 查找输入ID所属的组信息
+    group_info=$(jq -r --arg id "$1" '
+    to_entries[] | select(.value.mainqqid == $id or (.value.minorqqid[]? == $id))
+    ' "$json_file")
+    # 检查是否找到了匹配的组
+    if [ -z "$group_info" ]; then
+    echo "未找到ID为 $1 的相关信息。"
+    exit 1
+    fi
+    # 提取各项信息并存入变量
+    groupname=$(echo "$group_info" | jq -r '.key')
+    groupid=$(echo "$group_info" | jq -r '.value.mangroupid')
+    mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
+    minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
+    mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
+    minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
+    # 初始化端口变量
+    port=""
+    # 检查输入ID是否为mainqqid
+    if [ "$1" == "$mainqqid" ]; then
+    port=$mainqq_http_port
+    else
+    # 遍历 minorqqid 数组并找到对应的端口
+    i=0
+    for minorqqid in $minorqqid; do
+        if [ "$1" == "$minorqqid" ]; then
+        port=$(echo "$minorqq_http_ports" | sed -n "$((i+1))p")
+        break
+        fi
+        ((i++))
+    done
+    fi
+}
+if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null
+then
+    echo "serv.py is already running"
+else
+    source ./venv/bin/activate
+    python3 ./getmsgserv/serv.py &
+    echo "serv.py started"
+fi
+
+# Check if the OneBot server process is running
+if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null; then
+    pkill qq
+fi
+
+for qqid in "${runidlist[@]}"; do
+    echo "Starting QQ process for ID: $qqid"
+    nohup xvfb-run -a qq --no-sandbox -q "$qqid" &
+done
+fi
+
 while true; do
-    echo 启动系统等待循环
-    waitforprivmsg
-    last_mod_time=$(stat -c %Y "$file_to_watch")
+    # 获取当前小时和分钟
+    current_time=$(date +"%H:%M")
+    echo $current_time
+    current_M=$(date +"%M")
+    if [ "$current_M" == "00" ];then
+        echo 'reach :00'
+        #检查是否为早上7点
+        if [ "$current_time" == "07:00" ]; then
+            echo 'reach 7:00'
+            source ./venv/bin/activate
+            # 运行 Python 脚本
+            for qqid in "${runidlist[@]}"; do
+                echo "Like everyone with ID: $qqid"
+                getinfo $qqid
+                python3 ./qqBot/likeeveryday.py $port
+            done
+        fi
+        pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
+        python3 ./getmsgserv/serv.py &
+        echo serv.py 已重启
+        # 等待 1 小时，直到下一个小时
+        sleep 3539
+    else
+        # 如果不是整点，等待一分钟后再检查时间
+        sleep 59
+    fi
 done
