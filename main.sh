@@ -180,13 +180,6 @@ touch ./numfinal.txt
 pkill startd.sh
 # Activate virtual environment
 source ./venv/bin/activate
-# start startd
-./qqBot/startd.sh &
-child_pid=$!
-trap "kill $child_pid" EXIT
-
-echo 等待启动十秒
-sleep 10
 
 getnumnext(){
     numnow=$(cat ./numb.txt)
@@ -226,9 +219,9 @@ if [[ "$enable_selenium_autocorrecttag_onstartup" == true ]]; then
     echo 初始化编号...
     getnumnext-startup
     fi
-sendmsggroup 机器人已启动
 json_content=$(cat ./AcountGroupcfg.json)
 runidlist=($(echo "$json_content" | jq -r '.[] | .mainqqid, .minorqqid[]'))
+mainqqlist=($(echo "$json_content" | jq -r '.[] | .mainqqid'))
 getinfo(){
     json_file="./AcountGroupcfg.json"
     # 检查输入是否为空
@@ -287,7 +280,12 @@ for qqid in "${runidlist[@]}"; do
     echo "Starting QQ process for ID: $qqid"
     nohup xvfb-run -a qq --no-sandbox -q "$qqid" &
 done
-fi
+
+sleep 10
+for mqqid in ${mainqqlist[@]}; do
+  getinfo $mqqid
+  sendmsggroup 机器人已启动
+done
 
 while true; do
     # 获取当前小时和分钟
