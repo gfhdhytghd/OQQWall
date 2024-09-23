@@ -192,10 +192,7 @@ def main():
         "      \"message_id\","
         "      \"message_id\""
         "       #填写组内message的message_id数据到messages数组中，(注意是message_id不是time)不需要填写其他数据\n"
-        "  ],\n"
-        "  \"why\": {\n"
-        "  #在此填写你分段和填写各项目的依据与理由和原因\n"
-        "   }\n"
+        "  ]\n"
         "}"
     )
 

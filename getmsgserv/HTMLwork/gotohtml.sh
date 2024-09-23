@@ -10,14 +10,15 @@ fi
 
 userid=$(sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = '$tag';")
 nickname=$(sqlite3 'cache/OQQWall.db' "SELECT nickname FROM preprocess WHERE tag = '$tag';")
-
+userid_show=$userid
 # Extract values
 needpriv=$(echo "$json_data" | jq -r '.needpriv')
 safemsg=$(echo "$json_data" | jq -r '.safemsg')
 
 if [[ "$needpriv" == "true" && "$safemsg" == "true" ]]; then
     json_data=$(echo "$json_data" | jq '.sender.user_id=10000 | .sender.nickname="匿名"')
-    userid=""
+    userid="10000"
+    userid_show=""
 fi
 
 # Generate message_html
@@ -137,7 +138,7 @@ html_content=$(cat <<EOF
             <img src="http://q.qlogo.cn/headimg_dl?dst_uin=${userid}&spec=640&img_type=jpg" alt="Profile Image">
             <div class="header-text">
                 <h1>${nickname}</h1>
-                <h2>${userid}</h2>
+                <h2>${userid_show}</h2>
             </div>
         </div>
         <div class="content">

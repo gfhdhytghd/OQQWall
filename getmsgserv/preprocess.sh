@@ -1,8 +1,10 @@
 #!/bin/bash
 tag=$1
+flag=$2
 receiver=$(sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$tag';")
-userid=$(sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = '$tag';")
+senderid=$(sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = '$tag';")
 waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+if [[ $flag == nowaittime ]];then waittime=0 ;fi
 json_file="./AcountGroupcfg.json"
 group_info=$(jq -r --arg receiver "$receiver" '
   to_entries[] | select(.value.mainqqid == $receiver or (.value.minorqqid[]? == $receiver))
@@ -11,7 +13,7 @@ if [ -z "$group_info" ]; then
   echo "未找到ID为 $tag 的相关信息。"
   exit 1
 fi
-echo "开始处理来自$userid的消息,账号$receiver,内部编号$tag"
+echo "开始处理来自$senderid的消息,账号$receiver,内部编号$tag"
 groupname=$(echo "$group_info" | jq -r '.key')
 groupid=$(echo "$group_info" | jq -r '.value.mangroupid')
 mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
@@ -36,7 +38,8 @@ else
 fi
 echo waitingforsender...
 sleep $waittime
-last_modtime=$(sqlite3 'cache/OQQWall.db' "SELECT modtime FROM sender WHERE senderid = '$userid';")
+last_modtime=$(sqlite3 'cache/OQQWall.db' "SELECT modtime FROM sender WHERE senderid = '$senderid';")
+sqlite3 'cache/OQQWall.db' " update sender SET processtime = '$last_modtime' WHERE senderid = '$senderid';"
 
 sendmsggroup(){
     msg=$1
@@ -59,7 +62,7 @@ sendimagetoqqgroup() {
         msg=[CQ:image,file=file://$file_path]
         encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
         # 构建 curl 命令，并发送编码后的消息
-        cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
+        cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
         eval $cmd
         sleep 1  # 添加延时以避免过于频繁的请求
     done
@@ -140,14 +143,14 @@ notregular=$(echo $LMjson | jq -r '.notregular')
 safemsg=$(echo $LMjson | jq -r '.safemsg')
 numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
 if [ "$notregular" = "false" ]; then
-  MSGcache=有常规消息
+  sendmsggroup 有常规消息
 else
-  MSGcache=有非常规消息
+  sendmsggroup 有非常规消息
 fi
 if [ "$isover" = "true" ]; then
-  MSGcache+=，AI判断已写完
+  MSGcache=AI判断已写完
 else
-  MSGcache+=，AI判断未写完
+  MSGcache=AI判断未写完
 fi
 if [ "$safemsg" = "true" ]; then
   MSGcache+=，AI审核判定安全
@@ -155,6 +158,6 @@ elif [ "$safemsg" = "false" ]; then
   MSGcache+=，AI审核判定不安全
 fi
 MSGcache+=,内部编号$tag，外部编号$numfinal
-sendmsggroup "$MSGcache"
 sendimagetoqqgroup
+sendmsggroup "$MSGcache"
 sendmsggroup 请发送指令

@@ -86,7 +86,7 @@ sendimagetoqqgroup() {
         msg=[CQ:image,file=file://$file_path]
         encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
         # 构建 curl 命令，并发送编码后的消息
-        cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
+        cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
         eval $cmd
         sleep 1  # 添加延时以避免过于频繁的请求
     done
@@ -313,14 +313,14 @@ sendmsggroup(){
     msg=$1
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
-    cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$groupid&message=$encoded_msg\""
+    cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
     eval $cmd
 }
 sendmsgcommugroup(){
     msg=$1
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
-    cmd="curl \"http://127.0.0.1:8083/send_group_msg?group_id=$commgroup_id&message=$encoded_msg\""
+    cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$commgroup_id&message=$encoded_msg\""
     eval $cmd
 }
 sendmsgpriv(){
