@@ -1,8 +1,6 @@
 #!/bin/bash
 apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 http-serv-port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-auto_sync_communicate_group_id=$(grep 'auto_sync_communicate_group_id' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-enable_selenium_autocorrecttag_onstartup=$(grep 'enable_selenium_autocorrecttag_onstartup' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 DIR="./getmsgserv/rawpost/"
 check_variable() {
