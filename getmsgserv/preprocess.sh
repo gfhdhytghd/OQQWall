@@ -140,12 +140,12 @@ need_priv=$(echo $LMjson | jq -r '.needpriv' )
 isover=$(echo $LMjson | jq -r '.isover')
 notregular=$(echo $LMjson | jq -r '.notregular')
 safemsg=$(echo $LMjson | jq -r '.safemsg')
-sendimagetoqqgroup
 if [ "$notregular" = "false" ]; then
   sendmsggroup 有常规消息
 else
   sendmsggroup 有非常规消息
 fi
+sendimagetoqqgroup
 if [ "$isover" = "true" ]; then
   MSGcache=AI判断已写完
 else

@@ -51,7 +51,7 @@ postqzone(){
     sendqueue=("${goingtosendid[@]}")
     for qqid in "${sendqueue[@]}"; do
         echo "Sending qzone use id: $qqid"
-        postprocess $qqid
+        postprocess_pipe $qqid
     done
     sendmsgpriv $senderid "$numfinal 已发送(系统自动发送，请勿回复)"
     numfinal=$((numfinal + 1))
@@ -102,6 +102,7 @@ postprocess(){
                 renewqzoneloginauto $1
             else
                 sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,发送\"@出错账号 手动重新登陆\"以手动重新登陆,完毕后请重新发送审核指令,请发送指令"
+                exit 1
                 break
             fi
         else
@@ -113,13 +114,58 @@ postprocess(){
         attempt=$((attempt+1))
     done
 }
+postprocess_pipe(){
+    if [ ! -f "./cookies-$1.json" ]; then
+        echo "Cookies file does not exist. Executing relogin script."
+        renewqzoneloginauto $1
+    else
+        echo "Cookies file exists. No action needed."
+    fi
+    json_data=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+    need_priv=$(echo $json_data|jq -r '.needpriv')
+    sendimgfolder=$(pwd)/cache/prepost/$object
+    # Collect image paths
+    file_paths=()
+    for file in "$sendimgfolder"/*; do
+        file_paths+=("\"file://$file\"")
+    done
 
+    # Join the image paths with commas
+    IFS=','
+    filelist=$(echo "[${file_paths[*]}]")
 
-
-
-
-
-
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+        cookies=$(cat ./cookies-$1.json)
+        
+        # Fix JSON formatting by ensuring proper commas and quotes are placed
+        echo "{\"text\":\"$message\",\"image\":$filelist,\"cookies\":$cookies}" > ./qzone_in_fifo
+        
+        echo "$postcommand"
+        
+        # Execute the command
+        eval $postcommand
+        
+        # Check the status
+        post_statue=$(cat ./qzone_out_fifo)
+        if echo "$post_statue"  | grep -q "failed"; then
+            if [ $attempt -lt $max_attempts ]; then
+                renewqzoneloginauto $1
+            else
+                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,请发送指令"
+                exit 1
+            fi
+        elif echo "$post_statue"  | grep -q "success"; then
+            goingtosendid=("${goingtosendid[@]/$qqid}")
+            echo "$1发送完毕"
+            sendmsggroup "$1已发送"
+            break
+        else
+            sendmsggroup "系统错误：$post_statue"
+        fi
+        attempt=$((attempt+1))
+    done
+}
 
 max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 echo processsend收到审核指令:$1
@@ -130,7 +176,6 @@ senderid=$(sqlite3 'cache/OQQWall.db' "select senderid from preprocess where tag
 groupname=$(sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$object';")
 last_mod_time_id=$(sqlite3 'cache/OQQWall.db' "select processtime from sender where senderid=$senderid;")
 receiver=$(sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$object';")
-
 
 group_info=$(jq -r --arg receiver "$receiver" '
   to_entries[] | select(.value.mainqqid == $receiver or (.value.minorqqid[]? == $receiver))
@@ -313,7 +358,7 @@ EOF
         sendmsgpriv $senderid $flag
         ;;
     展示)
-        sendimagetoqqgroup $command
+        sendimagetoqqgroup
         ;;
     *)
         sendmsggroup "没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助"

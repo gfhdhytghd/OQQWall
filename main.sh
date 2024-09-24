@@ -272,6 +272,15 @@ else
     echo "serv.py started"
 fi
 
+if pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" > /dev/null
+then
+    echo "qzone-serv-pipe.py is already running"
+else
+    source ./venv/bin/activate
+    python3 ./python3 ./SendQzone/qzone-serv-pipe.py &
+    echo "qzone-serv-pipe.py started"
+fi
+
 # Check if the OneBot server process is running
 if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null; then
     pkill qq
