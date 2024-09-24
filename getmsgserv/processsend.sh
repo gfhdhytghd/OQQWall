@@ -91,8 +91,7 @@ postprocess(){
     fi
     json_data=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
     need_priv=$(echo $json_data|jq -r '.needpriv')
-    receiver=$(sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$object';")
-    postcommand="python3 ./SendQzone/send.py \"$message\" ./cache/prepost/$object $receiver"
+    postcommand="python3 ./SendQzone/send.py \"$message\" ./cache/prepost/$object $1"
     echo $postcommand
     attempt=1
     while [ $attempt -le $max_attempts ]; do
@@ -102,9 +101,7 @@ postprocess(){
             if [ $attempt -lt $max_attempts ]; then
                 renewqzoneloginauto $1
             else
-                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1"
-                sendmsggroup "发送\"@出错账号 手动重新登陆\"以手动重新登陆",完毕后请重新发送审核指令
-                sendmsggroup 请发送指令
+                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,发送\"@出错账号 手动重新登陆\"以手动重新登陆,完毕后请重新发送审核指令,请发送指令"
                 break
             fi
         else
