@@ -277,7 +277,7 @@ then
     echo "qzone-serv-pipe.py is already running"
 else
     source ./venv/bin/activate
-    python3 ./python3 ./SendQzone/qzone-serv-pipe.py &
+    python3 ./SendQzone/qzone-serv-pipe.py &
     echo "qzone-serv-pipe.py started"
 fi
 
