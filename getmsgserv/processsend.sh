@@ -41,11 +41,14 @@ renewqzoneloginauto(){
 postqzone(){
     message=$(sqlite3 'cache/OQQWall.db' "SELECT comment FROM preprocess WHERE tag = $object;")
     if [ -z "$message" ]; then
+        send_single=true
         if [[ "$need_priv" == "false" ]]; then
             message="#$numfinal @{uin:$senderid,nick:,who:1}"
         else
             message="#$numfinal"
         fi
+    else
+        send_single=false
     fi
     echo {$goingtosendid[@]}
     sendqueue=("${goingtosendid[@]}")

@@ -24,6 +24,33 @@ mainqqid_list=()
 minorqqid_list=()
 http_ports_list=()
 
+if [ ! -f ./cache/OQQWall.db ]; then
+  # 定义数据库文件名
+  DB_NAME="./cache/OQQWall.db"
+
+  # 创建 SQLite 数据库并创建表
+sqlite3 $DB_NAME <<EOF
+CREATE TABLE sender (
+    senderid TEXT,
+    receiver TEXT,
+    ACgroup TEXT,
+    rawmsg TEXT,
+    modtime TEXT,
+    processtime TEXT
+);
+CREATE TABLE preprocess (
+    tag INT,
+    senderid TEXT,
+    nickname TEXT,
+    receiver TEXT,
+    ACgroup TEXT,
+    AfterLM TEXT,
+    comment TEXT,
+    numnfinal INT
+);
+EOF
+
+fi
 # 检查 JSON 文件是否存在
 if [ ! -f "$json_file" ]; then
   echo "错误：未找到账户组配置文件！"
