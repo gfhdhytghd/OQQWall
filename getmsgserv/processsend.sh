@@ -217,7 +217,7 @@ IFS=',' read -ra minorqqids <<< "$minorqqid"
 for qqid in "${minorqqids[@]}"; do
     goingtosendid+=("$qqid")
 done
-touch /cache/numb/"$groupname"_numfinal.txt
+touch ./cache/numb/"$groupname"_numfinal.txt
 numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
 
 case $command in
