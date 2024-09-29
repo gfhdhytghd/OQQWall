@@ -13,7 +13,7 @@ getmsgserv/post-step2
 getmsgserv/post-step3
 getmsgserv/post-step4
 getmsgserv/post-step5
-getmsgserv/all/
+getmsgserv/all
 cookies.json
 qqBot/command/commands.txt
 qrcode.png
@@ -23,3 +23,5 @@ numfinal.txt
 main.sh.bak
 todo
 cache
+.vscode/settings.json
+.vscode/extensions.json
