@@ -55,6 +55,8 @@ class RequestHandler(BaseHTTPRequestHandler):
             # Ignore auto-reply messages
             if data.get('message_type') == 'private' and 'raw_message' in data and '自动回复' in data['raw_message']:
                 print("Received auto-reply message, ignored.")
+            elif data.get('message_type') == 'private' and 'raw_message' in data and '请求添加你为好友' in data['raw_message']:
+                print("Received friend-add request message, ignored.")
             else:
                 # Handle different types of notifications
                 if data.get('notice_type') == 'friend_recall':
