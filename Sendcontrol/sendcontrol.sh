@@ -1,9 +1,5 @@
 #!/bin/bash
 
-# ================================
-# sendcontrol 脚本
-# ================================
-
 # 激活虚拟环境
 activate_venv() {
     if [ -f "./venv/bin/activate" ]; then
@@ -136,12 +132,11 @@ savetostorge(){
     # 获取新的 tag 值
     new_tag=$(sqlite3 "$db_path" "SELECT IFNULL(MAX(tag), 0) + 1 FROM sendstorge_$groupname;")
 
-    for img in "${images[@]}"; do
-        sqlite3 "$db_path" "INSERT INTO sendstorge_$groupname (tag, atsender, image) VALUES ($new_tag, '$senderid', '$img');"
-    done
+    # 将所有图片连接为逗号分隔的字符串
+    image_list=$(IFS=,; echo "${images[*]}")
 
-    # 保存消息文本
-    sqlite3 "$db_path" "INSERT INTO sendstorge_$groupname (tag, atsender, image) VALUES ($new_tag, '$senderid', '$text');"
+    # 将消息文本保存到 atsender 字段，图片列表保存到 image 字段
+    sqlite3 "$db_path" "INSERT INTO sendstorge_$groupname (tag, atsender, image) VALUES ($new_tag, '$text', '$image_list');"
     
     echo "内容已保存到存储，tag=$new_tag"
 }
@@ -164,27 +159,21 @@ post_pre(){
     if [ "$mode" == "all" ]; then
         # 获取所有存储的消息和图片
         db_path="./cache/OQQWall.db"
-        messages=$(sqlite3 "$db_path" "SELECT image FROM sendstorge_$groupname WHERE image NOT LIKE 'file://%';")
-        images=$(sqlite3 "$db_path" "SELECT image FROM sendstorge_$groupname WHERE image LIKE 'file://%';")
+        combined_message=$(sqlite3 "$db_path" "SELECT GROUP_CONCAT(atsender, ' ') FROM sendstorge_$groupname;")
+        combined_images=$(sqlite3 "$db_path" "SELECT GROUP_CONCAT(image, ',') FROM sendstorge_$groupname;")
 
-        # 合并消息
-        combined_message=""
-        while IFS= read -r line; do
-            combined_message+="$line "
-        done <<< "$messages"
-        combined_message=$(echo "$combined_message" | xargs)  # 去除多余空格
-
-        # 合并图片列表为 JSON 数组
+        # 将图片列表转换为 JSON 数组
+        IFS=',' read -ra image_array <<< "$combined_images"
         image_list="["
         first=true
-        while IFS= read -r img; do
+        for img in "${image_array[@]}"; do
             if [ "$first" = true ]; then
-                image_list+="\"${img#file://}\""
+                image_list+="\"$img\""
                 first=false
             else
-                image_list+=",\"${img#file://}\""
+                image_list+=",\"$img\""
             fi
-        done <<< "$images"
+        done
         image_list+="]"
 
         # 发送合并后的内容
@@ -193,34 +182,29 @@ post_pre(){
         # 清空存储
         sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"
         echo "所有存储内容已发送并清空。"
+
     elif [ "$mode" == "single" ]; then
-        # 获取最新的 tag
-        db_path="./cache/OQQWall.db"
-        latest_tag=$(sqlite3 "$db_path" "SELECT MAX(tag) FROM sendstorge_$groupname;")
+        # 直接使用最新的FIFO输入数据，不从数据库读取
+        local text_in="$2"
+        local image_in=("${@:3}")
 
-        # 获取对应的消息和图片
-        message=$(sqlite3 "$db_path" "SELECT image FROM sendstorge_$groupname WHERE tag=$latest_tag AND image NOT LIKE 'file://%';")
-        images=$(sqlite3 "$db_path" "SELECT image FROM sendstorge_$groupname WHERE tag=$latest_tag AND image LIKE 'file://%';")
-
-        # 构建图片列表
+        # 将图片列表转换为 JSON 数组
         image_list="["
         first=true
-        while IFS= read -r img; do
+        for img in "${image_in[@]}"; do
             if [ "$first" = true ]; then
                 image_list+="\"${img#file://}\""
                 first=false
             else
                 image_list+=",\"${img#file://}\""
             fi
-        done <<< "$images"
+        done
         image_list+="]"
 
-        # 发送
-        postqzone "$message" "$image_list"
-
-        # 删除已发送的 tag
-        sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname WHERE tag=$latest_tag;"
-        echo "最新的存储内容已发送并删除。"
+        # 发送直接输入的内容
+        postqzone "$text_in" "$image_list"
+        
+        echo "最新的FIFO输入已发送。"
     fi
 }
 
@@ -260,36 +244,11 @@ get_send_info(){
     mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
     minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
     minorqqids=$(echo "$group_info" | jq -r '.value.minorqqid[]')
-
-    port=""
-    if [ "$receiver" == "$mainqqid" ]; then
-        port=$mainqq_http_port
-    else
-        i=1
-        for minorqqid in $minorqqids; do
-            if [ "$receiver" == "$minorqqid" ]; then
-                port=$(echo "$minorqq_http_ports" | cut -d',' -f"$i")
-                break
-            fi
-            ((i++))
-        done
-    fi
-
-    echo "port=$port"
-
     goingtosendid=("$mainqqid")
     IFS=',' read -ra minorqqids_array <<< "$minorqqids"
     for qqid in "${minorqqids_array[@]}"; do
         goingtosendid+=("$qqid")
     done
-
-    # 创建 FIFO 管道
-    if [ ! -p ./presend_in_fifo ]; then
-        mkfifo ./presend_in_fifo
-    fi
-    if [ ! -p ./presend_out_fifo ]; then
-        mkfifo ./presend_out_fifo
-    fi
 }
 
 # 主循环
@@ -300,8 +259,6 @@ main_loop(){
             image_in=($(echo "$in_json_data" | jq -r '.image[]'))  
             groupname=$(echo "$in_json_data" | jq -r '.groupname')
             initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue')
-            senderid=$(echo "$in_json_data" | jq -r '.senderid')  # 假设 JSON 中有 senderid
-            receiver=$(echo "$in_json_data" | jq -r '.receiver')  # 假设 JSON 中有 receiver
 
             get_send_info
             run_rules "$text_in" "${image_in[@]}"
@@ -317,6 +274,13 @@ initialize(){
     max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
     if [ -z "$max_attempts" ]; then
         max_attempts=3  # 默认重试次数
+    fi
+     # 创建 FIFO 管道
+    if [ ! -p ./presend_in_fifo ]; then
+        mkfifo ./presend_in_fifo
+    fi
+    if [ ! -p ./presend_out_fifo ]; then
+        mkfifo ./presend_out_fifo
     fi
 }
 
