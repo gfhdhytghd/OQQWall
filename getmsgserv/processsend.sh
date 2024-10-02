@@ -42,6 +42,8 @@ postqzone(){
     message=$(sqlite3 'cache/OQQWall.db' "SELECT comment FROM preprocess WHERE tag = $object;")
     if [ -z "$message" ]; then
         send_single=true
+        json_data=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+        need_priv=$(echo $json_data|jq -r '.needpriv')
         if [[ "$need_priv" == "false" ]]; then
             message="#$numfinal @{uin:$senderid,nick:,who:1}"
         else
@@ -86,6 +88,7 @@ postqzone(){
     fi
 }
 postprocess(){
+    #此函数已被弃用
     if [ ! -f "./cookies-$1.json" ]; then
         echo "Cookies file does not exist. Executing relogin script."
         renewqzoneloginauto $1
@@ -194,7 +197,6 @@ mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
 sendmsggroup 已收到指令
 minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
 minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
-
 port=""
 # 检查输入ID是否为mainqqid
 if [ "$receiver" == "$mainqqid" ]; then
@@ -337,13 +339,15 @@ EOF
         getmsgserv/preprocess.sh $object nowaittime
         ;;
     评论)
+        json_data=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+        need_priv=$(echo $json_data|jq -r '.needpriv')
         if [[ "$need_priv" == "false" ]]; then
             message="#$numfinal @{uin:$senderid,nick:,who:1}"
         else
             message="#$numfinal"
         fi
         if [ -n "$flag" ]; then
-            message="${message}"$'\n'"${flag}"
+            message="${message}"' '"${flag}"
             sendmsggroup "增加评论后的文本：\n $message"
             sendmsggroup 请发送指令
         else
