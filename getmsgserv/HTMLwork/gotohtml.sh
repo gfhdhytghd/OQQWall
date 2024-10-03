@@ -112,8 +112,8 @@ html_content=$(cat <<EOF
         }
         .cqface {
             vertical-align: middle; 
-            width: 20px; 
-            height: 20px;
+            width: 20px!important; 
+            height: 20px!important;
             margin: 0 0 0 0px!important;
             display: inline!important;
             padding:0px!important;
