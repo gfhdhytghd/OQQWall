@@ -110,7 +110,6 @@ for ((i=0; i<$pages; i++)); do
     formatted_index=$(printf "%02d" $i)
     convert -density 360 -quality 90 /dev/shm/OQQWall/oqqwallpdfcache.pdf[$i] $folder/${tag}-${formatted_index}.jpeg
 done
-} 200>/dev/shm/OQQWall/oqqwall.lock  # Lock the directory with a lock file
 existing_files=$(ls "$folder" | wc -l)
 next_file_index=$existing_files
 echo "$json_data" | jq -r '.messages[].message[] | select(.type == "image" and .data.sub_type == 0) | .data.url' | while read -r url; do
@@ -123,6 +122,7 @@ echo "$json_data" | jq -r '.messages[].message[] | select(.type == "image" and .
     # 增加文件索引
     next_file_index=$((next_file_index + 1))
 done
+} 200>/dev/shm/OQQWall/oqqwall.lock  # Lock the directory with a lock file
 cd $folder
 for file in *.*; do
   # 检查文件是否存在
