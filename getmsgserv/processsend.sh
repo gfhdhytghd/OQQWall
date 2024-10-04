@@ -154,20 +154,25 @@ postprocess_pipe(){
         
         # Check the status
         post_statue=$(cat ./qzone_out_fifo)
-        if echo "$post_statue"  | grep -q "failed"; then
+        if echo "$post_statue"  | grep -q "success"; then
+            goingtosendid=("${goingtosendid[@]/$qqid}")
+            echo "$1发送完毕"
+            sendmsggroup "$1已发送"
+            break
+        elif echo "$post_statue"  | grep -q "failed"; then
             if [ $attempt -lt $max_attempts ]; then
                 renewqzoneloginauto $1
             else
                 sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,请发送指令"
                 exit 1
             fi
-        elif echo "$post_statue"  | grep -q "success"; then
-            goingtosendid=("${goingtosendid[@]/$qqid}")
-            echo "$1发送完毕"
-            sendmsggroup "$1已发送"
-            break
         else
-            sendmsggroup "系统错误：$post_statue"
+            if [ $attempt -lt $max_attempts ]; then
+                renewqzoneloginauto $1
+            else
+                sendmsggroup "系统错误：$post_statue"
+                exit 1
+            fi
         fi
         attempt=$((attempt+1))
     done
