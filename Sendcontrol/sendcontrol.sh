@@ -62,12 +62,13 @@ renewqzoneloginauto(){
     python3 ./SendQzone/qzonerenewcookies.py $1
 }
 postqzone(){
-    message=$1
+    message_sending=$1
+    image_send_list=$2
     echo {$goingtosendid[@]}
     sendqueue=("${goingtosendid[@]}")
     for qqid in "${sendqueue[@]}"; do
         echo "Sending qzone use id: $qqid"
-        postprocess_pipe $qqid
+        postprocess_pipe "$qqid" "$image_send_list" "$message_sending"
     done
     #sendmsgpriv $senderid "$numfinal 已发送(系统自动发送，请勿回复)"
     #numfinal=$((numfinal + 1))
@@ -75,13 +76,14 @@ postqzone(){
 }
 
 postprocess_pipe(){
-    image_send_list=$1
+    image_send_list=$2
+    message_sending=$3
     attempt=1
     while [ $attempt -le $max_attempts ]; do
         cookies=$(cat ./cookies-$1.json)
         
         # Fix JSON formatting by ensuring proper commas and quotes are placed
-        echo "{\"text\":\"$message\",\"image\":$image_send_list,\"cookies\":$cookies}" > ./qzone_in_fifo
+        echo "{\"text\":\"$message_sending\",\"image\":$image_send_list,\"cookies\":$cookies}" > ./qzone_in_fifo
         
         echo "$postcommand"
         
@@ -126,26 +128,34 @@ savetostorge(){
     shift
     local images=("$@")
     local db_path="./cache/OQQWall.db"
+    
+    tag=""
+    char=""
+
+    # 使用正则表达式匹配
+    if [[ $text =~ ^#([0-9]+)(.*)$ ]]; then
+        num="${BASH_REMATCH[1]}"  # 提取数字部分
+        char="${BASH_REMATCH[2]}" # 提取字符部分（可能为空）
+    else
+        # 不以 # 开头，整个字符串作为字符部分
+        char="$text"
+    fi
 
     checkandcreattable
-
-    # 获取新的 tag 值
-    new_tag=$(sqlite3 "$db_path" "SELECT IFNULL(MAX(tag), 0) + 1 FROM sendstorge_$groupname;")
-
     # 将所有图片连接为逗号分隔的字符串
     image_list=$(IFS=,; echo "${images[*]}")
 
     # 将消息文本保存到 atsender 字段，图片列表保存到 image 字段
-    sqlite3 "$db_path" "INSERT INTO sendstorge_$groupname (tag, atsender, image) VALUES ($new_tag, '$text', '$image_list');"
+    sqlite3 "$db_path" "INSERT INTO sendstorge_$groupname (tag, atsender, image) VALUES ($tag, '$char', '$image_list');"
     
-    echo "内容已保存到存储，tag=$new_tag"
+    echo "内容已保存到存储，tag=$tag"
 }
 
 # 处理组
 process_group(){
     local db_path="./cache/OQQWall.db"
     local count=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM sendstorge_$groupname;")
-    if [ "$count" -ge 40 ]; then  # 假设阈值为40
+    if [ "$count" -ge 9 ]; then  # 假设阈值为40
         echo "sendnow"
     else
         echo "hold"
@@ -159,11 +169,15 @@ post_pre(){
     if [ "$mode" == "all" ]; then
         # 获取所有存储的消息和图片
         db_path="./cache/OQQWall.db"
+
         combined_message=$(sqlite3 "$db_path" "SELECT GROUP_CONCAT(atsender, ' ') FROM sendstorge_$groupname;")
         combined_images=$(sqlite3 "$db_path" "SELECT GROUP_CONCAT(image, ',') FROM sendstorge_$groupname;")
+        mintag=$(sqlite3 "$db_path" "SELECT MIN(tag) FROM sendstorge_$groupname;")
+        maxtag=$(sqlite3 "$db_path" "SELECT MAX(tag) FROM sendstorge_$groupname;")
 
         # 将图片列表转换为 JSON 数组
-        IFS=',' read -ra image_array <<< "$combined_images"
+        combined_images="${combined_images// /,}"
+        IFS=',' read -r image_array <<< "$combined_images"
         image_list="["
         first=true
         for img in "${image_array[@]}"; do
@@ -177,16 +191,15 @@ post_pre(){
         image_list+="]"
 
         # 发送合并后的内容
-        postqzone "$senderid" "$receiver" "$combined_message" "$image_list"
+        postqzone "#$mintag~$maxtag $combined_message" "$image_list"
+        sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"
 
         # 清空存储
+        sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"
         sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"
         echo "所有存储内容已发送并清空。"
 
     elif [ "$mode" == "single" ]; then
-        # 直接使用最新的FIFO输入数据，不从数据库读取
-        local text_in="$2"
-        local image_in=("${@:3}")
 
         # 将图片列表转换为 JSON 数组
         image_list="["
@@ -254,6 +267,10 @@ get_send_info(){
 # 主循环
 main_loop(){
     while true; do
+        text_in=""
+        image_in=()
+        groupname=""
+        initsendstatue=""
         if read -r in_json_data < ./presend_in_fifo; then
             text_in=$(echo "$in_json_data" | jq -r '.text')
             image_in=($(echo "$in_json_data" | jq -r '.image[]'))  
