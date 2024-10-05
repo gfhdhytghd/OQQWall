@@ -308,6 +308,14 @@ else
     echo "qzone-serv-pipe.py started"
 fi
 
+if pgrep -f "sendcontrol.sh" > /dev/null
+then
+    echo "sendcontrol.sh is already running"
+else
+    ./Sendcontrol/sendcontrol.sh &
+    echo "sendcontrol.sh started"
+fi
+
 # Check if the OneBot server process is running
 if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null; then
     pkill qq

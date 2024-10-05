@@ -58,7 +58,7 @@ postqzone(){
         echo "Sending qzone use id: $qqid"
         postprocess_pipe $qqid
     done
-    sendmsgpriv $senderid "$numfinal 已发送(系统自动发送，请勿回复)"
+    sendmsgpriv $senderid "$numfinal 已处理"
     numfinal=$((numfinal + 1))
     echo $numfinal > ./cache/numb/"$groupname"_numfinal.txt
     current_mod_time_id=$(sqlite3 'cache/OQQWall.db' "select modtime from sender where senderid=$senderid;")
@@ -145,7 +145,7 @@ postprocess_pipe(){
         cookies=$(cat ./cookies-$1.json)
         
         # Fix JSON formatting by ensuring proper commas and quotes are placed
-        echo "{\"text\":\"$message\",\"image\":$filelist,\"cookies\":$cookies}" > ./qzone_in_fifo
+        echo "{\"text\":\"$message\",\"image\":$filelist,\"initsendstatue\"=$initsendstatue}" > ./presend_in_fifo
         
         echo "$postcommand"
         
@@ -153,32 +153,19 @@ postprocess_pipe(){
         eval $postcommand
         
         # Check the status
-        post_statue=$(cat ./qzone_out_fifo)
-        if echo "$post_statue"  | grep -q "success"; then
-            goingtosendid=("${goingtosendid[@]/$qqid}")
-            echo "$1发送完毕"
-            sendmsggroup "$1已发送"
-            break
-        elif echo "$post_statue"  | grep -q "failed"; then
-            if [ $attempt -lt $max_attempts ]; then
-                renewqzoneloginauto $1
-            else
-                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,请发送指令"
-                exit 1
-            fi
-        else
-            if [ $attempt -lt $max_attempts ]; then
-                renewqzoneloginauto $1
-            else
-                sendmsggroup "系统错误：$post_statue"
-                exit 1
-            fi
-        fi
+        post_statue=$(cat ./presend_out_fifo)
+        sendmsggroup "$post_statue"
         attempt=$((attempt+1))
     done
 }
 
 max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+send_in_group=$(grep 'send_in_group' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+if [[ "$send_in_group" == "false" ]];then
+    initsendstatue=sendnow
+else
+    initsendstatue=ingroup
+fi
 echo processsend收到审核指令:$1
 object=$(echo $1 | awk '{print $1}')
 command=$(echo $1 | awk '{print $2}')

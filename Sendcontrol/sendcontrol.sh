@@ -81,15 +81,11 @@ postprocess_pipe(){
     attempt=1
     while [ $attempt -le $max_attempts ]; do
         cookies=$(cat ./cookies-$1.json)
-        
         # Fix JSON formatting by ensuring proper commas and quotes are placed
         echo "{\"text\":\"$message_sending\",\"image\":$image_send_list,\"cookies\":$cookies}" > ./qzone_in_fifo
-        
         echo "$postcommand"
-        
         # Execute the command
         eval $postcommand
-        
         # Check the status
         post_statue=$(cat ./qzone_out_fifo)
         if echo "$post_statue"  | grep -q "failed"; then
@@ -154,8 +150,12 @@ savetostorge(){
 # 处理组
 process_group(){
     local db_path="./cache/OQQWall.db"
-    local count=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM sendstorge_$groupname;")
-    if [ "$count" -ge 9 ]; then  # 假设阈值为40
+        combined_images=$(sqlite3 "$db_path" "SELECT GROUP_CONCAT(image, ',') FROM sendstorge_$groupname;")
+        # 将图片列表转换为 JSON 数组
+        combined_images="${combined_images// /,}"
+        IFS=',' read -r image_array <<< "$combined_images"
+    count=${#image_array[@]}
+    if [ "$count" -ge $group_limit ]; then  # 假设阈值为40
         echo "sendnow"
     else
         echo "hold"
@@ -271,18 +271,14 @@ main_loop(){
         image_in=()
         groupname=""
         initsendstatue=""
-        if read -r in_json_data < ./presend_in_fifo; then
-            text_in=$(echo "$in_json_data" | jq -r '.text')
-            image_in=($(echo "$in_json_data" | jq -r '.image[]'))  
-            groupname=$(echo "$in_json_data" | jq -r '.groupname')
-            initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue')
-
-            get_send_info
-            run_rules "$text_in" "${image_in[@]}"
-        else
-            echo "读取 FIFO 失败或 FIFO 被关闭。"
-            sleep 1
-        fi
+        read -r in_json_data < ./presend_in_fifo
+        text_in=$(echo "$in_json_data" | jq -r '.text')
+        image_in=($(echo "$in_json_data" | jq -r '.image[]'))  
+        groupname=$(echo "$in_json_data" | jq -r '.groupname')
+        initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue')
+        get_send_info
+        run_rules "$text_in" "${image_in[@]}"
+        echo "已存入待发送区" > presend_out_fifo
     done
 }
 
@@ -299,6 +295,7 @@ initialize(){
     if [ ! -p ./presend_out_fifo ]; then
         mkfifo ./presend_out_fifo
     fi
+    group_limit=$(grep 'group_limit' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 }
 
 # 启动脚本
