@@ -141,15 +141,14 @@ isover=$(echo $LMjson | jq -r '.isover')
 notregular=$(echo $LMjson | jq -r '.notregular')
 safemsg=$(echo $LMjson | jq -r '.safemsg')
 if [ "$notregular" = "false" ]; then
-  sendmsggroup 有常规消息
+  MSGcache=有常规消息
 else
-  sendmsggroup 有非常规消息
+  MSGcache=有非常规消息
 fi
-sendimagetoqqgroup
 if [ "$isover" = "true" ]; then
-  MSGcache=AI判断已写完
+  MSGcache+=,AI判断已写完
 else
-  MSGcache=AI判断未写完
+  MSGcache+=,AI判断未写完
 fi
 if [ "$safemsg" = "true" ]; then
   MSGcache+=，AI审核判定安全
@@ -161,5 +160,15 @@ if [[ "$current_mod_time_id" != "$last_modtime" ]]; then
     MSGcache+=，处理过程中有消息更新（需要更新请用刷新指令）
 fi
 MSGcache+=，内部编号$tag，请发送指令
-
+folder_path="$(pwd)/cache/prepost/$tag"
+# 检查文件夹是否存在
+if [ ! -d "$folder_path" ]; then
+echo "文件夹 $folder_path 不存在"
+fi
+echo $MSGcache
+for file_path in $(find "$folder_path" -maxdepth 1 -type f | sort); do
+    echo "添加文件: $file_path"
+    MSGcache+="[CQ:image,file=file://$file_path]"
+done
+echo $MSGcache
 sendmsggroup "$MSGcache"
