@@ -15,7 +15,7 @@ userid_show=$userid
 needpriv=$(echo "$json_data" | jq -r '.needpriv')
 safemsg=$(echo "$json_data" | jq -r '.safemsg')
 
-if [[ "$needpriv" == "true" && "$safemsg" == "true" ]]; then
+if [[ "$needpriv" == "true" ]]; then
     json_data=$(echo "$json_data" | jq '.sender.user_id=10000 | .sender.nickname="匿名"')
     nickname=匿名
     userid="10000"

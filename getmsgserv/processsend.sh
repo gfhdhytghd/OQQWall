@@ -244,7 +244,6 @@ EOF
         numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
         numfinal=$((numfinal + 1))
         echo $numfinal > ./cache/numb/"$groupname"_numfinal.txt
-        sendmsgpriv $senderid "你的稿件已转交人工处理"
         echo 结束发件流程,否
         ;;
     等)
