@@ -80,7 +80,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         if user_id and message_id:
             try:
-                conn = sqlite3.connect('cache/OQQWall.db')
+                conn = sqlite3.connect('cache/OQQWall.db', timeout=10)
                 cursor = conn.cursor()
 
                 # Fetch the existing rawmsg
@@ -162,7 +162,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             ACgroup = self_id_to_acgroup.get(self_id, 'Unknown')
 
             try:
-                conn = sqlite3.connect('cache/OQQWall.db')
+                conn = sqlite3.connect('cache/OQQWall.db', timeout=10)
                 cursor = conn.cursor()
 
                 # Check if a record already exists for this sender and receiver
