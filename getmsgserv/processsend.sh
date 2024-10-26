@@ -39,10 +39,10 @@ renewqzoneloginauto(){
     python3 ./SendQzone/qzonerenewcookies.py $1
 }
 postqzone(){
-    message=$(sqlite3 'cache/OQQWall.db' "SELECT comment FROM preprocess WHERE tag = $object;")
+    message=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT comment FROM preprocess WHERE tag = $object;")
     if [ -z "$message" ]; then
         send_single=true
-        json_data=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+        json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
         need_priv=$(echo $json_data|jq -r '.needpriv')
         if [[ "$need_priv" == "false" ]]; then
             message="#$numfinal @{uin:$senderid,nick:,who:1}"
@@ -61,25 +61,25 @@ postqzone(){
     sendmsgpriv $senderid "$numfinal 已发送(系统自动发送，请勿回复)"
     numfinal=$((numfinal + 1))
     echo $numfinal > ./cache/numb/"$groupname"_numfinal.txt
-    current_mod_time_id=$(sqlite3 'cache/OQQWall.db' "select modtime from sender where senderid=$senderid;")
+    current_mod_time_id=$(timeout 10s sqlite3 'cache/OQQWall.db' "select modtime from sender where senderid=$senderid;")
     echo "'current-mod-time-id:'$current_mod_time_id"
     echo "'last-mod-time-id:'$last_mod_time_id"
     if [[ "$current_mod_time_id" == "$last_mod_time_id" ]]; then
         echo "过程中此人无新消息，删除此人记录"
-        sqlite3 'cache/OQQWall.db' "delete from sender where senderid=$senderid;"
+        timeout 10s sqlite3 'cache/OQQWall.db' "delete from sender where senderid=$senderid;"
         rm -rf ./cache/prepost/$object
     else
         rm -rf ./cache/prepost/$object
         echo "过程中有新消息:needreprocess:$senderid"
         object=$1  
         # 创建新预处理项目
-        max_tag=$(sqlite3 "cache/OQQWall.db" "SELECT MAX(tag) FROM preprocess;")
+        max_tag=$(timeout 10s sqlite3 "cache/OQQWall.db" "SELECT MAX(tag) FROM preprocess;")
         new_tag=$((max_tag + 1))
-        row_data=$(sqlite3 "cache/OQQWall.db" "SELECT * FROM preprocess WHERE tag='$object';")
+        row_data=$(timeout 10s sqlite3 "cache/OQQWall.db" "SELECT * FROM preprocess WHERE tag='$object';")
         if [[ -n "$row_data" ]]; then
             # 解析原始数据并插入新的行，替换tag为新的tag值
             IFS="|" read -r tag senderid nickname receiver ACgroup else<<< "$row_data"
-            sqlite3 "cache/OQQWall.db" "INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup) VALUES ('$new_tag', '$senderid', '$nickname', '$receiver', '$ACgroup');"
+            timeout 10s sqlite3 "cache/OQQWall.db" "INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup) VALUES ('$new_tag', '$senderid', '$nickname', '$receiver', '$ACgroup');"
             echo "新的一行插入成功，新的tag值为$new_tag"
         else
             echo "没有找到tag=$object的行"
@@ -95,7 +95,7 @@ postprocess(){
     else
         echo "Cookies file exists. No action needed."
     fi
-    json_data=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+    json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
     need_priv=$(echo $json_data|jq -r '.needpriv')
     postcommand="python3 ./SendQzone/send.py \"$message\" ./cache/prepost/$object $1"
     echo $postcommand
@@ -127,7 +127,7 @@ postprocess_pipe(){
     else
         echo "Cookies file exists. No action needed."
     fi
-    json_data=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+    json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
     need_priv=$(echo $json_data|jq -r '.needpriv')
     sendimgfolder=$(pwd)/cache/prepost/$object
     # Collect image paths
@@ -183,10 +183,10 @@ echo processsend收到审核指令:$1
 object=$(echo $1 | awk '{print $1}')
 command=$(echo $1 | awk '{print $2}')
 flag=$(echo $1 | awk '{print $3}')
-senderid=$(sqlite3 'cache/OQQWall.db' "select senderid from preprocess where tag=$object;")
-groupname=$(sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$object';")
-last_mod_time_id=$(sqlite3 'cache/OQQWall.db' "select processtime from sender where senderid=$senderid;")
-receiver=$(sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$object';")
+senderid=$(timeout 10s sqlite3 'cache/OQQWall.db' "select senderid from preprocess where tag=$object;")
+groupname=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$object';")
+last_mod_time_id=$(timeout 10s sqlite3 'cache/OQQWall.db' "select processtime from sender where senderid=$senderid;")
+receiver=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$object';")
 
 group_info=$(jq -r --arg receiver "$receiver" '
   to_entries[] | select(.value.mainqqid == $receiver or (.value.minorqqid[]? == $receiver))
@@ -237,7 +237,7 @@ case $command in
     否)
         postcmd="false"
         rm -rf ./cache/prepost/$object
-        sqlite3 "./cache/OQQWall.db" <<EOF
+        timeout 10s sqlite3 "./cache/OQQWall.db" <<EOF
 DELETE FROM sender WHERE senderid='$senderid';
 EOF
         rm -rf cache/prepost/$object
@@ -254,14 +254,14 @@ EOF
     删)
         postcmd="del"
         rm -rf ./cache/prepost/$object
-        sqlite3 "./cache/OQQWall.db" <<EOF
+        timeout 10s sqlite3 "./cache/OQQWall.db" <<EOF
 DELETE FROM sender WHERE senderid='$senderid';
 EOF
         ;;
     拒)
         postcmd="ref"
         rm -rf ./cache/prepost/$object
-        sqlite3 "./cache/OQQWall.db" <<EOF
+        timeout 10s sqlite3 "./cache/OQQWall.db" <<EOF
 DELETE FROM sender WHERE senderid='$senderid';
 EOF
         rm -rf cache/prepost/$object
@@ -274,9 +274,9 @@ EOF
         ;;
     匿)
         sendmsggroup 尝试切换匿名状态...
-        json_content=$(sqlite3 "./cache/OQQWall.db" "SELECT AfterLM FROM preprocess WHERE tag='$object';")
+        json_content=$(timeout 10s sqlite3 "./cache/OQQWall.db" "SELECT AfterLM FROM preprocess WHERE tag='$object';")
         modified_json=$(echo "$json_content" | jq '.needpriv = (.needpriv == "true" | not | tostring)')
-        sqlite3 "./cache/OQQWall.db" "UPDATE preprocess SET AfterLM='$modified_json' WHERE tag='$object';"
+        timeout 10s sqlite3 "./cache/OQQWall.db" "UPDATE preprocess SET AfterLM='$modified_json' WHERE tag='$object';"
         
         {
             flock -x 200  # Acquire exclusive lock
@@ -288,7 +288,7 @@ EOF
         } 200>/dev/shm/OQQWall/oqqwall.lock  # Lock the directory with a lock file
         # Step 3: Process the output into JPG
         folder=./cache/prepost/${object}
-        json_data=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+        json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
         if [[ -z "$json_data" ]]; then
             echo "No data found for tag $object"
             exit 1
@@ -326,7 +326,7 @@ EOF
         done
         cd -
 
-        json_data=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+        json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
         need_priv=$(echo $json_data|jq -r '.needpriv')
         numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
         if [[ "$need_priv" == "false" ]]; then
@@ -343,7 +343,7 @@ EOF
         getmsgserv/preprocess.sh $object nowaittime
         ;;
     评论)
-        json_data=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+        json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
         need_priv=$(echo $json_data|jq -r '.needpriv')
         if [[ "$need_priv" == "false" ]]; then
             message="#$numfinal @{uin:$senderid,nick:,who:1}"
@@ -363,7 +363,7 @@ EOF
             sendmsggroup "没有找到评论内容，文本内容已还原"
             sendmsggroup "当前文本：\n $message"
         fi
-        sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET comment='$message' WHERE tag = '$object';"
+        timeout 10s sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET comment='$message' WHERE tag = '$object';"
         ;;
     回复)
         sendmsgpriv $senderid $flag
