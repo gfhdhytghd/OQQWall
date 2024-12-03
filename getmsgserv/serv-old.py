@@ -1,4 +1,3 @@
-import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import subprocess
 import json
@@ -6,15 +5,12 @@ import os
 import re
 import sqlite3
 
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-# 定义存储路径
+# Define storage paths
 RAWPOST_DIR = './getmsgserv/rawpost'
 ALLPOST_DIR = './getmsgserv/all'
 COMMAND_DIR = './qqBot/command'
 COMMU_DIR = './getmsgserv/all/'
-# 确保保存路径存在
+# Ensure save paths exist
 os.makedirs(RAWPOST_DIR, exist_ok=True)
 os.makedirs(ALLPOST_DIR, exist_ok=True)
 
@@ -29,7 +25,7 @@ def read_config(file_path):
 
 config = read_config('oqqwall.config')
 
-# 读取 AcountGroupcfg.json 以映射 self_id 到 ACgroup
+# Read AcountGroupcfg.json to map self_id to ACgroup
 with open('./AcountGroupcfg.json', 'r', encoding='utf-8') as f:
     account_group_cfg = json.load(f)
 
@@ -45,118 +41,37 @@ for group_name, group_info in account_group_cfg.items():
 class RequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
-            logging.info("newmsg")
-            logging.info(f"Request Headers: {self.headers}")
+            # Read the content length and data
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
 
-            # 检查是否使用了 Transfer-Encoding: chunked
-            transfer_encoding = self.headers.get('Transfer-Encoding', '').lower()
-            if 'chunked' in transfer_encoding:
-                post_data = self.read_chunked()
-            else:
-                # 获取 Content-Length，如果不存在则尝试读取直到连接关闭或达到最大限制
-                content_length = self.headers.get('Content-Length')
-                if content_length is not None:
-                    try:
-                        content_length = int(content_length)
-                        post_data = self.rfile.read(content_length)
-                    except ValueError:
-                        self.send_error(400, 'Invalid Content-Length')
-                        return
-                else:
-                    # Content-Length 不存在，尝试读取直到连接关闭或达到最大限制（例如 10KB）
-                    max_length = 10 * 1024  # 10 KB
-                    post_data = b''
-                    while True:
-                        chunk = self.rfile.read(1024)
-                        if not chunk:
-                            break
-                        post_data += chunk
-                        if len(post_data) > max_length:
-                            self.send_error(413, 'Payload Too Large')
-                            return
-
-            logging.info(f"Request Body: {post_data.decode('utf-8', errors='ignore')}") 
-
-            # 解码并解析 JSON 数据
+            # Decode and parse JSON data
             try:
                 data = json.loads(post_data.decode('utf-8'))
             except json.JSONDecodeError:
                 self.send_error(400, 'Invalid JSON')
                 return
 
-            # 忽略自动回复消息和好友请求消息
-            if data.get('message_type') == 'private' and 'raw_message' in data:
-                raw_message = data['raw_message']
-                if '自动回复' in raw_message:
-                    logging.info("Received auto-reply message, ignored.")
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(b'Auto-reply message ignored')
-                    return
-                if '请求添加你为好友' in raw_message:
-                    logging.info("Received friend-add request message, ignored.")
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(b'Friend-add request ignored')
-                    return
-
-            # 处理不同类型的通知
-            if data.get('notice_type') == 'friend_recall':
-                self.handle_friend_recall(data)
+            # Ignore auto-reply messages
+            if data.get('message_type') == 'private' and 'raw_message' in data and '自动回复' in data['raw_message']:
+                print("Received auto-reply message, ignored.")
+            elif data.get('message_type') == 'private' and 'raw_message' in data and '请求添加你为好友' in data['raw_message']:
+                print("Received friend-add request message, ignored.")
             else:
-                self.handle_default(data)
+                # Handle different types of notifications
+                if data.get('notice_type') == 'friend_recall':
+                    self.handle_friend_recall(data)
+                else:
+                    self.handle_default(data)
 
-            # 发送响应
+            # Send response
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b'Post received and saved')
 
         except Exception as e:
             self.send_error(500, f'Internal Server Error: {e}')
-            logging.error(f'Error handling request: {e}')
-
-    def read_chunked(self):
-        """
-        读取分块编码的请求体
-        """
-        data = b''
-        while True:
-            # 读取每个块的大小行
-            line = self.rfile.readline()
-            if not line:
-                break
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                # 解析块大小（十六进制）
-                chunk_size = int(line, 16)
-            except ValueError:
-                self.send_error(400, 'Invalid chunk size')
-                return b''
-
-            if chunk_size == 0:
-                # 最后的块，读取并忽略 trailer 头
-                while True:
-                    trailer = self.rfile.readline()
-                    if not trailer or trailer == b'\r\n':
-                        break
-                break
-
-            # 读取指定大小的块数据加上末尾的 CRLF
-            chunk = self.rfile.read(chunk_size + 2)
-            if len(chunk) < chunk_size + 2:
-                self.send_error(400, 'Incomplete chunked data')
-                return data
-            data += chunk[:-2]  # 去除末尾的 CRLF
-
-        # 可选：限制最大读取大小以防止资源耗尽
-        max_length = 10 * 1024 * 1024  # 10 MB
-        if len(data) > max_length:
-            self.send_error(413, 'Payload Too Large')
-            return b''
-
-        return data
+            print(f'Error handling request: {e}')
 
     def handle_friend_recall(self, data):
         user_id = str(data.get('user_id'))
@@ -181,24 +96,21 @@ class RequestHandler(BaseHTTPRequestHandler):
                         updated_rawmsg = json.dumps(message_list, ensure_ascii=False)
                         cursor.execute('UPDATE sender SET rawmsg=? WHERE senderid=? AND receiver=?', (updated_rawmsg, user_id, self_id))
                         conn.commit()
-                        logging.info('Message deleted from rawmsg in database')
+                        print('Message deleted from rawmsg in database')
                     except json.JSONDecodeError as e:
-                        logging.error(f'Error decoding rawmsg JSON: {e}')
+                        print(f'Error decoding rawmsg JSON: {e}')
                 else:
-                    logging.info('No existing messages found for this user and receiver.')
+                    print('No existing messages found for this user and receiver.')
                 conn.close()
             except Exception as e:
-                logging.error(f'Error deleting message from database: {e}')
+                print(f'Error deleting message from database: {e}')
 
     def handle_default(self, data):
         # Append to all_posts.json incrementally
         all_file_path = os.path.join(ALLPOST_DIR, 'all_posts.json')
-        try:
-            with open(all_file_path, 'a', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False)
-                f.write('\n')  # Add a newline for readability
-        except Exception as e:
-            logging.error(f'Error writing to all_posts.json: {e}')
+        with open(all_file_path, 'a', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False)
+            f.write('\n')  # Add a newline for readability
 
         # Record group commands and private messages
         self.record_group_command(data)
@@ -207,15 +119,15 @@ class RequestHandler(BaseHTTPRequestHandler):
     def record_group_command(self, data):
         message_type = data.get('message_type')
         if message_type == 'group':
-            # 读取 JSON 配置文件
+            # Read JSON configuration file
             try:
                 with open('./AcountGroupcfg.json', 'r', encoding='utf-8') as file:
                     cfgdata = json.load(file)
             except Exception as e:
-                logging.error(f'Error reading configuration file: {e}')
+                print(f'Error reading configuration file: {e}')
                 return
 
-            # 提取所有管理组 ID
+            # Extract all management group IDs
             mangroupid_list = [group['mangroupid'] for group in cfgdata.values()]
             group_id = str(data.get('group_id'))
             sender = data.get('sender', {})
@@ -253,11 +165,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 conn = sqlite3.connect('cache/OQQWall.db', timeout=10)
                 cursor = conn.cursor()
 
-                # 检查是否已存在该发送者和接收者的记录
+                # Check if a record already exists for this sender and receiver
                 cursor.execute('SELECT rawmsg FROM sender WHERE senderid=? AND receiver=?', (user_id, self_id))
                 row = cursor.fetchone()
                 if row:
-                    # 如果存在，加载现有的 rawmsg 并追加新消息
+                    # If exists, load the existing rawmsg and append the new message
                     rawmsg_json = row[0]
                     try:
                         message_list = json.loads(rawmsg_json)
@@ -267,7 +179,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         message_list = []
 
                     message_list.append(simplified_data)
-                    # 按时间排序消息
+                    # Sort messages by time
                     message_list = sorted(message_list, key=lambda x: x.get('time', 0))
 
                     updated_rawmsg = json.dumps(message_list, ensure_ascii=False)
@@ -277,7 +189,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         WHERE senderid=? AND receiver=?
                     ''', (updated_rawmsg, user_id, self_id))
                 else:
-                    # 如果不存在，插入新记录
+                    # If not exists, insert a new record with the message
                     message_list = [simplified_data]
                     rawmsg_json = json.dumps(message_list, ensure_ascii=False)
                     cursor.execute('''
@@ -285,33 +197,33 @@ class RequestHandler(BaseHTTPRequestHandler):
                         VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
                     ''', (user_id, self_id, ACgroup, rawmsg_json))
 
-                    # 检查 preprocess 表中的最大 tag
+                    # Check the max tag from the preprocess table
                     cursor.execute('SELECT MAX(tag) FROM preprocess')
                     max_tag = cursor.fetchone()[0] or 0
                     new_tag = max_tag + 1
 
-                    # 插入 preprocess 表
+                    # Insert into preprocess table
                     cursor.execute('''
                         INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup) 
                         VALUES (?, ?, ?, ?, ?)
                     ''', (new_tag, user_id, nickname, self_id, ACgroup))
 
-                    # 提交更改
+                    # Commit changes
                     conn.commit()
 
-                    # 调用 preprocess.sh 脚本
+                    # Call the preprocess.sh script with the new tag
                     preprocess_script_path = './getmsgserv/preprocess.sh'
                     try:
                         subprocess.run([preprocess_script_path, str(new_tag)], check=True)
                     except subprocess.CalledProcessError as e:
-                        logging.error(f"Preprocess script execution failed: {e}")
+                        print(f"Preprocess script execution failed: {e}")
 
                 conn.commit()
                 conn.close()
             except Exception as e:
-                logging.error(f'Error recording private message to database: {e}')
+                print(f'Error recording private message to database: {e}')
 
-            # 持续写入 priv_post.json
+            # Keep writing to priv_post.json as per original code
             priv_post_path = os.path.join(ALLPOST_DIR, 'priv_post.json')
             try:
                 if os.path.exists(priv_post_path):
@@ -324,60 +236,17 @@ class RequestHandler(BaseHTTPRequestHandler):
                 with open(priv_post_path, 'w', encoding='utf-8') as f:
                     json.dump(priv_post_data, f, ensure_ascii=False, indent=4)
             except Exception as e:
-                logging.error(f'Error recording to priv_post.json: {e}')
-
-    def read_chunked(self):
-        """
-        读取分块编码的请求体
-        """
-        data = b''
-        while True:
-            # 读取每个块的大小行
-            line = self.rfile.readline()
-            if not line:
-                break
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                # 解析块大小（十六进制）
-                chunk_size = int(line, 16)
-            except ValueError:
-                self.send_error(400, 'Invalid chunk size')
-                return b''
-
-            if chunk_size == 0:
-                # 最后的块，读取并忽略 trailer 头
-                while True:
-                    trailer = self.rfile.readline()
-                    if not trailer or trailer == b'\r\n':
-                        break
-                break
-
-            # 读取指定大小的块数据加上末尾的 CRLF
-            chunk = self.rfile.read(chunk_size + 2)
-            if len(chunk) < chunk_size + 2:
-                self.send_error(400, 'Incomplete chunked data')
-                return data
-            data += chunk[:-2]  # 去除末尾的 CRLF
-
-        # 可选：限制最大读取大小以防止资源耗尽
-        max_length = 10 * 1024 * 1024  # 10 MB
-        if len(data) > max_length:
-            self.send_error(413, 'Payload Too Large')
-            return b''
-
-        return data
+                print(f'Error recording to priv_post.json: {e}')
 
 def run(server_class=ThreadingHTTPServer, handler_class=RequestHandler):
     port = int(config.get('http-serv-port', 8000))
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
-    logging.info(f'Starting HTTP server on port {port}...')
+    print(f'Starting HTTP server on port {port}...')
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        logging.info('Server is shutting down...')
+        print('Server is shutting down...')
         httpd.server_close()
 
 if __name__ == '__main__':

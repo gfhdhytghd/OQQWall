@@ -66,7 +66,9 @@ postqzone(){
     echo "'last-mod-time-id:'$last_mod_time_id"
     if [[ "$current_mod_time_id" == "$last_mod_time_id" ]]; then
         echo "过程中此人无新消息，删除此人记录"
-        timeout 10s sqlite3 'cache/OQQWall.db' "delete from sender where senderid=$senderid;"
+        timeout 10s sqlite3 "./cache/OQQWall.db" <<EOF
+DELETE FROM sender WHERE senderid='$senderid';
+EOF
         rm -rf ./cache/prepost/$object
     else
         rm -rf ./cache/prepost/$object
@@ -254,7 +256,7 @@ EOF
     删)
         postcmd="del"
         rm -rf ./cache/prepost/$object
-        timeout 10s sqlite3 "./cache/OQQWall.db" <<EOF
+        sqlite3 "./cache/OQQWall.db" <<EOF
 DELETE FROM sender WHERE senderid='$senderid';
 EOF
         ;;
