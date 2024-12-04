@@ -25,7 +25,7 @@ if friend_list["status"] == "ok" and friend_list["retcode"] == 0:
         # 为每个好友发送20个赞
         like_payload = {
             "user_id": user_id,
-            "times": 20
+            "times": 50
         }
         
         like_response = requests.post(f"{url}/send_like", json=like_payload)
@@ -39,7 +39,7 @@ else:
 special_user_id = "3391146750"
 like_payload = {
     "user_id": special_user_id,
-    "times": 20
+    "times": 50
 }
 
 like_response = requests.post(f"{url}/send_like", json=like_payload)

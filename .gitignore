@@ -25,5 +25,5 @@ todo
 cache
 .vscode/settings.json
 .vscode/extensions.json
-qqBot
+qqBot/LangBot
 main.session.sql

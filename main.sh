@@ -321,7 +321,7 @@ done
 sleep 10
 for mqqid in ${mainqqlist[@]}; do
   getinfo $mqqid
-  sendmsggroup 机器人已启动
+  sendmsggroup 系统已启动
 done
 
 while true; do
