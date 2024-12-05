@@ -5,9 +5,14 @@ import json
 import os
 import re
 import sqlite3
+import time
 
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 配置日志#
+logging.basicConfig(
+    filename='OQQWallmsgserv.log',  # 日志文件名
+    level=logging.DEBUG, # 日志级别
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
 # 定义存储路径
 RAWPOST_DIR = './getmsgserv/rawpost'
@@ -45,8 +50,7 @@ for group_name, group_info in account_group_cfg.items():
 class RequestHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
-            logging.info("newmsg")
-            logging.info(f"Request Headers: {self.headers}")
+            logging.info("newmsg comes")
 
             # 检查是否使用了 Transfer-Encoding: chunked
             transfer_encoding = self.headers.get('Transfer-Encoding', '').lower()
@@ -74,8 +78,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                         if len(post_data) > max_length:
                             self.send_error(413, 'Payload Too Large')
                             return
-
-            logging.info(f"Request Body: {post_data.decode('utf-8', errors='ignore')}") 
 
             # 解码并解析 JSON 数据
             try:
@@ -246,7 +248,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "message": data.get("message"),
                 "time": data.get("time")
             }
-
+            logging.info(data.get("message"))
             ACgroup = self_id_to_acgroup.get(self_id, 'Unknown')
 
             try:

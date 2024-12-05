@@ -1,4 +1,24 @@
 #!/bin/bash
+if [[ $1 == -r ]]; then
+  echo "执行子系统重启..."
+  pkill startd.sh
+  if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null; then
+    pgrep -f "xvfb-run -a qq --no-sandbox -q" | xargs kill -15
+  fi
+  if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null; then
+    pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
+  fi
+  if pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" > /dev/null; then
+    pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" | xargs kill -15
+  fi
+elif [[ $1 == -rf ]]; then
+  echo "执行无检验的子系统强行重启..."
+  pkill startd.sh
+  pkill qq
+  pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
+  pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" | xargs kill -15
+fi
+
 apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 http-serv-port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
@@ -319,6 +339,10 @@ for qqid in "${runidlist[@]}"; do
 done
 
 sleep 10
+echo 系统启动完毕
+echo -e "\033[1;34m powered by \033[0m"
+echo -e "\033[1;34m   ____  ____  ____ _       __      ____\n  / __ \/ __ \/ __ \ |     / /___ _/ / /\n / / / / / / / / / / | /| / / __ \`/ / /\n/ /_/ / /_/ / /_/ /| |/ |/ / /_/ / / /\n\____/\___\_\___\_\|__/|__/\__,_/_/_/\n\033[0m"
+
 for mqqid in ${mainqqlist[@]}; do
   getinfo $mqqid
   sendmsggroup 系统已启动
