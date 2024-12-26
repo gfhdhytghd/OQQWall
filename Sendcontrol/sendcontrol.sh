@@ -301,6 +301,22 @@ initialize(){
     fi
 }
 
+# 添加清理函数
+cleanup(){
+    # 清理临时文件
+    rm -f /dev/shm/OQQWall/oqqwallhtmlcache.html
+    rm -f /dev/shm/OQQWall/oqqwallpdfcache.pdf
+    
+    # 关闭数据库连接
+    sqlite3 "$db_path" ".quit"
+    
+    # 删除FIFO
+    rm -f ./presend_in_fifo ./presend_out_fifo
+}
+
+# 添加信号处理
+trap cleanup EXIT SIGINT SIGTERM
+
 # 启动脚本
 initialize
 main_loop

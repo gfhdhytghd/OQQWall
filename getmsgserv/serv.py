@@ -6,6 +6,9 @@ import os
 import re
 import sqlite3
 import time
+from threading import Lock
+from contextlib import contextmanager
+import fcntl
 
 # 配置日志#
 logging.basicConfig(
@@ -22,6 +25,29 @@ COMMU_DIR = './getmsgserv/all/'
 # 确保保存路径存在
 os.makedirs(RAWPOST_DIR, exist_ok=True)
 os.makedirs(ALLPOST_DIR, exist_ok=True)
+
+# 添加文件锁
+file_lock = Lock()
+
+# 数据库连接管理
+@contextmanager
+def get_db_connection():
+    conn = sqlite3.connect('cache/OQQWall.db', timeout=10)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+# 文件操作安全化
+def safe_write_json(file_path, data):
+    with file_lock:
+        with open(file_path, 'w', encoding='utf-8') as f:
+            # 添加文件锁
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                json.dump(data, f, ensure_ascii=False, indent=4)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 def read_config(file_path):
     config = {}
@@ -252,124 +278,85 @@ class RequestHandler(BaseHTTPRequestHandler):
             ACgroup = self_id_to_acgroup.get(self_id, 'Unknown')
 
             try:
-                conn = sqlite3.connect('cache/OQQWall.db', timeout=10)
-                cursor = conn.cursor()
-
-                # 检查是否已存在该发送者和接收者的记录
-                cursor.execute('SELECT rawmsg FROM sender WHERE senderid=? AND receiver=?', (user_id, self_id))
-                row = cursor.fetchone()
-                if row:
-                    # 如果存在，加载现有的 rawmsg 并追加新消息
-                    rawmsg_json = row[0]
+                with get_db_connection() as conn:
+                    cursor = conn.cursor()
                     try:
-                        message_list = json.loads(rawmsg_json)
-                        if not isinstance(message_list, list):
-                            message_list = []
-                    except json.JSONDecodeError:
-                        message_list = []
+                        # 检查是否已存在该发送者和接收者的记录
+                        cursor.execute('SELECT rawmsg FROM sender WHERE senderid=? AND receiver=?', (user_id, self_id))
+                        row = cursor.fetchone()
+                        if row:
+                            # 如果存在，加载现有的 rawmsg 并追加新消息
+                            rawmsg_json = row[0]
+                            try:
+                                message_list = json.loads(rawmsg_json)
+                                if not isinstance(message_list, list):
+                                    message_list = []
+                            except json.JSONDecodeError:
+                                message_list = []
 
-                    message_list.append(simplified_data)
-                    # 按时间排序消息
-                    message_list = sorted(message_list, key=lambda x: x.get('time', 0))
+                            message_list.append(simplified_data)
+                            # 按时间排序消息
+                            message_list = sorted(message_list, key=lambda x: x.get('time', 0))
 
-                    updated_rawmsg = json.dumps(message_list, ensure_ascii=False)
-                    cursor.execute('''
-                        UPDATE sender 
-                        SET rawmsg=?, modtime=CURRENT_TIMESTAMP 
-                        WHERE senderid=? AND receiver=?
-                    ''', (updated_rawmsg, user_id, self_id))
-                else:
-                    # 如果不存在，插入新记录
-                    message_list = [simplified_data]
-                    rawmsg_json = json.dumps(message_list, ensure_ascii=False)
-                    cursor.execute('''
-                        INSERT INTO sender (senderid, receiver, ACgroup, rawmsg, modtime) 
-                        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ''', (user_id, self_id, ACgroup, rawmsg_json))
+                            updated_rawmsg = json.dumps(message_list, ensure_ascii=False)
+                            cursor.execute('''
+                                UPDATE sender 
+                                SET rawmsg=?, modtime=CURRENT_TIMESTAMP 
+                                WHERE senderid=? AND receiver=?
+                            ''', (updated_rawmsg, user_id, self_id))
+                        else:
+                            # 如果不存在，插入新记录
+                            message_list = [simplified_data]
+                            rawmsg_json = json.dumps(message_list, ensure_ascii=False)
+                            cursor.execute('''
+                                INSERT INTO sender (senderid, receiver, ACgroup, rawmsg, modtime) 
+                                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                            ''', (user_id, self_id, ACgroup, rawmsg_json))
 
-                    # 检查 preprocess 表中的最大 tag
-                    cursor.execute('SELECT MAX(tag) FROM preprocess')
-                    max_tag = cursor.fetchone()[0] or 0
-                    new_tag = max_tag + 1
+                            # 检查 preprocess 表中的最大 tag
+                            cursor.execute('SELECT MAX(tag) FROM preprocess')
+                            max_tag = cursor.fetchone()[0] or 0
+                            new_tag = max_tag + 1
 
-                    # 插入 preprocess 表
-                    cursor.execute('''
-                        INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup) 
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (new_tag, user_id, nickname, self_id, ACgroup))
+                            # 插入 preprocess 表
+                            cursor.execute('''
+                                INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup) 
+                                VALUES (?, ?, ?, ?, ?)
+                            ''', (new_tag, user_id, nickname, self_id, ACgroup))
 
-                    # 提交更改
-                    conn.commit()
+                            # 提交更改
+                            conn.commit()
 
-                    # 调用 preprocess.sh 脚本
-                    preprocess_script_path = './getmsgserv/preprocess.sh'
-                    try:
-                        subprocess.run([preprocess_script_path, str(new_tag)], check=True)
-                    except subprocess.CalledProcessError as e:
-                        logging.error(f"Preprocess script execution failed: {e}")
+                            # 调用 preprocess.sh 脚本
+                            preprocess_script_path = './getmsgserv/preprocess.sh'
+                            try:
+                                subprocess.run([preprocess_script_path, str(new_tag)], check=True)
+                            except subprocess.CalledProcessError as e:
+                                logging.error(f"Preprocess script execution failed: {e}")
 
-                conn.commit()
-                conn.close()
+                        conn.commit()
+                    except Exception as e:
+                        conn.rollback()
+                        logging.error(f'Database error: {e}')
+                        raise
+
+                # 持续写入 priv_post.json
+                priv_post_path = os.path.join(ALLPOST_DIR, 'priv_post.json')
+                try:
+                    if os.path.exists(priv_post_path):
+                        with open(priv_post_path, 'r', encoding='utf-8') as f:
+                            priv_post_data = json.load(f)
+                    else:
+                        priv_post_data = []
+
+                    priv_post_data.append(data)
+                    with open(priv_post_path, 'w', encoding='utf-8') as f:
+                        json.dump(priv_post_data, f, ensure_ascii=False, indent=4)
+                except Exception as e:
+                    logging.error(f'Error recording to priv_post.json: {e}')
+
             except Exception as e:
                 logging.error(f'Error recording private message to database: {e}')
-
-            # 持续写入 priv_post.json
-            priv_post_path = os.path.join(ALLPOST_DIR, 'priv_post.json')
-            try:
-                if os.path.exists(priv_post_path):
-                    with open(priv_post_path, 'r', encoding='utf-8') as f:
-                        priv_post_data = json.load(f)
-                else:
-                    priv_post_data = []
-
-                priv_post_data.append(data)
-                with open(priv_post_path, 'w', encoding='utf-8') as f:
-                    json.dump(priv_post_data, f, ensure_ascii=False, indent=4)
-            except Exception as e:
-                logging.error(f'Error recording to priv_post.json: {e}')
-
-    def read_chunked(self):
-        """
-        读取分块编码的请求体
-        """
-        data = b''
-        while True:
-            # 读取每个块的大小行
-            line = self.rfile.readline()
-            if not line:
-                break
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                # 解析块大小（十六进制）
-                chunk_size = int(line, 16)
-            except ValueError:
-                self.send_error(400, 'Invalid chunk size')
-                return b''
-
-            if chunk_size == 0:
-                # 最后的块，读取并忽略 trailer 头
-                while True:
-                    trailer = self.rfile.readline()
-                    if not trailer or trailer == b'\r\n':
-                        break
-                break
-
-            # 读取指定大小的块数据加上末尾的 CRLF
-            chunk = self.rfile.read(chunk_size + 2)
-            if len(chunk) < chunk_size + 2:
-                self.send_error(400, 'Incomplete chunked data')
-                return data
-            data += chunk[:-2]  # 去除末尾的 CRLF
-
-        # 可选：限制最大读取大小以防止资源耗尽
-        max_length = 10 * 1024 * 1024  # 10 MB
-        if len(data) > max_length:
-            self.send_error(413, 'Payload Too Large')
-            return b''
-
-        return data
 
 def run(server_class=ThreadingHTTPServer, handler_class=RequestHandler):
     port = int(config.get('http-serv-port', 8000))
