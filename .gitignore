@@ -22,7 +22,6 @@ getmsgserv/all/commugroup.txt
 numfinal.txt
 main.sh.bak
 todo
-cache
 .vscode/settings.json
 .vscode/extensions.json
 main.session.sql
@@ -34,3 +33,4 @@ getmsgserv/all/priv_post.json
 AcountGroupcfg.json
 AcountGroupcfg.json.bak
 oqqwall.config
+cache
