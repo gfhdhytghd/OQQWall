@@ -1,4 +1,6 @@
 import logging
+import sys
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import subprocess
 import json
@@ -10,12 +12,35 @@ from threading import Lock
 from contextlib import contextmanager
 import fcntl
 
-# 配置日志#
-logging.basicConfig(
-    filename='OQQWallmsgserv.log',  # 日志文件名
-    level=logging.DEBUG, # 日志级别
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# 创建自定义的日志格式化器
+class CustomFormatter(logging.Formatter):
+    def formatTime(self, record, datefmt=None):
+        # 自定义时间格式
+        ct = self.converter(record.created)
+        if datefmt:
+            s = datetime.fromtimestamp(record.created).strftime(datefmt)
+        else:
+            s = datetime.fromtimestamp(record.created).strftime("[%H:%M:%S %d/%b]")
+        return s
+
+# 配置日志
+logger = logging.getLogger('OQQWallServer')
+logger.setLevel(logging.INFO)
+
+# 创建格式化器
+formatter = CustomFormatter('%(asctime)s %(message)s')
+
+# 文件处理器
+file_handler = logging.FileHandler('OQQWallmsgserv.log')
+file_handler.setFormatter(formatter)
+
+# 控制台处理器
+console_handler = logging.StreamHandler(sys.stdout)
+console_handler.setFormatter(formatter)
+
+# 添加处理器
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
 
 # 定义存储路径
 RAWPOST_DIR = './getmsgserv/rawpost'
@@ -74,15 +99,24 @@ for group_name, group_info in account_group_cfg.items():
         self_id_to_acgroup[qqid] = group_name
 
 class RequestHandler(BaseHTTPRequestHandler):
-    # 重写 log_message 方法以控制日志输出
     def log_message(self, format, *args):
-        # 如果不需要标准日志，直接忽略
+        """重写默认的日志方法，禁用默认的访问日志"""
         pass
+
+    def handle(self):
+        """重写 handle 方法来捕获连接错误"""
+        try:
+            super().handle()
+        except ConnectionResetError as e:
+            logger.error(f"连接错误 {str(e)}")
+        except Exception as e:
+            logger.error(f"处理请求时发生错误: {str(e)}")
 
     def do_POST(self):
         try:
-            logging.info("newmsg comes")
-            
+            logger.info("newmsg comes")
+
+            # 检查是否使用了 Transfer-Encoding: chunked
             transfer_encoding = self.headers.get('Transfer-Encoding', '').lower()
             if 'chunked' in transfer_encoding:
                 post_data = self.read_chunked()
@@ -113,14 +147,35 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.send_error(400, 'Invalid JSON')
                 return
 
-            user_id = data.get("user_id", "Unknown")
-            self_id = data.get("self_id", "Unknown")
-            acgroup = self_id_to_acgroup.get(self_id, "Unknown")
+            # 记录消息日志
+            user_id = data.get('user_id')
+            self_id = data.get('self_id')
+            acgroup = self_id_to_acgroup.get(str(self_id), 'Unknown')
+            logger.info(f"来自{user_id}到{self_id},组{acgroup}")
 
-            # 自定义日志输出
-            logging.info(f"[{time.strftime('%H:%M:%S %d/%b')}] 来自{user_id}到{self_id},组{acgroup}")
+            # 忽略自动回复消息和好友请求消息
+            if data.get('message_type') == 'private' and 'raw_message' in data:
+                raw_message = data['raw_message']
+                if '自动回复' in raw_message:
+                    logger.info("Received auto-reply message, ignored.")
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b'Auto-reply message ignored')
+                    return
+                if '请求添加你为好友' in raw_message:
+                    logger.info("Received friend-add request message, ignored.")
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b'Friend-add request ignored')
+                    return
 
-            self.handle_default(data)
+            # 处理不同类型的通知
+            if data.get('notice_type') == 'friend_recall':
+                self.handle_friend_recall(data)
+            else:
+                self.handle_default(data)
+
+            # 发送响应
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b'Post received and saved')
@@ -128,9 +183,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         except ConnectionResetError as e:
             logging.error(f"[{time.strftime('%H:%M:%S %d/%b')}] 连接错误 {e}")
         except Exception as e:
+            logger.error(f"处理POST请求时发生错误: {str(e)}")
             self.send_error(500, f'Internal Server Error: {e}')
-            logging.error(f'Error handling request: {e}')
-
 
     def read_chunked(self):
         """
@@ -198,14 +252,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                         updated_rawmsg = json.dumps(message_list, ensure_ascii=False)
                         cursor.execute('UPDATE sender SET rawmsg=? WHERE senderid=? AND receiver=?', (updated_rawmsg, user_id, self_id))
                         conn.commit()
-                        logging.info('Message deleted from rawmsg in database')
+                        logger.info('Message deleted from rawmsg in database')
                     except json.JSONDecodeError as e:
-                        logging.error(f'Error decoding rawmsg JSON: {e}')
+                        logger.error(f'Error decoding rawmsg JSON: {e}')
                 else:
-                    logging.info('No existing messages found for this user and receiver.')
+                    logger.info('No existing messages found for this user and receiver.')
                 conn.close()
             except Exception as e:
-                logging.error(f'Error deleting message from database: {e}')
+                logger.error(f'Error deleting message from database: {e}')
 
     def handle_default(self, data):
         # Append to all_posts.json incrementally
@@ -215,7 +269,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 json.dump(data, f, ensure_ascii=False)
                 f.write('\n')  # Add a newline for readability
         except Exception as e:
-            logging.error(f'Error writing to all_posts.json: {e}')
+            logger.error(f'Error writing to all_posts.json: {e}')
 
         # Record group commands and private messages
         self.record_group_command(data)
@@ -229,7 +283,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 with open('./AcountGroupcfg.json', 'r', encoding='utf-8') as file:
                     cfgdata = json.load(file)
             except Exception as e:
-                logging.error(f'Error reading configuration file: {e}')
+                logger.error(f'Error reading configuration file: {e}')
                 return
 
             # 提取所有管理组 ID
@@ -263,7 +317,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "message": data.get("message"),
                 "time": data.get("time")
             }
-            logging.info(data.get("message"))
+            logger.info(data.get("message"))
             ACgroup = self_id_to_acgroup.get(self_id, 'Unknown')
 
             try:
@@ -321,12 +375,12 @@ class RequestHandler(BaseHTTPRequestHandler):
                             try:
                                 subprocess.run([preprocess_script_path, str(new_tag)], check=True)
                             except subprocess.CalledProcessError as e:
-                                logging.error(f"Preprocess script execution failed: {e}")
+                                logger.error(f"Preprocess script execution failed: {e}")
 
                         conn.commit()
                     except Exception as e:
                         conn.rollback()
-                        logging.error(f'Database error: {e}')
+                        logger.error(f'Database error: {e}')
                         raise
 
                 # 持续写入 priv_post.json
@@ -342,20 +396,20 @@ class RequestHandler(BaseHTTPRequestHandler):
                     with open(priv_post_path, 'w', encoding='utf-8') as f:
                         json.dump(priv_post_data, f, ensure_ascii=False, indent=4)
                 except Exception as e:
-                    logging.error(f'Error recording to priv_post.json: {e}')
+                    logger.error(f'Error recording to priv_post.json: {e}')
 
             except Exception as e:
-                logging.error(f'Error recording private message to database: {e}')
+                logger.error(f'Error recording private message to database: {e}')
 
 def run(server_class=ThreadingHTTPServer, handler_class=RequestHandler):
     port = int(config.get('http-serv-port', 8000))
     server_address = ('', port)
     httpd = server_class(server_address, handler_class)
-    logging.info(f'Starting HTTP server on port {port}...')
+    logger.info(f'Starting HTTP server on port {port}...')
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        logging.info('Server is shutting down...')
+        logger.info('Server is shutting down...')
         httpd.server_close()
 
 if __name__ == '__main__':
