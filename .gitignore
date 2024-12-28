@@ -25,7 +25,12 @@ todo
 cache
 .vscode/settings.json
 .vscode/extensions.json
-qqBot/LangBot
 main.session.sql
 OQQWallmsgserv.log
 qqBot/LangBot
+NapCatlog
+cookies-*
+getmsgserv/all/priv_post.json
+AcountGroupcfg.json
+AcountGroupcfg.json.bak
+oqqwall.config

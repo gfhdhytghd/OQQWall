@@ -1,4 +1,66 @@
 #!/bin/bash
+# 函数：检测文件或目录是否存在，不存在则创建
+check_and_create() {
+    local path=$1
+    local type=$2
+
+    if [[ $type == "file" ]]; then
+        if [[ ! -f $path ]]; then
+            touch "$path"
+            echo "已创建文件: $path"
+        fi
+    elif [[ $type == "directory" ]]; then
+        if [[ ! -d $path ]]; then
+            mkdir -p "$path"
+            echo "已创建目录: $path"
+        fi
+    else
+        echo "未知类型: $type。请指定 'file' 或 'directory'。"
+        return 1
+    fi
+}
+
+check_variable() {
+    var_name=$1
+    var_value=$2
+    if [ -z "$var_value" ] || [ "$var_value" == "xxx" ]; then
+        echo "变量 $var_name 未正确设置。请参考OQQWall文档设定初始变量,如果你刚刚进行了更新,请删除现有oqqwall.config中的所有内容,到github仓库复制oqqwall.config到你现有的oqqwall.config文件中,并填写。"
+        exit 1
+    fi
+}
+
+getnumnext(){
+    numnow=$(cat ./numb.txt)
+    numnext=$((numnow + 1))
+    echo "$numnext" > ./numb.txt
+    echo "numnext=$numnext"
+}
+
+getnumnext-startup(){
+    echo 使用selenium校准编号...
+    getnumcmd='python3 ./SendQzone/qzonegettag-headless.py'
+    output=$(eval $getnumcmd)
+    if echo "$output" | grep -q "Log Error!"; then
+        numnow=$( cat ./numfinal.txt )
+        numfinal=$[ numnow + 1 ]
+        echo numfinal:$numfinal
+        echo $numfinal > ./numfinal.txt
+    else
+        numnow=$( cat ./numb.txt )
+        numfinal=$[ numnow + 1 ]
+        echo $numfinal > ./numfinal.txt
+    fi
+}
+
+sendmsggroup() {
+    msg=$1
+    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
+    # 构建 curl 命令，并发送编码后的消息
+    for groupid in "${mangroupids[@]}"; do
+        curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
+    done
+}
+
 if [[ $1 == -r ]]; then
   echo "执行子系统重启..."
   pkill startd.sh
@@ -17,20 +79,20 @@ elif [[ $1 == -rf ]]; then
   pkill qq
   pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
   pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" | xargs kill -15
+elif [[ $1 == -h ]]; then
+echo "Without any flag-->start OQQWall
+-r    Subsystem restart
+-rf   Force subsystem restart
+Show Napcat(QQ) log: open a new terminal, go to OQQWall's home path and run: tail -n 100 -f ./NapCatlog
+for more information, read./OQQWall.wiki"
+exit 0
 fi
 
 apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-http-serv-port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+http_serv_port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"[:space:]')
 waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 DIR="./getmsgserv/rawpost/"
-check_variable() {
-    var_name=$1
-    var_value=$2
-    if [ -z "$var_value" ] || [ "$var_value" == "xxx" ]; then
-        echo "变量 $var_name 未正确设置。请参考OQQWall文档设定初始变量,如果你刚刚进行了更新,请删除现有oqqwall.config中的所有内容,到github仓库复制oqqwall.config到你现有的oqqwall.config文件中,并填写。"
-        exit 1
-    fi
-}
+
 # 检查关键变量是否设置
 check_variable "apikey" "$apikey"
 check_variable "http-serv-port" "$http-serv-port"
@@ -197,21 +259,46 @@ else
 fi
 mangroupids=($(jq -r '.[] | .mangroupid' ./AcountGroupcfg.json))
 # 初始化目录和文件
-
-mkdir /dev/shm/OQQWall/
-touch /dev/shm/OQQWall/oqqwallhtmlcache.html
-mkdir ./cache/numb/
-if [ ! -f "./qqBot/command/commands.txt" ]; then
-    touch ./qqBot/command/commands.txt
-    echo "已创建文件: ./qqBot/command/commands.txt"
+# 初始化目录
+check_and_create "/dev/shm/OQQWall/" "directory"
+check_and_create "./cache/numb/" "directory"
+check_and_create "getmsgserv/all/" "directory"
+# 初始化文件
+check_and_create "/dev/shm/OQQWall/oqqwallhtmlcache.html" "file"
+check_and_create "./getmsgserv/all/commugroup.txt" "file"
+check_and_create "./numfinal.txt" "file"
+if [[ ! -f "getmsgserv/all/priv_post.json" ]]; then
+    touch "getmsgserv/all/priv_post.json"
+    echo "[]" >> "getmsgserv/all/priv_post.json"
+    echo "已创建文件: getmsgserv/all/priv_post.json"
 fi
-
-# 检测并创建 ./getmsgserv/all/commugroup.txt 文件
-if [ ! -f "./getmsgserv/all/commugroup.txt" ]; then
-    touch ./getmsgserv/all/commugroup.txt
-    echo "已创建文件: ./getmsgserv/all/commugroup.txt"
+if [[ ! -f "AcountGroupcfg.json" ]]; then
+    touch "AcountGroupcfg.json"
+    echo '{
+    "MethGroup": {
+      "mangroupid": "",
+      "mainqqid": "",
+      "mainqq_http_port": "",
+      "minorqqid": [
+        ""
+      ],
+      "minorqq_http_port": [
+        ""
+      ]
+    }
+}' > AcountGroupcfg.json
+    echo "已创建文件: AcountGroupcfg.json"
 fi
-#目前只作为一个log文件
+if [[ ! -f "oqqwall.config" ]]; then
+    touch "oqqwall.config"
+    echo 'http-serv-port=
+apikey=""
+process_waittime=120
+max_attempts_qzone_autologin=3' >> "oqqwall.config"
+    echo "已创建文件: oqqwall.config"
+    echo "请参考wiki填写配置文件后再启动"
+    #exit 0
+fi
 
 #写入whitelist
 ## 由于多账号支持要求，QChatGPT的自动同步已经停用
@@ -224,49 +311,10 @@ fi
 #    jq --arg apikey "$apikey" '.keys.openai = [$apikey]' ./qqBot/QChatGPT/data/config/provider.json > tmp.json && mv tmp.json ./qqBot/QChatGPT/data/config/provider.json
 #fi
 
-touch ./numfinal.txt
 pkill startd.sh
 # Activate virtual environment
 source ./venv/bin/activate
 
-getnumnext(){
-    numnow=$(cat ./numb.txt)
-    numnext=$((numnow + 1))
-    echo "$numnext" > ./numb.txt
-    echo "numnext=$numnext"
-}
-getnumnext-startup(){
-    echo 使用selenium校准编号...
-    getnumcmd='python3 ./SendQzone/qzonegettag-headless.py'
-    output=$(eval $getnumcmd)
-    echo $output
-    if echo "$output" | grep -q "Log Error!"; then
-        numnow=$( cat ./numfinal.txt )
-        numfinal=$[ numnow + 1 ]
-        echo numfinal:$numfinal
-        echo $numfinal > ./numfinal.txt
-    else
-        numnow=$( cat ./numb.txt )
-        numfinal=$[ numnow + 1 ]
-        echo $numfinal > ./numfinal.txt
-    fi
-}
-sendmsggroup(){
-    msg=$1
-    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-    # 构建 curl 命令，并发送编码后的消息
-    for groupid in "${mangroupids[@]}"; do
-      cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-      echo $cmd
-      eval $cmd
-    done
-}
-
-
-if [[ "$enable_selenium_autocorrecttag_onstartup" == true ]]; then
-    echo 初始化编号...
-    getnumnext-startup
-    fi
 json_content=$(cat ./AcountGroupcfg.json)
 runidlist=($(echo "$json_content" | jq -r '.[] | .mainqqid, .minorqqid[]'))
 mainqqlist=($(echo "$json_content" | jq -r '.[] | .mainqqid'))
@@ -314,7 +362,6 @@ if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null
 then
     echo "serv.py is already running"
 else
-    source ./venv/bin/activate
     python3 ./getmsgserv/serv.py &
     echo "serv.py started"
 fi
@@ -323,7 +370,6 @@ if pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" > /dev/null
 then
     echo "qzone-serv-pipe.py is already running"
 else
-    source ./venv/bin/activate
     python3 ./SendQzone/qzone-serv-pipe.py &
     echo "qzone-serv-pipe.py started"
 fi
@@ -335,7 +381,7 @@ fi
 
 for qqid in "${runidlist[@]}"; do
     echo "Starting QQ process for ID: $qqid"
-    nohup xvfb-run -a qq --no-sandbox -q "$qqid" &
+    nohup xvfb-run -a qq --no-sandbox -q "$qqid" > ./NapCatlog 2>&1 &
 done
 
 sleep 10
@@ -351,14 +397,11 @@ done
 while true; do
     # 获取当前小时和分钟
     current_time=$(date +"%H:%M")
-    echo $current_time
     current_M=$(date +"%M")
     if [ "$current_M" == "00" ];then
-        echo 'reach :00'
         #检查是否为早上7点
         if [ "$current_time" == "07:00" ]; then
             echo 'reach 7:00'
-            source ./venv/bin/activate
             # 运行 Python 脚本
             for qqid in "${runidlist[@]}"; do
                 echo "Like everyone with ID: $qqid"
@@ -366,9 +409,9 @@ while true; do
                 python3 ./qqBot/likeeveryday.py $port
             done
         fi
-        pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
-        python3 ./getmsgserv/serv.py &
-        echo serv.py 已重启
+        #pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
+        #python3 ./getmsgserv/serv.py &
+        #echo serv.py 已重启
         # 等待 1 小时，直到下一个小时
         sleep 3539
     else

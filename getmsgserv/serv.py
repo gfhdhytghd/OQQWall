@@ -74,16 +74,19 @@ for group_name, group_info in account_group_cfg.items():
         self_id_to_acgroup[qqid] = group_name
 
 class RequestHandler(BaseHTTPRequestHandler):
+    # 重写 log_message 方法以控制日志输出
+    def log_message(self, format, *args):
+        # 如果不需要标准日志，直接忽略
+        pass
+
     def do_POST(self):
         try:
             logging.info("newmsg comes")
-
-            # 检查是否使用了 Transfer-Encoding: chunked
+            
             transfer_encoding = self.headers.get('Transfer-Encoding', '').lower()
             if 'chunked' in transfer_encoding:
                 post_data = self.read_chunked()
             else:
-                # 获取 Content-Length，如果不存在则尝试读取直到连接关闭或达到最大限制
                 content_length = self.headers.get('Content-Length')
                 if content_length is not None:
                     try:
@@ -93,7 +96,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                         self.send_error(400, 'Invalid Content-Length')
                         return
                 else:
-                    # Content-Length 不存在，尝试读取直到连接关闭或达到最大限制（例如 10KB）
                     max_length = 10 * 1024  # 10 KB
                     post_data = b''
                     while True:
@@ -105,43 +107,30 @@ class RequestHandler(BaseHTTPRequestHandler):
                             self.send_error(413, 'Payload Too Large')
                             return
 
-            # 解码并解析 JSON 数据
             try:
                 data = json.loads(post_data.decode('utf-8'))
             except json.JSONDecodeError:
                 self.send_error(400, 'Invalid JSON')
                 return
 
-            # 忽略自动回复消息和好友请求消息
-            if data.get('message_type') == 'private' and 'raw_message' in data:
-                raw_message = data['raw_message']
-                if '自动回复' in raw_message:
-                    logging.info("Received auto-reply message, ignored.")
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(b'Auto-reply message ignored')
-                    return
-                if '请求添加你为好友' in raw_message:
-                    logging.info("Received friend-add request message, ignored.")
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(b'Friend-add request ignored')
-                    return
+            user_id = data.get("user_id", "Unknown")
+            self_id = data.get("self_id", "Unknown")
+            acgroup = self_id_to_acgroup.get(self_id, "Unknown")
 
-            # 处理不同类型的通知
-            if data.get('notice_type') == 'friend_recall':
-                self.handle_friend_recall(data)
-            else:
-                self.handle_default(data)
+            # 自定义日志输出
+            logging.info(f"[{time.strftime('%H:%M:%S %d/%b')}] 来自{user_id}到{self_id},组{acgroup}")
 
-            # 发送响应
+            self.handle_default(data)
             self.send_response(200)
             self.end_headers()
             self.wfile.write(b'Post received and saved')
 
+        except ConnectionResetError as e:
+            logging.error(f"[{time.strftime('%H:%M:%S %d/%b')}] 连接错误 {e}")
         except Exception as e:
             self.send_error(500, f'Internal Server Error: {e}')
             logging.error(f'Error handling request: {e}')
+
 
     def read_chunked(self):
         """
