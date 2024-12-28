@@ -88,23 +88,88 @@ for more information, read./OQQWall.wiki"
 exit 0
 fi
 
-apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-http_serv_port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"[:space:]')
-waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-DIR="./getmsgserv/rawpost/"
+# 初始化目录和文件
+# 初始化目录
+check_and_create "/dev/shm/OQQWall/" "directory"
+check_and_create "./cache/numb/" "directory"
+check_and_create "getmsgserv/all/" "directory"
+# 初始化文件
+check_and_create "/dev/shm/OQQWall/oqqwallhtmlcache.html" "file"
+check_and_create "./getmsgserv/all/commugroup.txt" "file"
+check_and_create "./numfinal.txt" "file"
+if [[ ! -f "getmsgserv/all/priv_post.json" ]]; then
+    touch "getmsgserv/all/priv_post.json"
+    echo "[]" >> "getmsgserv/all/priv_post.json"
+    echo "已创建文件: getmsgserv/all/priv_post.json"
+fi
+if [[ ! -f "AcountGroupcfg.json" ]]; then
+    touch "AcountGroupcfg.json"
+    echo '{
+    "MethGroup": {
+      "mangroupid": "",
+      "mainqqid": "",
+      "mainqq_http_port": "",
+      "minorqqid": [
+        ""
+      ],
+      "minorqq_http_port": [
+        ""
+      ]
+    }
+}' > AcountGroupcfg.json
+    echo "已创建文件: AcountGroupcfg.json"
+fi
+#!/bin/bash
 
-# 检查关键变量是否设置
-check_variable "apikey" "$apikey"
-check_variable "http-serv-port" "$http-serv-port"
-check_variable "process_waittime" "$waittime"
-# 定义 JSON 文件名
-json_file="AcountGroupcfg.json"
-errors=()  # 用于存储所有错误信息
+# 尝试激活现有的虚拟环境
+if source ./venv/bin/activate 2>/dev/null; then
+    echo "已激活现有的Python虚拟环境."
+else
+    echo "虚拟环境不存在，正在创建新的Python虚拟环境..."
+    python3 -m venv ./venv
+    if [ $? -ne 0 ]; then
+        echo "创建虚拟环境失败，请确保已安装 Python 3."
+        exit 1
+    fi
 
-# 用于检查是否有重复的 ID 和端口
-mainqqid_list=()
-minorqqid_list=()
-http_ports_list=()
+    # 激活新创建的虚拟环境
+    source ./venv/bin/activate
+    if [ $? -ne 0 ]; then
+        echo "激活Python虚拟环境失败."
+        exit 1
+    fi
+
+    echo "Python虚拟环境已激活."
+
+    # 升级 pip
+    echo "正在升级 pip..."
+    pip install --upgrade pip
+    if [ $? -ne 0 ]; then
+        echo "升级 pip 失败."
+        exit 1
+    fi
+
+    # 安装所需的包
+    echo "正在安装所需的 Python 包..."
+    pip install dashscope re101 bs4 httpx uvicorn fastapi pydantic
+    if [ $? -ne 0 ]; then
+        echo "安装 Python 包失败."
+        exit 1
+    fi
+
+    echo "所有包已成功安装."
+fi
+
+if [[ ! -f "oqqwall.config" ]]; then
+    touch "oqqwall.config"
+    echo 'http-serv-port=
+apikey=""
+process_waittime=120
+max_attempts_qzone_autologin=3' >> "oqqwall.config"
+    echo "已创建文件: oqqwall.config"
+    echo "请参考wiki填写配置文件后再启动"
+    exit 0
+fi
 
 if [ ! -f ./cache/OQQWall.db ]; then
   # 定义数据库文件名
@@ -133,28 +198,26 @@ CREATE TABLE preprocess (
 EOF
 
 fi
-# 检查 JSON 文件是否存在
-if [ ! -f "$json_file" ]; then
-  echo "错误：未找到账户组配置文件！"
-  cat <<EOL > "$json_file"
-{
-    "MethGroup": {
-      "mangroupid": "",
-      "mainqqid": "",
-      "mainqq_http_port":"",
-      "minorqqid": [
-        ""
-      ],
-      "minorqq_http_port":[
-        ""
-      ]
-    }
-  }
-EOL
 
-  echo "账户组配置文件已创建: $json_file"
-  exit 1
-fi
+
+apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+http_serv_port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"[:space:]')
+waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+DIR="./getmsgserv/rawpost/"
+
+# 检查关键变量是否设置
+check_variable "apikey" "$apikey"
+check_variable "http-serv-port" "$http-serv-port"
+check_variable "process_waittime" "$waittime"
+# 定义 JSON 文件名
+json_file="AcountGroupcfg.json"
+errors=()  # 用于存储所有错误信息
+
+# 用于检查是否有重复的 ID 和端口
+mainqqid_list=()
+minorqqid_list=()
+http_ports_list=()
+
 
 # 检查 JSON 文件的语法是否正确
 if ! jq empty "$json_file" >/dev/null 2>&1; then
@@ -258,47 +321,6 @@ else
   echo "账户组配置文件验证完成，没有发现错误。"
 fi
 mangroupids=($(jq -r '.[] | .mangroupid' ./AcountGroupcfg.json))
-# 初始化目录和文件
-# 初始化目录
-check_and_create "/dev/shm/OQQWall/" "directory"
-check_and_create "./cache/numb/" "directory"
-check_and_create "getmsgserv/all/" "directory"
-# 初始化文件
-check_and_create "/dev/shm/OQQWall/oqqwallhtmlcache.html" "file"
-check_and_create "./getmsgserv/all/commugroup.txt" "file"
-check_and_create "./numfinal.txt" "file"
-if [[ ! -f "getmsgserv/all/priv_post.json" ]]; then
-    touch "getmsgserv/all/priv_post.json"
-    echo "[]" >> "getmsgserv/all/priv_post.json"
-    echo "已创建文件: getmsgserv/all/priv_post.json"
-fi
-if [[ ! -f "AcountGroupcfg.json" ]]; then
-    touch "AcountGroupcfg.json"
-    echo '{
-    "MethGroup": {
-      "mangroupid": "",
-      "mainqqid": "",
-      "mainqq_http_port": "",
-      "minorqqid": [
-        ""
-      ],
-      "minorqq_http_port": [
-        ""
-      ]
-    }
-}' > AcountGroupcfg.json
-    echo "已创建文件: AcountGroupcfg.json"
-fi
-if [[ ! -f "oqqwall.config" ]]; then
-    touch "oqqwall.config"
-    echo 'http-serv-port=
-apikey=""
-process_waittime=120
-max_attempts_qzone_autologin=3' >> "oqqwall.config"
-    echo "已创建文件: oqqwall.config"
-    echo "请参考wiki填写配置文件后再启动"
-    #exit 0
-fi
 
 #写入whitelist
 ## 由于多账号支持要求，QChatGPT的自动同步已经停用
@@ -313,7 +335,7 @@ fi
 
 pkill startd.sh
 # Activate virtual environment
-source ./venv/bin/activate
+
 
 json_content=$(cat ./AcountGroupcfg.json)
 runidlist=($(echo "$json_content" | jq -r '.[] | .mainqqid, .minorqqid[]'))

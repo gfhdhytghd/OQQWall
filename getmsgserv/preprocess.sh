@@ -1,4 +1,5 @@
 #!/bin/bash
+
 tag=$1
 flag=$2
 receiver=$(sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$tag';")
