@@ -41,12 +41,11 @@ echo waitingforsender...
 sleep $waittime
 last_modtime=$(sqlite3 'cache/OQQWall.db' "SELECT modtime FROM sender WHERE senderid = '$senderid';")
 sqlite3 'cache/OQQWall.db' " update sender SET processtime = '$last_modtime' WHERE senderid = '$senderid';"
-sendmsggroup(){
+sendmsggroup() {
     msg=$1
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
-    cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-    eval $cmd
+    curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
 }
 
 sendimagetoqqgroup() {

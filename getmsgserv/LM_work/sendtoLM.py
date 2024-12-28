@@ -79,7 +79,7 @@ def fetch_response_in_parts(prompt, max_rounds=5):
             if response.status_code == HTTPStatus.OK:
                 chunk = response.output.get('choices', [])[0].get('message', {}).get('content', '')
                 output_content += chunk
-                sys.stdout.write(chunk)  # 实时打印每个chunk
+                #sys.stdout.write(chunk)  # 实时打印每个chunk
                 sys.stdout.flush()
             else:
                 print(f"Error in API call: {response.status_code}, {response.message}")

@@ -3,14 +3,13 @@ file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
 litegettag=$(grep 'use_lite_tag_generator' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 self_id=$2
-sendmsggroup(){
+sendmsggroup() {
     msg=$1
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
     # 构建 curl 命令，并发送编码后的消息
-    cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-    echo $cmd
-    eval $cmd
+    curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
 }
+
 sendimagetoqqgroup() {
     # 设置文件夹路径
     folder_path="$(pwd)/cache/prepost/$1"
@@ -25,7 +24,6 @@ sendimagetoqqgroup() {
         encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
         # 构建 curl 命令，并发送编码后的消息
         cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-        echo $cmd
         eval $cmd
         sleep 1  # 添加延时以避免过于频繁的请求
     done
@@ -58,10 +56,10 @@ object=$(echo $1 | awk '{print $1}')
 command=$(echo $1 | awk '{print $2}')
 flag=$(echo $1 | awk '{print $3}')
 input_id="$self_id"
-echo obj:$object
-echo cmd:$command
-echo flag:$flag
-echo self_id:$self_id
+#echo obj:$object
+#echo cmd:$command
+#echo flag:$flag
+#echo self_id:$self_id
 json_file="./AcountGroupcfg.json"
 if [ -z "$input_id" ]; then
   echo "请提供mainqqid或minorqqid。"

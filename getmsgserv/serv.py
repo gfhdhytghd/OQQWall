@@ -114,8 +114,6 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         try:
-            logger.info("newmsg comes")
-
             # 检查是否使用了 Transfer-Encoding: chunked
             transfer_encoding = self.headers.get('Transfer-Encoding', '').lower()
             if 'chunked' in transfer_encoding:
