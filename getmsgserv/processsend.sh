@@ -66,7 +66,7 @@ postqzone(){
     if [[ "$current_mod_time_id" == "$last_mod_time_id" ]]; then
         echo "过程中此人无新消息，删除此人记录"
         timeout 10s sqlite3 "./cache/OQQWall.db" <<EOF
-DELETE FROM sender WHERE senderid='$senderid';
+DELETE FROM sender WHERE senderid = $senderid;
 EOF
         rm -rf ./cache/prepost/$object
     else
@@ -79,9 +79,29 @@ EOF
         row_data=$(timeout 10s sqlite3 "cache/OQQWall.db" "SELECT * FROM preprocess WHERE tag='$object';")
         if [[ -n "$row_data" ]]; then
             # 解析原始数据并插入新的行，替换tag为新的tag值
-            IFS="|" read -r tag senderid nickname receiver ACgroup else<<< "$row_data"
-            timeout 10s sqlite3 "cache/OQQWall.db" "INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup) VALUES ('$new_tag', '$senderid', '$nickname', '$receiver', '$ACgroup');"
+            # 避免使用关键字 'else'，改用 'extra'
+        IFS="|" read -r tag senderid nickname receiver ACgroup extra <<< "$row_data"
+
+        # 检查 $new_tag 是否定义，如果未定义则用 $tag
+        if [ -z "$new_tag" ]; then new_tag="$tag"; fi
+
+        # 使用参数化查询，避免 SQL 注入和引号问题
+        timeout 10s sqlite3 "cache/OQQWall.db" <<EOF
+        INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup) 
+        VALUES (:tag, :senderid, :nickname, :receiver, :ACgroup);
+        .parameter set :tag '$new_tag'
+        .parameter set :senderid '$senderid'
+        .parameter set :nickname '$nickname'
+        .parameter set :receiver '$receiver'
+        .parameter set :ACgroup '$ACgroup'
+        EOF
+
+        # 检查 SQLite 执行结果
+        if [ $? -eq 0 ]; then
             echo "新的一行插入成功，新的tag值为$new_tag"
+        else
+            echo "插入失败，请检查数据库或数据格式"
+        fi
         else
             echo "没有找到tag=$object的行"
         fi
@@ -239,7 +259,7 @@ case $command in
         postcmd="false"
         rm -rf ./cache/prepost/$object
         timeout 10s sqlite3 "./cache/OQQWall.db" <<EOF
-DELETE FROM sender WHERE senderid='$senderid';
+DELETE FROM sender WHERE senderid= $senderid;
 EOF
         rm -rf cache/prepost/$object
         numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
@@ -256,14 +276,14 @@ EOF
         postcmd="del"
         rm -rf ./cache/prepost/$object
         sqlite3 "./cache/OQQWall.db" <<EOF
-DELETE FROM sender WHERE senderid='$senderid';
+DELETE FROM sender WHERE senderid=$senderid;
 EOF
         ;;
     拒)
         postcmd="ref"
         rm -rf ./cache/prepost/$object
         timeout 10s sqlite3 "./cache/OQQWall.db" <<EOF
-DELETE FROM sender WHERE senderid='$senderid';
+DELETE FROM sender WHERE senderid=$senderid;
 EOF
         rm -rf cache/prepost/$object
         sendmsgpriv $senderid '你的稿件被拒绝,请尝试修改后重新投稿'
