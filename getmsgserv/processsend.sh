@@ -65,9 +65,7 @@ postqzone(){
     echo "'last-mod-time-id:'$last_mod_time_id"
     if [[ "$current_mod_time_id" == "$last_mod_time_id" ]]; then
         echo "过程中此人无新消息，删除此人记录"
-        timeout 10s sqlite3 "./cache/OQQWall.db" <<EOF
-DELETE FROM sender WHERE senderid = $senderid;
-EOF
+        timeout 10s sqlite3 "./cache/OQQWall.db" ".param set :id $senderid" "DELETE FROM sender WHERE senderid = :id;"
         rm -rf ./cache/prepost/$object
     else
         rm -rf ./cache/prepost/$object
@@ -86,15 +84,15 @@ EOF
         if [ -z "$new_tag" ]; then new_tag="$tag"; fi
 
         # 使用参数化查询，避免 SQL 注入和引号问题
-        timeout 10s sqlite3 "cache/OQQWall.db" <<EOF
-        INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup) 
-        VALUES (:tag, :senderid, :nickname, :receiver, :ACgroup);
-        .parameter set :tag '$new_tag'
-        .parameter set :senderid '$senderid'
-        .parameter set :nickname '$nickname'
-        .parameter set :receiver '$receiver'
-        .parameter set :ACgroup '$ACgroup'
-        EOF
+timeout 10s sqlite3 "cache/OQQWall.db" <<EOF
+INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup) 
+VALUES (:tag, :senderid, :nickname, :receiver, :ACgroup);
+.parameter set :tag '$new_tag'
+.parameter set :senderid '$senderid'
+.parameter set :nickname '$nickname'
+.parameter set :receiver '$receiver'
+.parameter set :ACgroup '$ACgroup'
+EOF
 
         # 检查 SQLite 执行结果
         if [ $? -eq 0 ]; then
@@ -258,9 +256,7 @@ case $command in
     否)
         postcmd="false"
         rm -rf ./cache/prepost/$object
-        timeout 10s sqlite3 "./cache/OQQWall.db" <<EOF
-DELETE FROM sender WHERE senderid= $senderid;
-EOF
+        timeout 10s sqlite3 "./cache/OQQWall.db" ".param set :id $senderid" "DELETE FROM sender WHERE senderid = :id;"
         rm -rf cache/prepost/$object
         numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
         numfinal=$((numfinal + 1))
@@ -275,16 +271,12 @@ EOF
     删)
         postcmd="del"
         rm -rf ./cache/prepost/$object
-        sqlite3 "./cache/OQQWall.db" <<EOF
-DELETE FROM sender WHERE senderid=$senderid;
-EOF
+        timeout 10s sqlite3 "./cache/OQQWall.db" ".param set :id $senderid" "DELETE FROM sender WHERE senderid = :id;"
         ;;
     拒)
         postcmd="ref"
         rm -rf ./cache/prepost/$object
-        timeout 10s sqlite3 "./cache/OQQWall.db" <<EOF
-DELETE FROM sender WHERE senderid=$senderid;
-EOF
+        timeout 10s sqlite3 "./cache/OQQWall.db" ".param set :id $senderid" "DELETE FROM sender WHERE senderid = :id;"
         rm -rf cache/prepost/$object
         sendmsgpriv $senderid '你的稿件被拒绝,请尝试修改后重新投稿'
         echo 结束发件流程,拒
