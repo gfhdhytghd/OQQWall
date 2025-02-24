@@ -112,6 +112,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         except Exception as e:
             logger.error(f"处理请求时发生错误: {str(e)}")
 
+    def send_json_response(self, status_code, data):
+        self.send_response(status_code)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+
     def do_POST(self):
         try:
             # 检查是否使用了 Transfer-Encoding: chunked
@@ -125,7 +131,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                         content_length = int(content_length)
                         post_data = self.rfile.read(content_length)
                     except ValueError:
-                        self.send_error(400, 'Invalid Content-Length')
+                        self.send_json_response(400, {"error": "Invalid Content-Length"})
                         return
                 else:
                     max_length = 10 * 1024  # 10 KB
@@ -136,13 +142,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                             break
                         post_data += chunk
                         if len(post_data) > max_length:
-                            self.send_error(413, 'Payload Too Large')
+                            self.send_json_response(413, {"error": "Payload Too Large"})
                             return
 
             try:
                 data = json.loads(post_data.decode('utf-8'))
             except json.JSONDecodeError:
-                self.send_error(400, 'Invalid JSON')
+                self.send_json_response(400, {"error": "Invalid JSON"})
                 return
 
             # 记录消息日志
@@ -156,15 +162,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 raw_message = data['raw_message']
                 if '自动回复' in raw_message:
                     logger.info("Received auto-reply message, ignored.")
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(b'Auto-reply message ignored')
+                    self.send_json_response(200, {"status": "ok", "message": "Auto-reply message ignored"})
                     return
                 if '请求添加你为好友' in raw_message:
                     logger.info("Received friend-add request message, ignored.")
-                    self.send_response(200)
-                    self.end_headers()
-                    self.wfile.write(b'Friend-add request ignored')
+                    self.send_json_response(200, {"status": "ok", "message": "Friend-add request ignored"})
                     return
 
             # 处理不同类型的通知
@@ -174,15 +176,13 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.handle_default(data)
 
             # 发送响应
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b'Post received and saved')
+            self.send_json_response(200, {"status": "ok", "message": "Post received and saved"})
 
         except ConnectionResetError as e:
             logging.error(f"[{time.strftime('%H:%M:%S %d/%b')}] 连接错误 {e}")
         except Exception as e:
             logger.error(f"处理POST请求时发生错误: {str(e)}")
-            self.send_error(500, f'Internal Server Error: {e}')
+            self.send_json_response(500, {"error": f"Internal Server Error: {str(e)}"})
 
     def read_chunked(self):
         """
@@ -201,7 +201,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 # 解析块大小（十六进制）
                 chunk_size = int(line, 16)
             except ValueError:
-                self.send_error(400, 'Invalid chunk size')
+                self.send_json_response(400, {"error": "Invalid chunk size"})
                 return b''
 
             if chunk_size == 0:
@@ -215,14 +215,14 @@ class RequestHandler(BaseHTTPRequestHandler):
             # 读取指定大小的块数据加上末尾的 CRLF
             chunk = self.rfile.read(chunk_size + 2)
             if len(chunk) < chunk_size + 2:
-                self.send_error(400, 'Incomplete chunked data')
+                self.send_json_response(400, {"error": "Incomplete chunked data"})
                 return data
             data += chunk[:-2]  # 去除末尾的 CRLF
 
         # 可选：限制最大读取大小以防止资源耗尽
         max_length = 10 * 1024 * 1024  # 10 MB
         if len(data) > max_length:
-            self.send_error(413, 'Payload Too Large')
+            self.send_json_response(413, {"error": "Payload Too Large"})
             return b''
 
         return data

@@ -54,13 +54,6 @@ sendimagetoqqgroup() {
     done
     echo "所有文件已发送"
 }
-
-renewqzoneloginauto(){
-    source ./venv/bin/activate
-    rm ./cookies-$receiver.json
-    rm ./qrcode.png
-    python3 ./SendQzone/qzonerenewcookies.py $1
-}
 postqzone(){
     message_sending=$1
     image_send_list=$2
@@ -134,7 +127,7 @@ savetostorge(){
 
     # 使用正则表达式匹配
     if [[ $text =~ ^#([0-9]+)(.*)$ ]]; then
-        num="${BASH_REMATCH[1]}"  # 提取数字部分
+        tag="${BASH_REMATCH[1]}"  # 提取数字部分
         char="${BASH_REMATCH[2]}" # 提取字符部分（可能为空）
     else
         # 不以 # 开头，整个字符串作为字符部分
@@ -195,7 +188,7 @@ post_pre(){
         sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"
 
         # 清空存储
-        sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"
+        sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"renewqzoneloginauto
         sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"
         echo "所有存储内容已发送并清空。"
 
@@ -306,12 +299,6 @@ cleanup(){
     # 清理临时文件
     rm -f /dev/shm/OQQWall/oqqwallhtmlcache.html
     rm -f /dev/shm/OQQWall/oqqwallpdfcache.pdf
-    
-    # 关闭数据库连接
-    sqlite3 "$db_path" ".quit"
-    
-    # 删除FIFO
-    rm -f ./presend_in_fifo ./presend_out_fifo
 }
 
 # 添加信号处理
