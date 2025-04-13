@@ -355,6 +355,9 @@ case $command in
     刷新)
         getmsgserv/preprocess.sh $object nowaittime
         ;;
+    重渲染)
+        getmsgserv/preprocess.sh $object randeronly
+        ;;
     评论)
         json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
         need_priv=$(echo $json_data|jq -r '.needpriv')
