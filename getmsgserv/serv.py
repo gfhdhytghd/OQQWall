@@ -343,13 +343,14 @@ class RequestHandler(BaseHTTPRequestHandler):
                     gottedtag = match_tag.group(1) if match_tag else None
                     print(f"提取的内部编号 gottedtag: {gottedtag}")
 
-                    # 获取最后一个词
-                    text_only = re.sub(r"\[CQ:[^\]]+\]", "", raw_message).strip()
-                    words = re.findall(r"[\w\u4e00-\u9fff]+", text_only)
-                    last_word = words[-1] if words else ""
+                    # 获取 [CQ:at,qq=xxx] 后面的内容作为命令文本的一部分
+                    match_after_at = re.search(r"\[CQ:at,qq=\d+\]\s*(.+)", raw_message)
+                    after_at_text = match_after_at.group(1).strip() if match_after_at else ""
 
                     # 合并得到 command_text
-                    command_text = f"{gottedtag} {last_word}" if gottedtag and last_word else None
+
+                    # 合并得到 command_text
+                    command_text = f"{gottedtag} {after_at_text}" if gottedtag and after_at_text else None
 
                     print(f"command_text: {command_text}")
                     command_script_path = './getmsgserv/command.sh'
