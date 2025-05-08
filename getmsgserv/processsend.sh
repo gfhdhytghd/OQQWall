@@ -291,66 +291,16 @@ case $command in
         modified_json=$(echo "$json_content" | jq '.needpriv = (.needpriv == "true" | not | tostring)')
         timeout 10s sqlite3 "./cache/OQQWall.db" "UPDATE preprocess SET AfterLM='$modified_json' WHERE tag='$object';"
         
-        {
-            flock -x 200  # Acquire exclusive lock
-            getmsgserv/HTMLwork/gotohtml.sh $object > /dev/shm/OQQWall/oqqwallhtmlcache.html
-            google-chrome-stable --headless --disable-gpu --print-to-pdf=/dev/shm/OQQWall/oqqwallpdfcache.pdf \
-            --run-all-compositor-stages-before-draw --no-pdf-header-footer --virtual-time-budget=2000 \
-            --pdf-page-orientation=portrait --no-margins --enable-background-graphics --print-background=true \
-            file:///dev/shm/OQQWall/oqqwallhtmlcache.html
-        } 200>/dev/shm/OQQWall/oqqwall.lock  # Lock the directory with a lock file
-        # Step 3: Process the output into JPG
-        folder=./cache/prepost/${object}
-        json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
-        if [[ -z "$json_data" ]]; then
-            echo "No data found for tag $object"
-            exit 1
-        fi
-        rm -rf $folder
-        mkdir -p "$folder"
-        # 使用identify获取PDF页数
-        pages=$(identify -format "%n\n" /dev/shm/OQQWall/oqqwallpdfcache.pdf | head -n 1)
-        # 循环处理每一页
-        for ((i=0; i<$pages; i++)); do
-            formatted_index=$(printf "%02d" $i)
-            convert -density 360 -quality 90 /dev/shm/OQQWall/oqqwallpdfcache.pdf[$i] $folder/${object}-${formatted_index}.jpeg
-        done
-        existing_files=$(ls "$folder" | wc -l)
-        next_file_index=$existing_files
-        echo "$json_data" | jq -r '.messages[].message[] | select(.type == "image" and .data.sub_type == 0) | .data.url' | while read -r url; do
-            # 格式化文件索引
-            formatted_index=$(printf "%02d" $next_file_index)
-            
-            # 下载文件并保存
-            curl -o "$folder/$object-${formatted_index}.jpg" "$url"
-            
-            # 增加文件索引
-            next_file_index=$((next_file_index + 1))
-        done
-        cd $folder
-        for file in *.*; do
-        # 检查文件是否存在
-        if [ -f "$file" ]; then
-            # 提取文件名（不包括后缀）
-            base_name="${file%.*}"
-            # 重命名文件，去除后缀名
-            mv "$file" "$base_name"
-        fi
-        done
-        cd -
-
-        json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
-        need_priv=$(echo $json_data|jq -r '.needpriv')
-        numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
-        if [[ "$need_priv" == "false" ]]; then
-            message="#$numfinal @{uin:$senderid,nick:,who:1}"
-        else
-            message="#$numfinal"
-        fi
-        sendimagetoqqgroup
-        sendmsggroup $numnext
-        echo askforgroup...
-        sendmsggroup 请发送指令
+        # {
+        #     flock -x 200  # Acquire exclusive lock
+        #     getmsgserv/HTMLwork/gotohtml.sh $object > /dev/shm/OQQWall/oqqwallhtmlcache.html
+        #     google-chrome-stable --headless --disable-gpu --print-to-pdf=/dev/shm/OQQWall/oqqwallpdfcache.pdf \
+        #     --run-all-compositor-stages-before-draw --no-pdf-header-footer --virtual-time-budget=2000 \
+        #     --pdf-page-orientation=portrait --no-margins --enable-background-graphics --print-background=true \
+        #     file:///dev/shm/OQQWall/oqqwallhtmlcache.html
+        # } 200>/dev/shm/OQQWall/oqqwall.lock  # Lock the directory with a lock file
+        # Step 3: Process the output into JPG and send
+        getmsgserv/preprocess.sh $object randeronly
         ;;
     刷新)
         getmsgserv/preprocess.sh $object nowaittime

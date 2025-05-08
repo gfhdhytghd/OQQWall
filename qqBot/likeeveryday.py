@@ -37,7 +37,7 @@ for special_user_id in special_user_ids:
         except requests.RequestException as e:
             print(f"未能为至高无上的开发者（ID: {special_user_id}）发送赞。错误: {e}")
             break
-    
+
 # 获取好友列表
 try:
     response = requests.post(f"{url}/get_friend_list")
