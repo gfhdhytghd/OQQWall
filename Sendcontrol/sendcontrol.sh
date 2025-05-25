@@ -10,254 +10,280 @@ activate_venv() {
     fi
 }
 
-# 续期 Qzone 登录
-renewqzoneloginauto(){
-    receiver=$1
-    activate_venv
-    rm -f "./cookies-$receiver.json"
-    rm -f "./qrcode.png"
-    python3 ./SendQzone/qzonerenewcookies.py "$receiver"
+
+# 续登 QQ 空间：给 QQ 号自动刷新 Napcat Cookie
+# 调用：renewqzoneloginauto <qqid>
+renewqzoneloginauto() {
+    local qqid="$1"
+    if [[ -z "$qqid" ]]; then
+        echo "[ERR] renewqzoneloginauto: 缺少 QQ 号参数"
+        return 1
+    fi
+
+    #▶ 删除旧 cookie / 二维码
+    rm -f "./cookies-${qqid}.json" qrcode.png
+
+    #▶ 解析端口
+    local qport=""
+    if [[ "$qqid" == "$mainqqid" ]]; then
+        qport="$mainqq_http_port"
+    else
+        # minorqqid / minorqq_http_ports 需用 **相同顺序** 的逗号或空格分隔
+        IFS=',' read -ra id_arr   <<< "$minorqqid"
+        IFS=',' read -ra port_arr <<< "$minorqq_http_ports"
+        for idx in "${!id_arr[@]}"; do
+            if [[ "${id_arr[$idx]}" == "$qqid" ]]; then
+                qport="${port_arr[$idx]}"
+                break
+            fi
+        done
+    fi
+    if [[ -z "$qport" ]]; then
+        echo "[ERR] renewqzoneloginauto: 找不到 QQ $qqid 对应端口"
+        return 1
+    fi
+    echo "[INFO] renewqzoneloginauto: qq=$qqid  port=$qport"
+
+    #▶ 执行续登脚本
+    python3 ./SendQzone/qzonerenewcookies-napcat.py "$qport"
+    local ret=$?
+    if [[ $ret -ne 0 ]]; then
+        echo "[ERR] qzonerenewcookies-napcat.py 失败 (exit=$ret)"
+        return $ret
+    fi
+    echo "[OK] cookie 刷新成功"
 }
 
-# 发送私信
+# 发送私信（通过 OneBot HTTP 接口）
 sendmsgpriv(){
     user_id=$1
     msg=$2
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-    cmd="curl \"http://127.0.0.1:$port/send_private_msg?user_id=$user_id&message=$encoded_msg\""
-    eval "$cmd"
+    curl -s -o /dev/null "http://127.0.0.1:$port/send_private_msg?user_id=$user_id&message=$encoded_msg"
 }
 
-# 发送群消息
+# 发送群消息（通过 OneBot HTTP 接口）
 sendmsggroup(){
     msg=$1
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-    cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-    eval "$cmd"
+    curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
 }
 
-# 发送图片到群
-sendimagetoqqgroup() {
-    folder_path="$(pwd)/cache/prepost/$object"
-    if [ ! -d "$folder_path" ]; then
-        echo "文件夹 $folder_path 不存在"
+# 根据组名获取群组和账号发送参数
+get_send_info(){
+    group_info=$(jq -r --arg groupname "$groupname" '.[$groupname]' AcountGroupcfg.json)
+    if [ -z "$group_info" ] || [ "$group_info" = "null" ]; then
+        echo "未找到组名为 $groupname 的账户配置！"
         exit 1
     fi
-
-    find "$folder_path" -maxdepth 1 -type f | sort | while IFS= read -r file_path; do
-        echo "发送文件: $file_path"
-        msg="[CQ:image,file=$file_path]"
-        encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-        cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-        eval "$cmd"
-        sleep 1  # 添加延时以避免过于频繁的请求
-    done
-    echo "所有文件已发送"
-}
-postqzone(){
-    message_sending=$1
-    image_send_list=$2
-    echo {$goingtosendid[@]}
-    sendqueue=("${goingtosendid[@]}")
-    for qqid in "${sendqueue[@]}"; do
-        echo "Sending qzone use id: $qqid"
-        postprocess_pipe "$qqid" "$image_send_list" "$message_sending"
-    done
-    #sendmsgpriv $senderid "$numfinal 已发送(系统自动发送，请勿回复)"
-    #numfinal=$((numfinal + 1))
-    #echo $numfinal > ./cache/numb/"$groupname"_numfinal.txt
-}
-
-postprocess_pipe(){
-    image_send_list=$2
-    message_sending=$3
-    attempt=1
-    while [ $attempt -le $max_attempts ]; do
-        cookies=$(cat ./cookies-$1.json)
-        
-        # Fix JSON formatting by ensuring proper commas and quotes are placed
-        echo "{\"text\":\"$message_sending\",\"image\":$image_send_list,\"cookies\":$cookies}" > ./qzone_in_fifo
-        
-        echo "$postcommand"
-        
-        # Execute the command
-        eval $postcommand
-        
-        # Check the status
-        post_statue=$(cat ./qzone_out_fifo)
-        if echo "$post_statue"  | grep -q "failed"; then
-            if [ $attempt -lt $max_attempts ]; then
-                renewqzoneloginauto $1
-            else
-                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,请发送指令"
-                exit 1
+    groupid=$(echo "$group_info" | jq -r '.mangroupid')
+    mainqqid=$(echo "$group_info" | jq -r '.mainqqid')
+    mainqq_http_port=$(echo "$group_info" | jq -r '.mainqq_http_port')
+    # 设置需要发送说说的账号列表（主账号 + 副账号）
+    goingtosendid=()
+    goingtosendid+=("$(echo "$group_info" | jq -r '.mainqqid')")
+    # 如有副账户配置，加入发送列表
+    minor_ids=$(echo "$group_info" | jq -r '.minorqqid[]')
+    if [ -n "$minor_ids" ] && [ "$minor_ids" != "" ]; then
+        for mid in $minor_ids; do
+            if [ -n "$mid" ]; then
+                goingtosendid+=("$mid")
             fi
-        elif echo "$post_statue"  | grep -q "success"; then
-            goingtosendid=("${goingtosendid[@]/$qqid}")
-            echo "$1发送完毕"
-            sendmsggroup "$1已发送"
-            break
-        else
-            sendmsggroup "系统错误：$post_statue"
-        fi
-        attempt=$((attempt+1))
-    done
-}
-
-# 检查并创建 SQLite 表
-checkandcreattable(){
-    local db_path="./cache/OQQWall.db"
-    if ! sqlite3 "$db_path" "SELECT name FROM sqlite_master WHERE type='table' AND name='sendstorge_$groupname';" | grep -q "sendstorge_$groupname"; then
-        sqlite3 "$db_path" "CREATE TABLE sendstorge_$groupname (tag INTEGER, atsender TEXT, image TEXT);"
-        echo "表 sendstorge_$groupname 已创建。"
-    else
-        echo "表 sendstorge_$groupname 已存在。"
+        done
     fi
+    # 获取私信发送端口（假定所有账号共用同一 HTTP 服务端口）
+    port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"[:space:]"')
 }
 
-# 保存到存储
+# 检查并创建SQLite暂存表（按群区分）
+check_and_create_table(){
+    local db_path="./cache/OQQWall.db"
+    sqlite3 "$db_path" "CREATE TABLE IF NOT EXISTS sendstorge_$groupname (tag INTEGER, atsender TEXT, image TEXT);"
+}
+
+# 将投稿保存到暂存表
 savetostorge(){
     local text="$1"
     shift
     local images=("$@")
     local db_path="./cache/OQQWall.db"
-    
-    tag=""
-    char=""
-
-    # 使用正则表达式匹配
+    # 提取投稿编号和正文内容（如文本以#开头表示评论回复）
+    local tag_num=""
+    local content="$text"
     if [[ $text =~ ^#([0-9]+)(.*)$ ]]; then
-        tag="${BASH_REMATCH[1]}"  # 提取数字部分
-        char="${BASH_REMATCH[2]}" # 提取字符部分（可能为空）
-    else
-        # 不以 # 开头，整个字符串作为字符部分
-        char="$text"
+        tag_num="${BASH_REMATCH[1]}"
+        content="${BASH_REMATCH[2]}"
     fi
-
-    checkandcreattable
-    # 将所有图片连接为逗号分隔的字符串
-    image_list=$(IFS=,; echo "${images[*]}")
-
-    # 将消息文本保存到 atsender 字段，图片列表保存到 image 字段
-    sqlite3 "$db_path" "INSERT INTO sendstorge_$groupname (tag, atsender, image) VALUES ($tag, '$char', '$image_list');"
-    
-    echo "内容已保存到存储，tag=$tag"
+    # 转义文本中的单引号以防SQL错误
+    local content_sql=$(echo "$content" | sed "s/'/''/g")
+    # 拼接图片路径列表为逗号分隔字符串
+    local image_list=""
+    if [ ${#images[@]} -gt 0 ]; then
+        image_list=$(IFS=,; echo "${images[*]}")
+    fi
+    check_and_create_table
+    # 插入投稿记录
+    sqlite3 "$db_path" "INSERT INTO sendstorge_$groupname (tag, atsender, image) VALUES ($tag_num, '$content_sql', '$image_list');"
 }
 
-# 处理组
+# 检查暂存队列是否达到发送阈值
 process_group(){
     local db_path="./cache/OQQWall.db"
     local count=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM sendstorge_$groupname;")
-    if [ "$count" -ge 9 ]; then  # 假设阈值为40
+    # 计算队列中累计的图片总数
+    local total_images=0
+    local images_lists=$(sqlite3 "$db_path" "SELECT image FROM sendstorge_$groupname;")
+    while IFS= read -r line; do
+        if [ -n "$line" ]; then
+            IFS=',' read -ra imgs <<< "$line"
+            total_images=$((total_images + ${#imgs[@]}))
+        fi
+    done <<< "$images_lists"
+    # 读取阈值配置（没有配置则使用默认值）
+    local max_count=$(grep 'merge_threshold' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+    local max_images=$(grep 'image_threshold' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+    [ -z "$max_count" ] && max_count=40
+    [ -z "$max_images" ] && max_images=9
+    if [ "$count" -ge "$max_count" ] || [ "$total_images" -ge "$max_images" ]; then
         echo "sendnow"
     else
         echo "hold"
     fi
 }
 
-# 预处理发布
+# 发送前准备：将暂存队列合并/单条组织成 QQ空间说说内容并通过FIFO发送
 post_pre(){
-    local mode="$1"  # all 或 single
-
-    if [ "$mode" == "all" ]; then
-        # 获取所有存储的消息和图片
-        db_path="./cache/OQQWall.db"
-
-        combined_message=$(sqlite3 "$db_path" "SELECT GROUP_CONCAT(atsender, ' ') FROM sendstorge_$groupname;")
-        combined_images=$(sqlite3 "$db_path" "SELECT GROUP_CONCAT(image, ',') FROM sendstorge_$groupname;")
-        mintag=$(sqlite3 "$db_path" "SELECT MIN(tag) FROM sendstorge_$groupname;")
-        maxtag=$(sqlite3 "$db_path" "SELECT MAX(tag) FROM sendstorge_$groupname;")
-
-        # 将图片列表转换为 JSON 数组
-        combined_images="${combined_images// /,}"
-        IFS=',' read -r image_array <<< "$combined_images"
-        image_list="["
-        first=true
-        for img in "${image_array[@]}"; do
-            if [ "$first" = true ]; then
-                image_list+="\"$img\""
-                first=false
-            else
-                image_list+=",\"$img\""
+    local mode="$1"  # 模式："all" 合并全部暂存，"single" 发送单条
+    local db_path="./cache/OQQWall.db"
+    local message_text=""
+    local image_array_json="[]"
+    if [ "$mode" = "all" ]; then
+        # 合并所有暂存消息文本（换行分隔）
+        message_text=$(sqlite3 "$db_path" "SELECT GROUP_CONCAT(atsender, '\n') FROM sendstorge_$groupname;")
+        # 汇总所有图片路径到数组
+        combined_images=$(sqlite3 "$db_path" "SELECT image FROM sendstorge_$groupname WHERE image != '';")
+        if [ -n "$combined_images" ]; then
+            declare -a all_imgs
+            while IFS= read -r line; do
+                if [ -n "$line" ]; then
+                    IFS=',' read -ra imgs <<< "$line"
+                    for img in "${imgs[@]}"; do
+                        all_imgs+=("$img")
+                    done
+                fi
+            done <<< "$combined_images"
+            if [ ${#all_imgs[@]} -gt 0 ]; then
+                local img_json_elems=""
+                for img in "${all_imgs[@]}"; do
+                    if [ -n "$img_json_elems" ]; then
+                        img_json_elems+=", \\\"$img\\\""
+                    else
+                        img_json_elems="\\\"$img\\\""
+                    fi
+                done
+                image_array_json="[${img_json_elems}]"
             fi
-        done
-        image_list+="]"
-
-        # 发送合并后的内容
-        postqzone "#$mintag~$maxtag $combined_message" "$image_list"
-        sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"
-
-        # 清空存储
-        sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"renewqzoneloginauto
-        sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"
-        echo "所有存储内容已发送并清空。"
-
-    elif [ "$mode" == "single" ]; then
-
-        # 将图片列表转换为 JSON 数组
-        image_list="["
-        first=true
-        for img in "${image_in[@]}"; do
-            if [ "$first" = true ]; then
-                image_list+="\"${img#file://}\""
-                first=false
-            else
-                image_list+=",\"${img#file://}\""
+        fi
+    elif [ "$mode" = "single" ]; then
+        # 取暂存表中最后一条记录的内容和图片
+        message_text=$(sqlite3 "$db_path" "SELECT atsender FROM sendstorge_$groupname ORDER BY rowid DESC LIMIT 1;")
+        local images_line=$(sqlite3 "$db_path" "SELECT image FROM sendstorge_$groupname ORDER BY rowid DESC LIMIT 1;")
+        if [ -n "$images_line" ]; then
+            IFS=',' read -ra imgs <<< "$images_line"
+            if [ ${#imgs[@]} -gt 0 ]; then
+                local img_json_elems=""
+                for img in "${imgs[@]}"; do
+                    if [ -n "$img_json_elems" ]; then
+                        img_json_elems+=", \\\"$img\\\""
+                    else
+                        img_json_elems="\\\"$img\\\""
+                    fi
+                done
+                image_array_json="[${img_json_elems}]"
             fi
+        fi
+    fi
+    # 逐个账号尝试发送（支持多账号协同）
+    for qqid in "${goingtonsendid[@]}"; do
+        attempt=1
+        while [ $attempt -le $max_attempts ]; do
+            cookies=$(cat "./cookies-$qqid.json")
+            # 写入待发送内容到 QQ空间输入管道
+            echo "{\"text\":\"$message_text\",\"image\":$image_array_json,\"cookies\":$cookies}" > ./qzone_in_fifo
+            # 读取发送结果输出
+            post_status=$(cat ./qzone_out_fifo)
+            if echo "$post_status" | grep -q "failed"; then
+                if [ $attempt -lt $max_attempts ]; then
+                    echo "QQ空间发送失败，尝试重新登录账号 $qqid （第 $((attempt+1)) 次重试）..."
+                    renewqzoneloginauto $qqid
+                else
+                    sendmsggroup "投稿发送失败：账号 $qqid 可能需要重新登录，请检查。"
+                fi
+            elif echo "$post_status" | grep -q "success"; then
+                echo "账号 $qqid 投稿发送成功。"
+                sendmsggroup "账号 $qqid 已发布墙贴。"
+                break
+            else
+                sendmsggroup "发布出现系统错误：$post_status"
+            fi
+            attempt=$((attempt+1))
         done
-        image_list+="]"
-
-        # 发送直接输入的内容
-        postqzone "$text_in" "$image_list"
-        
-        echo "最新的FIFO输入已发送。"
-    fi
-}
-
-# 运行规则
-run_rules(){
-    local text_in="$1"
-    shift
-    local image_in=("$@")
-
-    if [[ "$initsendstatue" == "sendnow" ]]; then
-        # 先发送当前的所有库存投稿，再发送当前传入的投稿
-        post_pre "all"
-        post_pre "single"
-    else
-        savetostorge "$text_in" "${image_in[@]}"
-    fi
-
-    local statue_amount=$(process_group)
-    if [[ "$statue_amount" == "sendnow" ]]; then
-        post_pre "all"
-    fi
-}
-
-# 获取发送信息
-get_send_info(){
-    group_info=$(jq -r --arg groupname "$groupname" '
-    to_entries[] | select(.key == $groupname)
-    ' "AcountGroupcfg.json")
-
-    if [ -z "$group_info" ]; then
-        echo "未找到组名为$groupname 的相关信息。"
-        exit 1
-    fi
-
-    groupid=$(echo "$group_info" | jq -r '.value.mangroupid')
-    mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
-    mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
-    minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
-    minorqqids=$(echo "$group_info" | jq -r '.value.minorqqid[]')
-    goingtosendid=("$mainqqid")
-    IFS=',' read -ra minorqqids_array <<< "$minorqqids"
-    for qqid in "${minorqqids_array[@]}"; do
-        goingtosendid+=("$qqid")
     done
+    # 清理暂存队列内容
+    if [ "$mode" = "all" ]; then
+        sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"
+    elif [ "$mode" = "single" ]; then
+        sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname WHERE rowid = (SELECT MAX(rowid) FROM sendstorge_$groupname);"
+    fi
 }
 
-# 主循环
+# 处理新投稿的规则逻辑
+run_rules(){
+    # 如为管理员触发的立即发送所有指令（无正文），直接发送所有暂存内容
+    if [ "$initsendstatue" = "sendnow" ] && [ -z "$text_in" ]; then
+        # 立即发送所有暂存的投稿
+        post_pre "all"
+        return
+    fi
+    # 保存投稿到暂存数据库
+    savetostorge "$text_in" "${image_in[@]}"
+    # 决策是否需要发送
+    local decide=$(process_group)
+    if [ "$initsendstatue" = "single" ]; then
+        # 管理员指令要求立即发送此帖
+        post_pre "single"
+    elif [ -n "$text_in" ] && [[ $text_in =~ ^#([0-9]+) ]]; then
+        # 用户评论指令（#开头），即时单独发送
+        post_pre "single"
+    elif [ "$decide" = "sendnow" ]; then
+        # 达到合并阈值，发送暂存队列所有内容
+        post_pre "all"
+    else
+        # 未触发发送条件，暂不发送（内容已暂存队列）
+        :
+    fi
+}
+
+# 清理函数：退出时移除FIFO等
+cleanup(){
+    rm -f ./presend_in_fifo
+    # （qzone_in_fifo 和 qzone_out_fifo 由 SendQzone 服务统一管理）
+    echo "sendcontrol 已退出。"
+}
+
+# 初始化：读取配置并创建通信管道
+initialize(){
+    max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+    [ -z "$max_attempts" ] && max_attempts=3
+    # 创建发送控制输入FIFO管道
+    if [ ! -p ./presend_in_fifo ]; then
+        mkfifo ./presend_in_fifo
+    fi
+    # 准备发送命令占位（使用持续运行的 qzone-serv-pipe 服务时无需额外命令）
+    postcommand=""
+}
+
+# 主循环：持续从管道读取投稿发布请求
 main_loop(){
     while true; do
         text_in=""
@@ -265,45 +291,30 @@ main_loop(){
         groupname=""
         initsendstatue=""
         if read -r in_json_data < ./presend_in_fifo; then
+            # 解析输入JSON字段
             text_in=$(echo "$in_json_data" | jq -r '.text')
-            image_in=($(echo "$in_json_data" | jq -r '.image[]'))  
+            # 提取图片数组
+            local imgCount
+            imgCount=$(echo "$in_json_data" | jq '.image | length')
+            if [ "$imgCount" -gt 0 ]; then
+                mapfile -t image_in < <(echo "$in_json_data" | jq -r '.image[]')
+            fi
             groupname=$(echo "$in_json_data" | jq -r '.groupname')
             initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue')
-
+            # 获取该群组对应的发送参数（群号、端口等）
             get_send_info
-            run_rules "$text_in" "${image_in[@]}"
+            # 应用发送控制规则
+            run_rules
         else
-            echo "读取 FIFO 失败或 FIFO 被关闭。"
+            echo "[sendcontrol] FIFO 读取失败或已关闭，等待重试..."
             sleep 1
         fi
     done
 }
 
-# 初始化
-initialize(){
-    max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-    if [ -z "$max_attempts" ]; then
-        max_attempts=3  # 默认重试次数
-    fi
-     # 创建 FIFO 管道
-    if [ ! -p ./presend_in_fifo ]; then
-        mkfifo ./presend_in_fifo
-    fi
-    if [ ! -p ./presend_out_fifo ]; then
-        mkfifo ./presend_out_fifo
-    fi
-}
-
-# 添加清理函数
-cleanup(){
-    # 清理临时文件
-    rm -f /dev/shm/OQQWall/oqqwallhtmlcache.html
-    rm -f /dev/shm/OQQWall/oqqwallpdfcache.pdf
-}
-
-# 添加信号处理
+# 设置退出信号捕获，确保程序中止时清理资源
 trap cleanup EXIT SIGINT SIGTERM
 
-# 启动脚本
+# 启动 sendcontrol 模块
 initialize
 main_loop
