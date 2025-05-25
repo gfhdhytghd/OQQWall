@@ -291,15 +291,78 @@ class RequestHandler(BaseHTTPRequestHandler):
             raw_message = data.get('raw_message', '')
             self_id = str(data.get('self_id'))
 
-            if (group_id in mangroupid_list and sender.get('role') == 'admin' and raw_message.startswith(f"[CQ:at,qq={self_id}")):
+            # 1) 普通 @消息 处理
+            if (
+                group_id in mangroupid_list
+                and sender.get('role') == 'admin'
+                and raw_message.startswith(f"[CQ:at,qq={self_id}")
+            ):
                 print("serv:有指令消息")
                 command_text = re.sub(r'\[.*?\]', '', raw_message).strip()
                 print("指令:", command_text)
                 command_script_path = './getmsgserv/command.sh'
                 try:
-                    subprocess.run([command_script_path, command_text] + [self_id], check=True)
+                    subprocess.run([command_script_path, command_text, self_id], check=True)
                 except subprocess.CalledProcessError as e:
                     print(f"Command execution failed: {e}")
+
+            # 2) 带有 [CQ:reply,id=XXX] 并 @机器人 的回复消息
+            if (
+                group_id in mangroupid_list
+                and sender.get('role') == 'admin'
+                and raw_message.startswith("[CQ:reply,id=")
+                and f"[CQ:at,qq={self_id}]" in raw_message
+            ):
+                # 提取 reply_id
+                match_reply = re.search(r"\[CQ:reply,id=(\d+)\]", raw_message)
+                if match_reply:
+                    reply_id = int(match_reply.group(1))
+                    print(f"Reply ID: {reply_id}")
+
+                    # 读取 all_posts.json 并倒序遍历，找对应 message_id
+                    raw_reply_message = None
+                    with open("getmsgserv/all/all_posts.json", "r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                        for line in reversed(lines):
+                            try:
+                                msg = json.loads(line)
+                                if msg.get("message_id") == reply_id:
+                                    raw_reply_message = msg.get("raw_message")
+                                    break
+                            except json.JSONDecodeError:
+                                continue
+
+                    if not raw_reply_message:
+                        # 找不到回复消息时
+                        print("未找到对应的 reply 消息")
+                        return
+
+                    # 如果找到 raw_reply_message，则继续处理
+                    print(f"匹配到的回复消息内容：{raw_reply_message}")
+                    match_tag = re.search(r"内部编号(\d+)", raw_reply_message)
+                    gottedtag = match_tag.group(1) if match_tag else None
+                    print(f"提取的内部编号 gottedtag: {gottedtag}")
+
+                    # 获取 [CQ:at,qq=xxx] 后面的内容作为命令文本的一部分
+                    match_after_at = re.search(r"\[CQ:at,qq=\d+\]\s*(.+)", raw_message)
+                    after_at_text = match_after_at.group(1).strip() if match_after_at else ""
+
+                    # 合并得到 command_text
+
+                    # 合并得到 command_text
+                    command_text = f"{gottedtag} {after_at_text}" if gottedtag and after_at_text else None
+
+                    print(f"command_text: {command_text}")
+                    command_script_path = './getmsgserv/command.sh'
+
+                    if command_text:
+                        try:
+                            subprocess.run([command_script_path, command_text, self_id], check=True)
+                        except subprocess.CalledProcessError as e:
+                            print(f"Command execution failed: {e}")
+                    else:
+                        print("内部编号或最后一个词不存在，无法执行命令。")
+
 
     def record_private_message(self, data):
         message_type = data.get('message_type')

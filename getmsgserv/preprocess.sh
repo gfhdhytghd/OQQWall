@@ -6,6 +6,7 @@ receiver=$(sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag
 senderid=$(sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = '$tag';")
 waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 if [[ $flag == nowaittime ]];then waittime=0 ;fi
+if [[ $flag == randeronly ]];then waittime=0 ;fi
 json_file="./AcountGroupcfg.json"
 group_info=$(jq -r --arg receiver "$receiver" '
   to_entries[] | select(.value.mainqqid == $receiver or (.value.minorqqid[]? == $receiver))
@@ -67,25 +68,28 @@ sendimagetoqqgroup() {
     done
     echo "所有文件已发送"
 }
-echo process-message-to-jpg...
-###processinfo###
-# Step 1: Process tag and send to LM
-attempt=0
-max_lm_attempts=3
-success=false
-while [[ $attempt -lt $max_lm_attempts ]]; do
-  if getmsgserv/LM_work/progress-lite-json.sh "$tag" | python3 getmsgserv/LM_work/sendtoLM.py "$tag"; then
-    success=true
-    break
-  else
-    ((attempt++))
-    echo "Attempt $attempt failed, retrying..."
+if [[ $flag == randeronly ]]; then
+  echo "跳过 LLM 处理（randeronly 模式）"
+else
+  echo process-message-to-jpg...
+  ###processinfo###
+  # Step 1: Process tag and send to LM
+  attempt=0
+  max_lm_attempts=3
+  success=false
+  while [[ $attempt -lt $max_lm_attempts ]]; do
+    if getmsgserv/LM_work/progress-lite-json.sh "$tag" | python3 getmsgserv/LM_work/sendtoLM.py "$tag"; then
+      success=true
+      break
+    else
+      ((attempt++))
+      echo "Attempt $attempt failed, retrying..."
+    fi
+  done
+  if [ "$success" = false ]; then
+    sendmsggroup LLM处理错误，请检查相关信息
   fi
-done
-if [ "$success" = false ]; then
-  sendmsggroup LLM处理错误，请检查相关信息
 fi
-
 # Step 2: Lock the cache files and process HTML to PDF
 {
   flock -x 200  # Acquire exclusive lock

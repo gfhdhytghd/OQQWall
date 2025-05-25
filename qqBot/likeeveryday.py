@@ -7,36 +7,37 @@ port = sys.argv[1]
 # 构造基础 URL
 url = f"http://127.0.0.1:{port}"
 
-# 为至高无上的开发者发送赞
-special_user_id = "3391146750"
-like_payload = {
-    "user_id": special_user_id,
-    "times": 50  # 初始点赞次数设置为 50
-}
-while True:
-    try:
-        # 发送赞请求给特殊用户
-        like_response = requests.post(f"{url}/send_like", json=like_payload)
-        like_response.raise_for_status()  # 检查请求是否成功
-        response_data = like_response.json()
+# 为特殊用户（至高无上的开发者和他最爱的某人）点赞
+special_user_ids = ["3391146750", "1720953645"]
+for special_user_id in special_user_ids:
+    like_payload = {
+        "user_id": special_user_id,
+        "times": 50  # 初始点赞次数设置为 50
+    }
+    while True:
+        try:
+            # 发送赞请求
+            like_response = requests.post(f"{url}/send_like", json=like_payload)
+            like_response.raise_for_status()
+            response_data = like_response.json()
 
-        # 检查返回信息
-        if "点赞数无效" in response_data.get("message", ""):
-            if like_payload["times"] == 50:
-                like_payload["times"] = 20  # 如果 50 无效，改为 20
-            elif like_payload["times"] == 20:
-                like_payload["times"] = 10  # 如果 20 无效，改为 10
-            elif like_payload["times"] == 10:
-                print("为至高无上的开发者发送赞失败，尝试次数均无效。")
+            # 检查返回信息
+            if "点赞数无效" in response_data.get("message", ""):
+                if like_payload["times"] == 50:
+                    like_payload["times"] = 20
+                elif like_payload["times"] == 20:
+                    like_payload["times"] = 10
+                elif like_payload["times"] == 10:
+                    print(f"为至高无上的开发者或他的对象（ID: {special_user_id}）发送赞失败，尝试次数均无效。")
+                    break
+            else:
+                print(f"已为至高无上的开发者和他的对象（ID: {special_user_id}）发送 {like_payload['times']} 个赞。")
+                print(f"完整返回信息: {response_data}")
                 break
-        else:
-            print(f"已为至高无上的开发者发送 {like_payload['times']} 个赞。")
-            print(f"完整返回信息: {response_data}")  # 输出完整的返回信息
+        except requests.RequestException as e:
+            print(f"未能为至高无上的开发者（ID: {special_user_id}）发送赞。错误: {e}")
             break
-    except requests.RequestException as e:
-        print(f"未能为至高无上的开发者发送赞。错误: {e}")
-        break
-    
+
 # 获取好友列表
 try:
     response = requests.post(f"{url}/get_friend_list")
@@ -53,10 +54,10 @@ except ValueError:
 data_list = friend_list.get('data', [])
 
 # 检查好友列表是否有足够数据
-if len(data_list) > 499:
-    # 随机选择 499 个好友
-    selected_friends = random.sample(data_list, 499)
-    # 更新 friend_list 的数据为选中的 499 个好友
+if len(data_list) > 498:
+    # 随机选择 498 个好友
+    selected_friends = random.sample(data_list, 498)
+    # 更新 friend_list 的数据为选中的 498 个好友
     friend_list['data'] = selected_friends
 
 # 确保响应状态正常后处理每个好友
