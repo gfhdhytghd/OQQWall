@@ -5,8 +5,7 @@ flag=$2
 receiver=$(sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$tag';")
 senderid=$(sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = '$tag';")
 waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-if [[ $flag == nowaittime ]];then waittime=0 ;fi
-if [[ $flag == randeronly ]];then waittime=0 ;fi
+if [[ $flag == nowaittime || $flag == randeronly ]]; then waittime=0; fi
 json_file="./AcountGroupcfg.json"
 group_info=$(jq -r --arg receiver "$receiver" '
   to_entries[] | select(.value.mainqqid == $receiver or (.value.minorqqid[]? == $receiver))
@@ -41,7 +40,12 @@ fi
 echo waitingforsender...
 sleep $waittime
 last_modtime=$(sqlite3 'cache/OQQWall.db' "SELECT modtime FROM sender WHERE senderid = '$senderid';")
-sqlite3 'cache/OQQWall.db' " update sender SET processtime = '$last_modtime' WHERE senderid = '$senderid';"
+if [[ $flag == randeronly ]]; then
+  echo "跳过更新processtime（randeronly 模式）"
+else
+  sqlite3 'cache/OQQWall.db' " update sender SET processtime = '$last_modtime' WHERE senderid = '$senderid';"
+fi
+
 sendmsggroup() {
     msg=$1
     encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")

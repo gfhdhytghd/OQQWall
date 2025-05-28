@@ -75,18 +75,16 @@ renewqzoneloginauto() {
 }
 
 postqzone(){
-    message=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT comment FROM preprocess WHERE tag = $object;")
-    if [ -z "$message" ]; then
-        send_single=true
-        json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
-        need_priv=$(echo $json_data|jq -r '.needpriv')
-        if [[ "$need_priv" == "false" ]]; then
-            message="#$numfinal @{uin:$senderid,nick:,who:1}"
-        else
-            message="#$numfinal"
-        fi
+    comment=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT comment FROM preprocess WHERE tag = $object;")
+    json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+    need_priv=$(echo $json_data|jq -r '.needpriv')
+    if [[ "$need_priv" == "false" ]]; then
+        message="#$numfinal @{uin:$senderid,nick:,who:1}"
     else
-        send_single=false
+        message="#$numfinal"
+    fi
+    if [[ -n "$comment" && "$comment" != "null" ]]; then
+    message="$message $comment"
     fi
     echo {$goingtosendid[@]}
     sendqueue=("${goingtosendid[@]}")
@@ -94,12 +92,10 @@ postqzone(){
         echo "Sending qzone use id: $qqid"
         postprocess_pipe $qqid
     done
-    sendmsgpriv $senderid "$numfinal 已发送(系统自动发送，请勿回复)"
+    sendmsgpriv $senderid "# $numfinal 投稿已发送(系统自动发送，请勿回复)"
     numfinal=$((numfinal + 1))
     echo $numfinal > ./cache/numb/"$groupname"_numfinal.txt
     current_mod_time_id=$(timeout 10s sqlite3 'cache/OQQWall.db' "select modtime from sender where senderid=$senderid;")
-    echo "'current-mod-time-id:'$current_mod_time_id"
-    echo "'last-mod-time-id:'$last_mod_time_id"
     if [[ "$current_mod_time_id" == "$last_mod_time_id" ]]; then
         echo "过程中此人无新消息，删除此人记录"
         timeout 10s sqlite3 "./cache/OQQWall.db" ".param set :id $senderid" "DELETE FROM sender WHERE senderid = :id;"
@@ -107,7 +103,6 @@ postqzone(){
     else
         rm -rf ./cache/prepost/$object
         echo "过程中有新消息:needreprocess:$senderid"
-        object=$1  
         # 创建新预处理项目
         max_tag=$(timeout 10s sqlite3 "cache/OQQWall.db" "SELECT MAX(tag) FROM preprocess;")
         new_tag=$((max_tag + 1))
@@ -122,13 +117,12 @@ postqzone(){
 
         # 使用参数化查询，避免 SQL 注入和引号问题
 timeout 10s sqlite3 "cache/OQQWall.db" <<EOF
-INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup) 
-VALUES (:tag, :senderid, :nickname, :receiver, :ACgroup);
-.parameter set :tag '$new_tag'
-.parameter set :senderid '$senderid'
-.parameter set :nickname '$nickname'
-.parameter set :receiver '$receiver'
-.parameter set :ACgroup '$ACgroup'
+.parameter set :oldtag  $object
+.parameter set :newtag  $new_tag
+INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup)
+SELECT :newtag, senderid, nickname, receiver, ACgroup
+  FROM preprocess
+ WHERE tag = :oldtag;
 EOF
 
         # 检查 SQLite 执行结果
@@ -140,7 +134,7 @@ EOF
         else
             echo "没有找到tag=$object的行"
         fi
-        ./getmsgserv/preprocess $new_tag
+        getmsgserv/preprocess.sh $new_tag
     fi
 }
 postprocess(){
@@ -163,7 +157,7 @@ postprocess(){
             if [ $attempt -lt $max_attempts ]; then
                 renewqzoneloginauto $1
             else
-                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,发送\"@出错账号 手动重新登陆\"以手动重新登陆,完毕后请重新发送审核指令,请发送指令"
+                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,发送\"@出错账号 手动重新登陆\"以手动重新登陆,完毕后请重新发送审核指令,内部编号$object,请发送指令"
                 exit 1
                 break
             fi
@@ -219,7 +213,7 @@ postprocess_pipe(){
             if [ $attempt -lt $max_attempts ]; then
                 renewqzoneloginauto $1
             else
-                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,请发送指令"
+                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,内部编号$object,请发送指令"
                 exit 1
             fi
         else
@@ -327,16 +321,6 @@ case $command in
         json_content=$(timeout 10s sqlite3 "./cache/OQQWall.db" "SELECT AfterLM FROM preprocess WHERE tag='$object';")
         modified_json=$(echo "$json_content" | jq '.needpriv = (.needpriv == "true" | not | tostring)')
         timeout 10s sqlite3 "./cache/OQQWall.db" "UPDATE preprocess SET AfterLM='$modified_json' WHERE tag='$object';"
-        
-        # {
-        #     flock -x 200  # Acquire exclusive lock
-        #     getmsgserv/HTMLwork/gotohtml.sh $object > /dev/shm/OQQWall/oqqwallhtmlcache.html
-        #     google-chrome-stable --headless --disable-gpu --print-to-pdf=/dev/shm/OQQWall/oqqwallpdfcache.pdf \
-        #     --run-all-compositor-stages-before-draw --no-pdf-header-footer --virtual-time-budget=2000 \
-        #     --pdf-page-orientation=portrait --no-margins --enable-background-graphics --print-background=true \
-        #     file:///dev/shm/OQQWall/oqqwallhtmlcache.html
-        # } 200>/dev/shm/OQQWall/oqqwall.lock  # Lock the directory with a lock file
-        # Step 3: Process the output into JPG and send
         getmsgserv/preprocess.sh $object randeronly
         ;;
     刷新)
@@ -347,26 +331,26 @@ case $command in
         ;;
     评论)
         json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
-        need_priv=$(echo $json_data|jq -r '.needpriv')
-        if [[ "$need_priv" == "false" ]]; then
-            message="#$numfinal @{uin:$senderid,nick:,who:1}"
-        else
-            message="#$numfinal"
-        fi
+        #need_priv=$(echo $json_data|jq -r '.needpriv')
+        # if [[ "$need_priv" == "false" ]]; then
+        #     message="#$numfinal @{uin:$senderid,nick:,who:1}"
+        # else
+        #     message="#$numfinal"
+        # fi
         if [ -n "$flag" ]; then
-            message="${message}"' '"${flag}"
-            sendmsggroup "增加评论后的文本：\n $message"
-            sendmsggroup 请发送指令
+            timeout 10s sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET comment='$flag' WHERE tag = '$object';"
+            sendmsggroup "已储存评论内容：\n $flag"
+            sendmsggroup "内部编号$object, 请发送指令"
         else
-            if [[ "$need_priv" == "false" ]]; then
-                message="#$numfinal @{uin:$senderid,nick:,who:1}"
-            else
-                message="#$numfinal"
-            fi
-            sendmsggroup "没有找到评论内容，文本内容已还原"
-            sendmsggroup "当前文本：\n $message"
+            # if [[ "$need_priv" == "false" ]]; then
+            #     message="#$numfinal @{uin:$senderid,nick:,who:1}"
+            # else
+            #     message="#$numfinal"
+            # fi
+            timeout 10s sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET comment='' WHERE tag = '$object';"
+            sendmsggroup "没有找到评论内容，评论已清空"
+            sendmsggroup "内部编号$object, 请发送指令"
         fi
-        timeout 10s sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET comment='$message' WHERE tag = '$object';"
         ;;
     回复)
         sendmsgpriv $senderid $flag
@@ -376,6 +360,6 @@ case $command in
         ;;
     *)
         sendmsggroup "没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助"
-        sendmsggroup 请发送指令
+        sendmsggroup "内部编号$object, 请发送指令"
         ;;
 esac
