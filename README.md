@@ -30,47 +30,49 @@
 # <div align=center>文档</div>
 ## <div align=center > [快速开始](https://github.com/gfhdhytghd/OQQWall/wiki/%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B) | [全部文档](https://github.com/gfhdhytghd/OQQWall/wiki)</div>
 
-# <div align=center> 使用效果展示</div>
+<h3 align="center">使用效果展示</h3>
 
-<div style="column-width:250px; column-gap:10px; padding-top:10px;">
-
-<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
-  <img src="readme_Recorces/Screenshot_20250529_182031_TIM.jpg" alt="标准发送示意图" style="width:100%; border-radius:6px;">
-  <p style="margin:6px 0 0; font-size:14px;">标准发送</p>
-</div>
-
-<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
-  <img src="readme_Recorces/Screenshot_20250529_182106_TIM.jpg" alt="队列发送示意图" style="width:100%; border-radius:6px;">
-  <p style="margin:6px 0 0; font-size:14px;">密集审核，队列发送</p>
-</div>
-
-<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
-  <img src="readme_Recorces/Screenshot_20250529_182255_TIM.jpg" alt="处理时间段再次投稿示意图" style="width:100%; border-radius:6px;">
-  <p style="margin:6px 0 0; font-size:14px;">允许处理时间段内再次投稿</p>
-</div>
-
-<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
-  <img src="readme_Recorces/Screenshot_20250529_182129_TIM.jpg" alt="评论功能示意图" style="width:100%; border-radius:6px;">
-  <p style="margin:6px 0 0; font-size:14px;">管理员评论</p>
-</div>
-<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
-  <img src="readme_Recorces/Screenshot_20250529_192949_TIM.jpg" alt="图片渲染与单独发送展示图" style="width:100%; border-radius:6px;">
-  <p style="margin:6px 0 0; font-size:14px;">图片渲染与单独发送</p>
-</div>
-<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
-  <img src="readme_Recorces/Screenshot_20250529_192801_TIM.jpg" alt="单次多投稿发送效果展示图" style="width:100%; border-radius:6px;">
-  <p style="margin:6px 0 0; font-size:14px;">单次多投稿发送效果</p>
-</div>
-
-<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
-  <img src="readme_Recorces/Screenshot_20250529_193037_TIM.jpg" alt="自动匿名识别展示图" style="width:100%; border-radius:6px;">
-  <p style="margin:6px 0 0; font-size:14px;">自动匿名识别</p>
-</div>
-
-<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
-  <img src="readme_Recorces/Screenshot_20250529_192908_TIM.jpg" alt="表情包渲染展示图" style="width:100%; border-radius:6px;">
-  <p style="margin:6px 0 0; font-size:14px;">表情包渲染</p>
-</div>
+<table>
+  <tr>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_192801_TIM.jpg" width="220"><br/>
+      <sub>单次多投稿发送效果</sub>
+    </td>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_182106_TIM.jpg" width="220"><br/>
+      <sub>密集审核，队列发送</sub>
+    </td>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_182255_TIM.jpg" width="220"><br/>
+      <sub>允许处理时间段内再次投稿</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_182031_TIM.jpg" width="220"><br/>
+      <sub>标准发送</sub>
+    </td>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_182129_TIM.jpg" width="220"><br/>
+      <sub>管理员评论</sub>
+    </td>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_193037_TIM.jpg" width="220"><br/>
+      <sub>自动匿名识别</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_192908_TIM.jpg" width="220"><br/>
+      <sub>表情包渲染</sub>
+    </td>
+     <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_192949_TIM.jpg" width="220"><br/>
+      <sub>图片渲染与单独发送</sub>
+    </td>
+    <td></td>
+  </tr>
+</table>
 
 
 
