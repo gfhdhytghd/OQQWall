@@ -27,5 +27,70 @@
 <br/>无法Ai审核图片内容
 <br/>没有历史消息处理逻辑，onebot下线过程中的积压投稿无法处理
 
-# <div align=center >文档</div>
-### <div align=center > [快速开始](https://github.com/gfhdhytghd/OQQWall/wiki/%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B) | [全部文档](https://github.com/gfhdhytghd/OQQWall/wiki)</div>
+# <div align=center>文档</div>
+## <div align=center > [快速开始](https://github.com/gfhdhytghd/OQQWall/wiki/%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B) | [全部文档](https://github.com/gfhdhytghd/OQQWall/wiki)</div>
+
+# <div align=center> 使用效果展示</div>
+
+<div style="column-width:250px; column-gap:10px; padding-top:10px;">
+
+<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
+  <img src="readme_Recorces/Screenshot_20250529_182031_TIM.jpg" alt="标准发送示意图" style="width:100%; border-radius:6px;">
+  <p style="margin:6px 0 0; font-size:14px;">标准发送</p>
+</div>
+
+<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
+  <img src="readme_Recorces/Screenshot_20250529_182106_TIM.jpg" alt="队列发送示意图" style="width:100%; border-radius:6px;">
+  <p style="margin:6px 0 0; font-size:14px;">密集审核，队列发送</p>
+</div>
+
+<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
+  <img src="readme_Recorces/Screenshot_20250529_182255_TIM.jpg" alt="处理时间段再次投稿示意图" style="width:100%; border-radius:6px;">
+  <p style="margin:6px 0 0; font-size:14px;">允许处理时间段内再次投稿</p>
+</div>
+
+<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
+  <img src="readme_Recorces/Screenshot_20250529_182129_TIM.jpg" alt="评论功能示意图" style="width:100%; border-radius:6px;">
+  <p style="margin:6px 0 0; font-size:14px;">管理员评论</p>
+</div>
+<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
+  <img src="readme_Recorces/Screenshot_20250529_192949_TIM.jpg" alt="图片渲染与单独发送展示图" style="width:100%; border-radius:6px;">
+  <p style="margin:6px 0 0; font-size:14px;">图片渲染与单独发送</p>
+</div>
+<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
+  <img src="readme_Recorces/Screenshot_20250529_192801_TIM.jpg" alt="单次多投稿发送效果展示图" style="width:100%; border-radius:6px;">
+  <p style="margin:6px 0 0; font-size:14px;">单次多投稿发送效果</p>
+</div>
+
+<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
+  <img src="readme_Recorces/Screenshot_20250529_193037_TIM.jpg" alt="自动匿名识别展示图" style="width:100%; border-radius:6px;">
+  <p style="margin:6px 0 0; font-size:14px;">自动匿名识别</p>
+</div>
+
+<div style="display:inline-block; width:100%; margin-bottom:10px; break-inside:avoid; text-align:center;">
+  <img src="readme_Recorces/Screenshot_20250529_192908_TIM.jpg" alt="表情包渲染展示图" style="width:100%; border-radius:6px;">
+  <p style="margin:6px 0 0; font-size:14px;">表情包渲染</p>
+</div>
+
+
+
+
+</div>
+
+<div align="center">
+
+## 开源项目列表
+
+本项目使用或参考了以下开源项目：  
+[Campux](https://github.com/idoknow/Campux)  
+[Python](https://www.python.org/)  
+[dashscope](https://github.com/dashscope)  
+[with-ai-agents](https://github.com/yejue/with-ai-agents)  
+[napneko](https://napneko.github.io/zh-CN/)  
+[liteloaderqqnt](https://liteloaderqqnt.github.io/)  
+[LLOneBot](https://github.com/LLOneBot/LLOneBot/)  
+[Lagrange.onebot](https://github.com/LSTM-Kirigaya/Lagrange.onebot)  
+[Stapxs QQ lite](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0)  
+感谢各位对自由软件与本项目作出的贡献！
+
+</div>
