@@ -1,5 +1,6 @@
 #!/bin/bash
 # 函数：检测文件或目录是否存在，不存在则创建
+source ./Global_toolkit.sh
 check_and_create() {
     local path=$1
     local type=$2
@@ -52,14 +53,6 @@ getnumnext-startup(){
     fi
 }
 
-sendmsggroup() {
-    msg=$1
-    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-    # 构建 curl 命令，并发送编码后的消息
-    for groupid in "${mangroupids[@]}"; do
-        curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
-    done
-}
 
 if [[ $1 == -r ]]; then
   echo "执行子系统重启..."

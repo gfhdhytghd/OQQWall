@@ -1,56 +1,9 @@
 #!/bin/bash
+source ./Global_toolkit.sh
 file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
 litegettag=$(grep 'use_lite_tag_generator' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 self_id=$2
-sendmsggroup() {
-    msg=$1
-    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-    # 构建 curl 命令，并发送编码后的消息
-    curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
-}
-
-sendimagetoqqgroup() {
-    # 设置文件夹路径
-    folder_path="$(pwd)/cache/prepost/$1"
-    # 检查文件夹是否存在
-    if [ ! -d "$folder_path" ]; then
-    sendmsggroup "不存在此待处理项目"
-    exit 1
-    fi
-    find "$folder_path" -maxdepth 1 -type f | sort | while IFS= read -r file_path; do
-        echo "发送文件: $file_path"
-        msg=[CQ:image,file=file://$file_path]
-        encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-        # 构建 curl 命令，并发送编码后的消息
-        cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-        eval $cmd
-        sleep 1  # 添加延时以避免过于频繁的请求
-    done
-    echo "所有文件已发送"
-}
-renewqzoneloginauto(){
-    rm ./cookies-$self_id.json
-    rm ./qrcode.png
-    if [[ "$use_selenium_to_generate_qzone_cookies" == "true" ]]; then
-        python3 ./SendQzone/qzonerenewcookies-selenium.py $1
-    else
-        python3 ./SendQzone/qzonerenewcookies.py $1
-    fi
-}
-
-renewqzonelogin(){
-    rm ./cookies-$self_id.json
-    rm ./qrcode.png
-    python3 SendQzone/send.py relogin "" $1 &
-        sleep 2
-        sendmsggroup 请立即扫描二维码
-        sendmsggroup "[CQ:image,file=$(pwd)/qrcode.png]"
-        sleep 120
-    postqzone
-    sleep 2
-    sleep 60
-}
 echo 收到指令:$1
 object=$(echo $1 | awk '{print $1}')
 command=$(echo $1 | awk '{print $2}')

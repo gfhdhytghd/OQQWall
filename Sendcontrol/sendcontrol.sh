@@ -58,14 +58,14 @@ renewqzoneloginauto() {
 sendmsgpriv(){
     user_id=$1
     msg=$2
-    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
+    encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$msg")
     curl -s -o /dev/null "http://127.0.0.1:$port/send_private_msg?user_id=$user_id&message=$encoded_msg"
 }
 
 # 发送群消息（通过 OneBot HTTP 接口）
 sendmsggroup(){
     msg=$1
-    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
+    encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$msg")
     curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
 }
 

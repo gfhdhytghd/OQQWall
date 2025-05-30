@@ -1,5 +1,5 @@
 #!/bin/bash
-
+source ./Global_toolkit.sh
 tag=$1
 flag=$2
 receiver=$(sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$tag';")
@@ -45,33 +45,6 @@ if [[ $flag == randeronly ]]; then
 else
   sqlite3 'cache/OQQWall.db' " update sender SET processtime = '$last_modtime' WHERE senderid = '$senderid';"
 fi
-
-sendmsggroup() {
-    msg=$1
-    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-    # 构建 curl 命令，并发送编码后的消息
-    curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
-}
-
-sendimagetoqqgroup() {
-    # 设置文件夹路径
-    folder_path="$(pwd)/cache/prepost/$tag"
-    # 检查文件夹是否存在
-    if [ ! -d "$folder_path" ]; then
-    echo "文件夹 $folder_path 不存在"
-    exit 1
-    fi
-    find "$folder_path" -maxdepth 1 -type f | sort | while IFS= read -r file_path; do
-        echo "发送文件: $file_path"
-        msg=[CQ:image,file=file://$file_path]
-        encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-        # 构建 curl 命令，并发送编码后的消息
-        cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-        eval $cmd
-        sleep 1  # 添加延时以避免过于频繁的请求
-    done
-    echo "所有文件已发送"
-}
 if [[ $flag == randeronly ]]; then
   echo "跳过 LLM 处理（randeronly 模式）"
 else
