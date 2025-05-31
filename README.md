@@ -18,7 +18,7 @@
 <br/>微信短时间内不会支持，因为没有找到linux能用的，好用的api。
 
 本系统的技术实现方式不是很优雅，创建过程大量使用chatgpt编写实现小功能的脚本，并最终由一个bash把所有东西都串起来，不过他确实能跑起来。
-<br/>编写和测试平台是阿里云的ubuntu 22.04 x64 UEFI版本。
+<br/>编写和测试平台是主线ArchLinux，作者目前使用的生产环境是阿里云的ubuntu 22.04 x64 UEFI版本。
 
 本系统拥有处理并发的能力，允许的最小投稿时间间隔是无限小，最大并行处理能力取决于你的电脑内存大小和管理员响应速度。平均一个稿件从收到首条消息到发出要三分钟。
 
@@ -27,5 +27,72 @@
 <br/>无法Ai审核图片内容
 <br/>没有历史消息处理逻辑，onebot下线过程中的积压投稿无法处理
 
-# <div align=center >文档</div>
-### <div align=center > [快速开始](https://github.com/gfhdhytghd/OQQWall/wiki/%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B) | [全部文档](https://github.com/gfhdhytghd/OQQWall/wiki)</div>
+# <div align=center>文档</div>
+## <div align=center > [快速开始](https://github.com/gfhdhytghd/OQQWall/wiki/%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B) | [全部文档](https://github.com/gfhdhytghd/OQQWall/wiki)</div>
+
+<h3 align="center">使用效果展示</h3>
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_192801_TIM.jpg" width="220"><br/>
+      <sub>单次多投稿发送效果</sub>
+    </td>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_182106_TIM.jpg" width="220"><br/>
+      <sub>密集审核，队列发送</sub>
+    </td>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_182255_TIM.jpg" width="220"><br/>
+      <sub>允许处理时间段内再次投稿</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_182031_TIM.jpg" width="220"><br/>
+      <sub>标准发送</sub>
+    </td>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_182129_TIM.jpg" width="220"><br/>
+      <sub>管理员评论</sub>
+    </td>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_193037_TIM.jpg" width="220"><br/>
+      <sub>自动匿名识别</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_192908_TIM.jpg" width="220"><br/>
+      <sub>表情包渲染</sub>
+    </td>
+     <td align="center">
+      <img src="readme_Recorces/Screenshot_20250529_192949_TIM.jpg" width="220"><br/>
+      <sub>图片渲染与单独发送</sub>
+    </td>
+    <td></td>
+  </tr>
+</table>
+
+
+
+
+</div>
+
+<div align="center">
+
+## 开源项目列表
+
+本项目使用或参考了以下开源项目：  
+[Campux](https://github.com/idoknow/Campux)  
+[Python](https://www.python.org/)  
+[dashscope](https://github.com/dashscope)  
+[with-ai-agents](https://github.com/yejue/with-ai-agents)  
+[napneko](https://napneko.github.io/zh-CN/)  
+[liteloaderqqnt](https://liteloaderqqnt.github.io/)  
+[LLOneBot](https://github.com/LLOneBot/LLOneBot/)  
+[Lagrange.onebot](https://github.com/LSTM-Kirigaya/Lagrange.onebot)  
+[Stapxs QQ lite](https://github.com/Stapxs/Stapxs-QQ-Lite-2.0)  
+感谢各位对自由软件与本项目作出的贡献！
+
+</div>
