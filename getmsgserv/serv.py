@@ -168,6 +168,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                     logger.info("Received friend-add request message, ignored.")
                     self.send_json_response(200, {"status": "ok", "message": "Friend-add request ignored"})
                     return
+                if '我们已成功添加为好友，' in raw_message:
+                    logger.info("Received friend-add request message, ignored.")
+                    self.send_json_response(200, {"status": "ok", "message": "Friend-add request ignored"})
+                    return
 
             # 处理不同类型的通知
             if data.get('notice_type') == 'friend_recall':
