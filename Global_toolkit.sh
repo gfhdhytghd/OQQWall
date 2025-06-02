@@ -6,7 +6,7 @@ sendmsggroup() {
 }
 sendmsgpriv(){
     msg=$2
-    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
+    encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$msg")
     # 构建 curl 命令，并发送编码后的消息
     cmd="curl -s -o /dev/null \"http://127.0.0.1:$port/send_private_msg?user_id=$1&message=$encoded_msg\""
     eval $cmd
@@ -28,6 +28,7 @@ sendimagetoqqgroup() {
         eval $cmd
         sleep 1  # 添加延时以避免过于频繁的请求
     done
+    sendmsggroup 
     echo "所有文件已发送"
 }
 renewqzoneloginauto() {
