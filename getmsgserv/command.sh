@@ -68,6 +68,20 @@ case $object in
             sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
         fi
         ;;
+    "调出")
+        max_tag=$(sqlite3 "cache/OQQWall.db" "SELECT MAX(tag) FROM preprocess;")
+        if [[ $command =~ ^[0-9]+$ ]]; then
+            echo max:$max_tag
+            if [[ $command -le $max_tag ]];then
+                ./getmsgserv/preprocess.sh "$command" randeronly
+            else
+                 sendmsggroup "当前编号不在数据库中"
+            fi
+        else
+            echo "Error: arg is not a pure number."
+            sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
+        fi
+        ;;
     "待处理")
         numbpending=$(find ./cache/prepost -mindepth 1 -maxdepth 1 -type d -exec basename {} \;)
         if [ -z $numbpending ]; then
@@ -81,10 +95,65 @@ $numbpending"
         rm -rf ./cache/prepost/*
         sendmsggroup 已清空待处理列表
         ;;
+    "自检")
+        # 1. 先通过 printf -v 初始化 syschecklist，并确保每条后面都有真实换行符
+        printf -v syschecklist '== 系统自检报告 ==\n'
+
+        # 2. CPU 使用率
+        cpu_idle=$(top -bn1 | awk '/Cpu\(s\):/ {print $8}')
+        cpu_usage=$(bc <<< "scale=1; 100 - $cpu_idle")
+        printf -v syschecklist '%sCPU使用率: %s%%\n' "$syschecklist" "$cpu_usage"
+
+        # 3. 内存使用情况
+        #    free -h 输出第二行：total used free ...
+        read total_mem used_mem _ <<< "$(free -h | awk 'NR==2 {print $2, $3}')"
+        printf -v syschecklist '%s内存使用情况: 已用: %s / 总计: %s\n' \
+            "$syschecklist" "$used_mem" "$total_mem"
+
+        # 4. 硬盘使用情况
+        disk_info=$(df -h --total | awk '/^total/ {print "已用: "$3" / 总计: "$2" ("$5" 已用)"}')
+        printf -v syschecklist '%s硬盘使用情况: %s\n' "$syschecklist" "$disk_info"
+
+        # 5. 检测各个服务是否在运行
+        if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null; then
+            printf -v syschecklist '%sqq消息接收服务已在运行\n' "$syschecklist"
+        else
+            printf -v syschecklist '%sqq消息接收服务不在运行，正在尝试重启\n' "$syschecklist"
+            pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
+            python3 ./getmsgserv/serv.py &
+            echo "serv.py started"
+        fi
+
+        if pgrep -f "./Sendcontrol/sendcontrol.sh" > /dev/null; then
+            printf -v syschecklist '%s发送调度服务已在运行\n' "$syschecklist"
+        else
+            printf -v syschecklist '%s发送调度服务服务不在运行，正在尝试重启\n' "$syschecklist"
+            pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" | xargs kill -15
+            ./Sendcontrol/sendcontrol.sh &
+            echo "sendcontrol.sh started"
+        fi
+
+        if pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" > /dev/null; then
+            printf -v syschecklist '%s空间发送服务已在运行\n' "$syschecklist"
+        else
+            printf -v syschecklist '%s空间发送服务不在运行，正在尝试重启\n' "$syschecklist"
+            pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" | xargs kill -15
+            python3 ./SendQzone/qzone-serv-pipe.py &
+            echo "qzone-serv-pipe.py started"
+        fi
+
+        # 6. 添加结尾
+        printf -v syschecklist '%s==== 自检完成 ====' "$syschecklist"
+
+        # 7. 调用已存在的发送函数，注意这里不修改 sendmsggroup 的定义
+        sendmsggroup "$syschecklist"
+        ;;
     "帮助")
         help='全局指令:
 语法: @本账号/次要账号 指令
 (可以在任何时刻@本账号调用的指令)
+调出：用于调出曾经接收到过的投稿
+用法：调出 xxx（xxx为内部编号）
 手动重新登录:扫码登陆QQ空间
 自动重新登录:尝试自动登录qq空间
 (请注意是登录不是登陆)
@@ -94,6 +163,7 @@ $numbpending"
 设定编号
 用法：设定编号 xxx （xxx是你希望下一条说说带有的外部编号，必须是纯数字）
 帮助:查看这个帮助列表
+自检：系统与服务自检
 
 审核指令:
 语法: @本账号 内部编号 指令
@@ -105,6 +175,7 @@ $numbpending"
 等：等待180秒，然后重新执行分段-渲染-审核流程，常用于稿件没发完的情况，等待完毕后会再次询问指令
 删：此条不发送（不用机器发，也不会用人工发送）（常用于用户发来的不是稿件的情况）
 拒：拒绝稿件,此条不发送（用于不过审的情况），系统会给发送者发送稿件被拒绝提示
+立即：系统会立刻发送暂存区的所有投稿，并立即把当前投稿单发。
 刷新：重新进行 聊天记录->图片 的过程
 重渲染：重新进行 聊天记录->图片 的过程，但是不重新进行AI分段步骤（通常仅用于调试渲染管道）
 评论：在编号和@发送者的下一行增加文本评论，处理完毕后会再次询问指令

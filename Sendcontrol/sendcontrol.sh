@@ -4,17 +4,25 @@
 source ./Global_toolkit.sh
 
 run_rules(){
+    tag=$(echo "$in_json_data" | jq -r '.tag') 
+    local cur_tag="$tag"
     max_post_stack=$(grep 'max_post_stack' oqqwall.config | cut -d'=' -f2 | tr -d '"')
     max_imaga_number_one_post=$(grep 'max_imaga_number_one_post' oqqwall.config | cut -d'=' -f2 | tr -d '"')
     # 取出所有 tag，直接放进 tags 数组，同时计算总行数
-    echo "当前投稿数: $current_post_num"
-    echo "当前总图片数: $current_image_num"
     if [[ $initsendstatue == "now" ]]; then
+        echo "立即发送..."
         postmanager all
-        savetostorge "$tag" "$numfinal" "$port" "$senderid"
+        savetostorge "$cur_tag" "$numfinal" "$port" "$senderid"
+        # 重新拉取本组全部 tag
+        readarray -t tags < <(sqlite3 "$db_path" "SELECT tag FROM sendstorge_$groupname;")
+        current_post_num="${#tags[@]}"
+        current_image_num=$(image_counter "${tags[@]}")
+        echo "当前投稿数: $current_post_num"
+        echo "当前总图片数: $current_image_num"
+        # 再统一发送
         postmanager all
     else
-        savetostorge "$tag" "$numfinal" "$port" "$senderid"
+        savetostorge "$cur_tag" "$numfinal" "$port" "$senderid"
         readarray -t tags < <(sqlite3 "$db_path" "SELECT tag FROM sendstorge_$groupname;")
         # 使用数组长度作为 current_post_num
         current_post_num="${#tags[@]}"
@@ -69,18 +77,21 @@ image_counter(){
     done
     echo "$total_count"
 }
-
 atgenerate(){
+    if [[ "$at_unprived_sender" == "false" ]]; then
+        return 1
+    fi
     final_at=''
-    for tag in "$@"; do
-        local json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$tag';")
-        local atsenderid=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = '$tag';")
+    local t       
+    for t in "$@"; do
+        local json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$t';")
+        local atsenderid=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = '$t';")
         need_priv=$(echo $json_data|jq -r '.needpriv')
         if [[ "$need_priv" == "false" ]]; then
             final_at+=", @{uin:$atsenderid,nick:,who:1}"
         fi
     done
-    echo "$final_at"
+    echo "${final_at#, }"
 }
 
 imglistgen() {
@@ -97,6 +108,13 @@ imglistgen() {
 }
 
 postmanager(){
+    sendmsggroup "执行发送..."
+    local rowcount
+    rowcount=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM sendstorge_$groupname;")
+    if (( rowcount == 0 )); then
+        echo "数据库为空，跳过本次发送"
+        return            # 若在独立脚本里单独执行，可改为 exit 0
+    fi
     send_list_gen
     #numfinal合并
     # 从数据库查询 min_num 和 max_num
@@ -112,7 +130,7 @@ postmanager(){
     # 输出 message 看看
     echo "$message"
 
-    message="${message}$(atgenerate "${tags[@]}")"
+    message="${message} $(atgenerate "${tags[@]}")"
     #图像列表创建
     file_arr=( $(imglistgen "${tags[@]}") )
     total=${#file_arr[@]}
@@ -138,10 +156,23 @@ postmanager(){
         msg="#${num} 投稿已发送(系统自动发送，请勿回复)"
         sendmsgpriv_givenport "$senderid" "$port" "$msg"
     done
-    #清空暂存表
-    sqlite3 $db_path "delete from sendstorge_$groupname;"
+   # 清空暂存表
+    sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"
 
+    #########################################################
+    # 发送结束后，删除对应 ./cache/prepost/$tag 目录释放空间
+    #########################################################
+    if [[ ${#tags[@]} -gt 0 ]]; then
+        for tag in "${tags[@]}"; do
+            dir="./cache/prepost/$tag"
+            if [[ -d $dir ]]; then
+                rm -rf -- "$dir"
+                echo "已删除缓存目录: $dir"
+            fi
+        done
+    fi
 }
+
 
 qqidtoport(){
     if [ "$1" == "$mainqqid" ]; then
@@ -149,8 +180,8 @@ qqidtoport(){
     else
     # 遍历 minorqqid 数组并找到对应的端口
     i=0
-    for minorqqid in $minorqqid; do
-        if [ "$1" == "$minorqqid" ]; then
+    for minorqq in $minorqqid; do
+        if [ "$1" == "$minorqq" ]; then
         port=$(echo "$minorqq_http_ports" | sed -n "$((i+1))p")
         break
         fi
@@ -196,7 +227,7 @@ postprocess_pipe(){
         # Check the status
         post_statue=$(cat ./qzone_out_fifo)
         if echo "$post_statue"  | grep -q "success"; then
-            goingtosendid=("${goingtosendid[@]/$qqid}")
+            goingtosendid=("${goingtosendid[@]/$1}")
             echo "$1发送完毕"
             sendmsggroup "$1已发送"
             break
@@ -204,7 +235,7 @@ postprocess_pipe(){
             if [ $attempt -lt $max_attempts ]; then
                 renewqzoneloginauto $1
             else
-                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,内部编号$object,请发送指令"
+                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,内部编号$tag,请发送指令"
                 exit 1
             fi
         else
@@ -224,6 +255,7 @@ postprocess_pipe(){
 initialize(){
     db_path="./cache/OQQWall.db"
     max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+    at_unprived_sender=$(grep 'at_unprived_sender' oqqwall.config | cut -d'=' -f2 | tr -d '"')
     [ -z "$max_attempts" ] && max_attempts=3
     # 创建发送控制输入FIFO管道
     if [ ! -p ./presend_in_fifo ]; then
@@ -240,14 +272,14 @@ initialize(){
 # 主循环：持续从管道读取投稿发布请求
 main_loop(){
     while true; do
-        text_in=""
-        image_in=()
+        # 清空循环中使用的变量
+        unset tag numfinal initsendstatue senderid receiver comment json_data need_priv groupname group_info groupid mainqqid mainqq_http_port minorqq_http_ports minorqqid port message file_arr goingtosendid
         groupname=""
         initsendstatue=""
         in_json_data=$(cat ./presend_in_fifo)
         echo "$in_json_data"
         # 解析输入JSON字段
-        tag=$(echo "$in_json_data" | jq -r '.tag')  
+        tag=$(echo "$in_json_data" | jq -r '.tag') 
         numfinal=$(echo "$in_json_data" | jq -r '.numb')      
         initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue')
         senderid=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = '$tag';")

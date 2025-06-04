@@ -66,12 +66,16 @@ if [[ $1 == -r ]]; then
   if pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" > /dev/null; then
     pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" | xargs kill -15
   fi
+  if pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" > /dev/null; then
+    pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" | xargs kill -15
+  fi
 elif [[ $1 == -rf ]]; then
   echo "执行无检验的子系统强行重启..."
   pkill startd.sh
   pkill qq
   pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
   pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" | xargs kill -15
+  pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" | xargs kill -15
 elif [[ $1 == -h ]]; then
 echo "Without any flag-->start OQQWall
 -r    Subsystem restart
@@ -405,6 +409,16 @@ else
     python3 ./SendQzone/qzone-serv-pipe.py &
     echo "qzone-serv-pipe.py started"
 fi
+./Sendcontrol/sendcontrol.sh
+
+if pgrep -f "./Sendcontrol/sendcontrol.sh" > /dev/null
+then
+    echo "sendcontrol.sh is already running"
+else
+    ./Sendcontrol/sendcontrol.sh &
+    echo "sendcontrol.sh started"
+fi
+
 
 # Check if the OneBot server process is running
 if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null; then
