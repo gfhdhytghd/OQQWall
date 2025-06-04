@@ -1,32 +1,24 @@
 source ./Global_toolkit.sh
+
 postqzone(){
-    comment=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT comment FROM preprocess WHERE tag = $object;")
-    json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
-    need_priv=$(echo $json_data|jq -r '.needpriv')
-    if [[ "$need_priv" == "false" ]]; then
-        message="#$numfinal @{uin:$senderid,nick:,who:1}"
-    else
-        message="#$numfinal"
-    fi
-    if [[ -n "$comment" && "$comment" != "null" ]]; then
-    message="$message $comment"
-    fi
-    echo {$goingtosendid[@]}
-    sendqueue=("${goingtosendid[@]}")
-    for qqid in "${sendqueue[@]}"; do
-        echo "Sending qzone use id: $qqid"
-        postprocess_pipe $qqid
-    done
-    sendmsgpriv $senderid "# $numfinal 投稿已发送(系统自动发送，请勿回复)"
+    #传给sendcontrol
+    echo "开始传递给sendcontrol"
+    jq -n --arg tag "$object" --arg numb "$numfinal" --arg initsendstatue "$initsendstatus" \
+    '{tag:$tag, numb: $numb, initsendstatue: $initsendstatue}' > ./presend_in_fifo
+    echo 已传递给sendcontrol
+    # Check the status
+    post_statue=$(cat ./presend_out_fifo)
+    echo 已收到回报
+    #post_statue返回
+    sendmsgpriv $senderid "#$numfinal 投稿已存入暂存区,你现在可以继续投稿(系统自动发送，请勿回复)"
+    sendmsggroup "#$numfinal 投稿已存入暂存区"
     numfinal=$((numfinal + 1))
     echo $numfinal > ./cache/numb/"$groupname"_numfinal.txt
     current_mod_time_id=$(timeout 10s sqlite3 'cache/OQQWall.db' "select modtime from sender where senderid=$senderid;")
     if [[ "$current_mod_time_id" == "$last_mod_time_id" ]]; then
         echo "过程中此人无新消息，删除此人记录"
         timeout 10s sqlite3 "./cache/OQQWall.db" ".param set :id $senderid" "DELETE FROM sender WHERE senderid = :id;"
-        rm -rf ./cache/prepost/$object
     else
-        rm -rf ./cache/prepost/$object
         echo "过程中有新消息:needreprocess:$senderid"
         # 创建新预处理项目
         max_tag=$(timeout 10s sqlite3 "cache/OQQWall.db" "SELECT MAX(tag) FROM preprocess;")
@@ -61,96 +53,6 @@ EOF
         fi
         getmsgserv/preprocess.sh $new_tag
     fi
-}
-postprocess(){
-    #此函数已被弃用
-    if [ ! -f "./cookies-$1.json" ]; then
-        echo "Cookies file does not exist. Executing relogin script."
-        renewqzoneloginauto $1
-    else
-        echo "Cookies file exists. No action needed."
-    fi
-    json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
-    need_priv=$(echo $json_data|jq -r '.needpriv')
-    postcommand="python3 ./SendQzone/send.py \"$message\" ./cache/prepost/$object $1"
-    echo $postcommand
-    attempt=1
-    while [ $attempt -le $max_attempts ]; do
-        output=$(eval $postcommand)
-
-        if echo "$output" | grep -q "Failed to publish."; then
-            if [ $attempt -lt $max_attempts ]; then
-                renewqzoneloginauto $1
-            else
-                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,发送\"@出错账号 手动重新登陆\"以手动重新登陆,完毕后请重新发送审核指令,内部编号$object,请发送指令"
-                exit 1
-                break
-            fi
-        else
-            goingtosendid=("${goingtosendid[@]/$qqid}")
-            echo $1发送完毕
-            sendmsggroup $1已发送
-            break
-        fi
-        attempt=$((attempt+1))
-    done
-}
-postprocess_pipe(){
-    if [ ! -f "./cookies-$1.json" ]; then
-        echo "Cookies file does not exist. Executing relogin script."
-        renewqzoneloginauto $1
-    else
-        echo "Cookies file exists. No action needed."
-    fi
-    json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
-    need_priv=$(echo $json_data|jq -r '.needpriv')
-    sendimgfolder=$(pwd)/cache/prepost/$object
-    # Collect image paths
-    file_paths=()
-    for file in "$sendimgfolder"/*; do
-        file_paths+=("\"file://$file\"")
-    done
-
-    # Join the image paths with commas
-    IFS=','
-    filelist=$(echo "[${file_paths[*]}]")
-
-    attempt=1
-    while [ $attempt -le $max_attempts ]; do
-        cookies=$(cat ./cookies-$1.json)
-        
-        # Fix JSON formatting by ensuring proper commas and quotes are placed
-        echo "{\"text\":\"$message\",\"image\":$filelist,\"cookies\":$cookies}" > ./qzone_in_fifo
-        
-        echo "$postcommand"
-        
-        # Execute the command
-        eval $postcommand
-        
-        # Check the status
-        post_statue=$(cat ./qzone_out_fifo)
-        if echo "$post_statue"  | grep -q "success"; then
-            goingtosendid=("${goingtosendid[@]/$qqid}")
-            echo "$1发送完毕"
-            sendmsggroup "$1已发送"
-            break
-        elif echo "$post_statue"  | grep -q "failed"; then
-            if [ $attempt -lt $max_attempts ]; then
-                renewqzoneloginauto $1
-            else
-                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,内部编号$object,请发送指令"
-                exit 1
-            fi
-        else
-            if [ $attempt -lt $max_attempts ]; then
-                renewqzoneloginauto $1
-            else
-                sendmsggroup "系统错误：$post_statue"
-                exit 1
-            fi
-        fi
-        attempt=$((attempt+1))
-    done
 }
 
 max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
@@ -205,6 +107,14 @@ numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
 case $command in
     是)
         postcmd="true"
+        initsendstatus="stacking"
+        numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
+        postqzone
+        echo 结束发件流程,是
+        ;;
+    立即)
+        postcmd="true"
+        initsendstatus="now"
         numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
         postqzone
         echo 结束发件流程,是
@@ -282,6 +192,7 @@ case $command in
         ;;
     展示)
         sendimagetoqqgroup
+        sendmsggroup "内部编号$object, 请发送指令"
         ;;
     *)
         sendmsggroup "没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助"

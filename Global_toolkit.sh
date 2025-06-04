@@ -11,6 +11,14 @@ sendmsgpriv(){
     cmd="curl -s -o /dev/null \"http://127.0.0.1:$port/send_private_msg?user_id=$1&message=$encoded_msg\""
     eval $cmd
 }
+sendmsgpriv_givenport(){
+    msg=$3
+    port=$2
+    encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$msg")
+    # 构建 curl 命令，并发送编码后的消息
+    cmd="curl -s -o /dev/null \"http://127.0.0.1:$port/send_private_msg?user_id=$1&message=$encoded_msg\""
+    eval $cmd
+}
 sendimagetoqqgroup() {
     # 设置文件夹路径
     folder_path="$(pwd)/cache/prepost/$1"

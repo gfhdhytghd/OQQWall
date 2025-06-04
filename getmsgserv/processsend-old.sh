@@ -1,229 +1,78 @@
-file_to_watch="./getmsgserv/all/priv_post.json"
-command_file="./qqBot/command/commands.txt"
-use_selenium_to_generate_qzone_cookies=$(grep 'use_selenium_to_generate_qzone_cookies' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-disable_qzone_autologin=$(grep 'disable_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-LMarg=$(grep 'LMarg' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-mixid=$1
-id="${mixid%-*}"
-self_id="${mixid#*-}"
-numnext=$2
-# 输入参数ID
-input_id="${mixid#*-}"
-# JSON 文件路径
-json_file="./AcountGroupcfg.json"
-# 检查输入是否为空
-if [ -z "$input_id" ]; then
-  echo "请提供mainqqid或minorqqid。"
-  exit 1
-fi
-# 使用 jq 查找输入ID所属的组信息
-group_info=$(jq -r --arg id "$input_id" '
-  to_entries[] | select(.value.mainqqid == $id or (.value.minorqqid[]? == $id))
-' "$json_file")
-# 检查是否找到了匹配的组
-if [ -z "$group_info" ]; then
-  echo "未找到ID为 $input_id 的相关信息。"
-  exit 1
-fi
-# 提取各项信息并存入变量
-groupname=$(echo "$group_info" | jq -r '.key')
-groupid=$(echo "$group_info" | jq -r '.value.mangroupid')
-mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
-minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
-mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
-minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
-# 初始化端口变量
-port=""
-# 检查输入ID是否为mainqqid
-if [ "$input_id" == "$mainqqid" ]; then
-  port=$mainqq_http_port
-else
-  # 遍历 minorqqid 数组并找到对应的端口
-  i=0
-  for minorqqid in $minorqqid; do
-    if [ "$input_id" == "$minorqqid" ]; then
-      port=$(echo "$minorqq_http_ports" | sed -n "$((i+1))p")
-      break
+source ./Global_toolkit.sh
+postqzone(){
+    comment=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT comment FROM preprocess WHERE tag = $object;")
+    json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+    need_priv=$(echo $json_data|jq -r '.needpriv')
+    if [[ "$need_priv" == "false" ]]; then
+        message="#$numfinal @{uin:$senderid,nick:,who:1}"
+    else
+        message="#$numfinal"
     fi
-    ((i++))
-  done
-fi
-goingtosendid=("$mainqqid")
-# 将minorqqid解析为数组并添加到goingtosendid
-IFS=',' read -ra minorqqids <<< "$minorqqid"
-for qqid in "${minorqqids[@]}"; do
-    goingtosendid+=("$qqid")
-done
-waitforfilechange(){
-        last_mod_time_cmd=$(stat -c %Y "$1")
-
-    while true; do
-        sleep 5
-        # 获取文件的当前修改时间
-        current_mod_time_cmd=$(stat -c %Y "$1")
-
-        # 检查文件是否已被修改
-        if [ "$current_mod_time_cmd" -ne "$last_mod_time_cmd" ]; then
-            echo 检测到指令
-            break
-        fi
-    done
-}
-sendimagetoqqgroup() {
-    # 设置文件夹路径
-    folder_path="$(pwd)/getmsgserv/post-step5/$numnext"
-
-    # 检查文件夹是否存在
-    if [ ! -d "$folder_path" ]; then
-    echo "文件夹 $folder_path 不存在"
-    exit 1
+    if [[ -n "$comment" && "$comment" != "null" ]]; then
+    message="$message $comment"
     fi
-
-    find "$folder_path" -maxdepth 1 -type f | sort | while IFS= read -r file_path; do
-        echo "发送文件: $file_path"
-        msg=[CQ:image,file=file://$file_path]
-        encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-        # 构建 curl 命令，并发送编码后的消息
-        cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-        eval $cmd
-        sleep 1  # 添加延时以避免过于频繁的请求
+    echo {$goingtosendid[@]}
+    sendqueue=("${goingtosendid[@]}")
+    for qqid in "${sendqueue[@]}"; do
+        echo "Sending qzone use id: $qqid"
+        postprocess_pipe $qqid
     done
-    echo "所有文件已发送"
-}
-getnumnext(){
-    numnow=$(cat ./numb.txt)
-    numnext=$((numnow + 1))
-    echo "$numnext" > ./numb.txt
-    echo "$numnext=$numnext"
-}
-askforintro(){
-    sendmsggroup 请发送指令
-    # 初始化文件的上次修改时间
-    waitforfilechange "./qqBot/command/commands.txt"
+    sendmsgpriv $senderid "# $numfinal 投稿已发送(系统自动发送，请勿回复)"
+    numfinal=$((numfinal + 1))
+    echo $numfinal > ./cache/numb/"$groupname"_numfinal.txt
+    current_mod_time_id=$(timeout 10s sqlite3 'cache/OQQWall.db' "select modtime from sender where senderid=$senderid;")
+    if [[ "$current_mod_time_id" == "$last_mod_time_id" ]]; then
+        echo "过程中此人无新消息，删除此人记录"
+        timeout 10s sqlite3 "./cache/OQQWall.db" ".param set :id $senderid" "DELETE FROM sender WHERE senderid = :id;"
+        rm -rf ./cache/prepost/$object
+    else
+        rm -rf ./cache/prepost/$object
+        echo "过程中有新消息:needreprocess:$senderid"
+        # 创建新预处理项目
+        max_tag=$(timeout 10s sqlite3 "cache/OQQWall.db" "SELECT MAX(tag) FROM preprocess;")
+        new_tag=$((max_tag + 1))
+        row_data=$(timeout 10s sqlite3 "cache/OQQWall.db" "SELECT * FROM preprocess WHERE tag='$object';")
+        if [[ -n "$row_data" ]]; then
+            # 解析原始数据并插入新的行，替换tag为新的tag值
+            # 避免使用关键字 'else'，改用 'extra'
+        IFS="|" read -r tag senderid nickname receiver ACgroup extra <<< "$row_data"
 
-    while true; do
-        mapfile -t lines < "$command_file"
-        found=false
+        # 检查 $new_tag 是否定义，如果未定义则用 $tag
+        if [ -z "$new_tag" ]; then new_tag="$tag"; fi
 
-        for (( i=${#lines[@]}-1 ; i>=0 ; i-- )); do
-            line=${lines[i]}
-            number=$(echo $line | awk '{print $1}')
-            status=$(echo $line | awk '{print $2}')
-            flag=$(echo $line | awk '{print $3}')
+        # 使用参数化查询，避免 SQL 注入和引号问题
+timeout 10s sqlite3 "cache/OQQWall.db" <<EOF
+.parameter set :oldtag  $object
+.parameter set :newtag  $new_tag
+INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup)
+SELECT :newtag, senderid, nickname, receiver, ACgroup
+  FROM preprocess
+ WHERE tag = :oldtag;
+EOF
 
-            if [[ "$number" -eq "$numnext" ]]; then
-                sendmsggroup 已收到指令
-                sed -i "${i}d" "$command_file"
-                found=true
-                numfinal=$(cat ./"$groupname"_numfinal.txt)
-                case $status in
-                是)
-                    postcmd="true"
-                    numfinal=$(cat ./"$groupname"_numfinal.txt)
-                    postqzone
-                    echo 结束发件流程,是
-                    ;;
-                否)
-                    postcmd="false"
-                    rm $id_file
-                    rm -rf ./getmsgserv/post-step5/$numnext
-                    numfinal=$(cat ./"$groupname"_numfinal.txt)
-                    numfinal=$((numfinal + 1))
-                    echo $numfinal > ./"$groupname"_numfinal.txt
-                    sendmsgpriv $id "你的稿件已转交人工处理"
-                    echo 结束发件流程,否
-                    ;;
-                等)
-                    postcmd="wait"
-                    sleep 180
-                    processsend
-                    ;;
-                删)
-                    postcmd="del"
-                    rm $id_file
-                    rm -rf ./getmsgserv/post-step5/$numnext
-                    ;;
-                拒)
-                    postcmd="ref"
-                    rm $id_file
-                    rm -rf ./getmsgserv/post-step5/$numnext
-                    sendmsgpriv $id '你的稿件被拒绝,请尝试修改后重新投稿'
-                    echo 结束发件流程,拒
-                    ;;
-                拉黑)
-                    sendmsggroup 不再接收来自$id的投稿
-                    rm -rf ./getmsgserv/post-step5/$numnext
-                    ;;
-                匿)
-                    sendmsggroup 尝试切换匿名状态...
-                    file="./getmsgserv/post-step2/$numnext.json"
-                    json_content=$(cat "$file")
-                    modified_json=$(echo "$json_content" | jq '.needpriv = (.needpriv == "true" | not | tostring)')
-                    echo "$modified_json" > "$file"
-                    python3 ./getmsgserv/HTMLwork/gotohtml.py "$numnext"
-                    ./getmsgserv/HTMLwork/gotopdf.sh "$numnext"
-                    ./getmsgserv/HTMLwork/gotojpg.sh "$numnext"
-                    json_path="./getmsgserv/post-step2/$numnext.json"
-                    need_priv=$(jq -r '.needpriv' "$json_path")
-                    numfinal=$(cat ./"$groupname"_numfinal.txt)
-                    if [[ "$need_priv" == "false" ]]; then
-                        massege="#$numfinal @{uin:$id,nick:,who:1}"
-                    else
-                        massege="#$numfinal"
-                    fi
-                    sendimagetoqqgroup
-                    sendmsggroup $numnext
-                    echo askforgroup...
-                    askforintro
-                    ;;
-                评论)
-                    if [[ "$need_priv" == "false" ]]; then
-                        massege="#$numfinal @{uin:$id,nick:,who:1}"
-                    else
-                        massege="#$numfinal"
-                    fi
-                    if [ -n "$flag" ]; then
-                        massege="${massege}"$'\n'"${flag}"
-                        sendmsggroup "增加评论后的文本：\n $massege"
-                        askforintro
-                    else
-                        if [[ "$need_priv" == "false" ]]; then
-                            massege="#$numfinal @{uin:$id,nick:,who:1}"
-                        else
-                            massege="#$numfinal"
-                        fi
-                        sendmsggroup "没有找到评论内容，文本内容已还原"
-                        sendmsggroup "当前文本：\n $massege"
-                    fi
-                    ;;
-                *)
-                    sendmsggroup "没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助"
-                    askforintro
-                    ;;
-                esac
-                break
-            fi
-        done
-
-        if $found; then
-            break
+        # 检查 SQLite 执行结果
+        if [ $? -eq 0 ]; then
+            echo "新的一行插入成功，新的tag值为$new_tag"
+        else
+            echo "插入失败，请检查数据库或数据格式"
         fi
-
-        sleep 5
-    done
+        else
+            echo "没有找到tag=$object的行"
+        fi
+        getmsgserv/preprocess.sh $new_tag
+    fi
 }
 postprocess(){
+    #此函数已被弃用
     if [ ! -f "./cookies-$1.json" ]; then
         echo "Cookies file does not exist. Executing relogin script."
         renewqzoneloginauto $1
     else
         echo "Cookies file exists. No action needed."
     fi
-    json_path="./getmsgserv/post-step2/$numnext.json"
-    need_priv=$(jq -r '.needpriv' "$json_path")
-    postcommand="python3 ./SendQzone/send.py \"$massege\" ./getmsgserv/post-step5/$numnext/ $1"
+    json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+    need_priv=$(echo $json_data|jq -r '.needpriv')
+    postcommand="python3 ./SendQzone/send.py \"$message\" ./cache/prepost/$object $1"
     echo $postcommand
     attempt=1
     while [ $attempt -le $max_attempts ]; do
@@ -233,9 +82,8 @@ postprocess(){
             if [ $attempt -lt $max_attempts ]; then
                 renewqzoneloginauto $1
             else
-                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1"
-                sendmsggroup "发送\"@出错账号 手动重新登陆\"以手动重新登陆",完毕后请重新发送审核指令
-                askforintro
+                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,发送\"@出错账号 手动重新登陆\"以手动重新登陆,完毕后请重新发送审核指令,内部编号$object,请发送指令"
+                exit 1
                 break
             fi
         else
@@ -247,151 +95,196 @@ postprocess(){
         attempt=$((attempt+1))
     done
 }
-postqzone(){
-    if [[ "$need_priv" == "false" ]]; then
-        massege="#$numfinal @{uin:$id,nick:,who:1}"
+postprocess_pipe(){
+    if [ ! -f "./cookies-$1.json" ]; then
+        echo "Cookies file does not exist. Executing relogin script."
+        renewqzoneloginauto $1
     else
-        massege="#$numfinal"
+        echo "Cookies file exists. No action needed."
     fi
-    sendqueue=("${goingtosendid[@]}")
-    for qqid in "${sendqueue[@]}"; do
-        echo "Sending qzone use id: $qqid"
-        postprocess $qqid
+    json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+    need_priv=$(echo $json_data|jq -r '.needpriv')
+    sendimgfolder=$(pwd)/cache/prepost/$object
+    # Collect image paths
+    file_paths=()
+    for file in "$sendimgfolder"/*; do
+        file_paths+=("\"file://$file\"")
     done
-    sendmsgpriv $id "$numfinal 已发送(系统自动发送，请勿回复)"
-    numfinal=$((numfinal + 1))
-    echo $numfinal > ./"$groupname"_numfinal.txt
-    id_file=./getmsgserv/rawpost/$id-$self_id.json
-    current_mod_time_id=$(stat -c %Y "$id_file")
-    echo "'current-mod-time-id:'$current_mod_time_id"
-    echo "'last-mod-time-id:'$last_mod_time_id"
-    if [ "$current_mod_time_id" -eq "$last_mod_time_id" ]; then
-        echo "过程中此人无新消息，删除此人记录"
-        rm $id_file
-        rm -rf ./getmsgserv/post-step5/$numnext
-    else
-        rm -rf ./getmsgserv/post-step5/$numnext
-        echo "过程中有新消息:needreprocess:$id"
-        goingtosendid=""
-        goingtosendid=("$mainqqid")
-        IFS=',' read -ra minorqqids <<< "$minorqqid"
-        for qqid in "${minorqqids[@]}"; do
-            goingtosendid+=("$qqid")
-        done
-        getnumnext
-        processsend
-    fi
-}
-renewqzoneloginauto(){
-    source ./venv/bin/activate
-    if [[ "$disable_qzone_autologin" == "true" ]]; then
-        renewqzonelogin $1
-    else
-        rm ./cookies-$self_id.json
-        rm ./qrcode.png
-        if [[ "$use_selenium_to_generate_qzone_cookies" == "true" ]]; then
-            python3 ./SendQzone/qzonerenewcookies-selenium.py $1
-        else
-            python3 ./SendQzone/qzonerenewcookies.py $1
-        fi
-    fi
-}
-renewqzonelogin(){
-    source ./venv/bin/activate
-    rm ./cookies-$self_id.json
-    rm ./qrcode.png
-    python3 SendQzone/send.py relogin "" $1 &
-        sleep 2
-        sendmsggroup 请立即扫描二维码
-        sendmsggroup "[CQ:image,file=$(pwd)/qrcode.png]"
-        sleep 120
-    postqzone
-    sleep 2
-    sleep 60
-}
-sendmsggroup(){
-    msg=$1
-    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-    # 构建 curl 命令，并发送编码后的消息
-    cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
-    eval $cmd
-}
-sendmsgcommugroup(){
-    msg=$1
-    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-    # 构建 curl 命令，并发送编码后的消息
-    cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$commgroup_id&message=$encoded_msg\""
-    eval $cmd
-}
-sendmsgpriv(){
-    msg=$2
-    encoded_msg=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$msg'''))")
-    # 构建 curl 命令，并发送编码后的消息
-    cmd="curl \"http://127.0.0.1:$port/send_private_msg?user_id=$1&message=$encoded_msg\""
-    eval $cmd
-}
-processsend(){
-    echo waitingforsender...
-    sleep $waittime
-    id_file=./getmsgserv/rawpost/$id-$self_id.json
-    last_mod_time_id=$(stat -c %Y "$id_file")
-    echo $id
-    echo process-json...
-    ./getmsgserv/LM_work/progress-lite-json.sh "${id}-${self_id}" ${numnext}
-    echo 'wait-for-LM...'
-    python3 ./getmsgserv/LM_work/sendtoLM{$LMarg}.py ${numnext}
-    for i in {1..3}
-    do
-        if [ -f "./getmsgserv/post-step2/${numnext}.json" ]; then
-            echo "File exists, continuing..."
+
+    # Join the image paths with commas
+    IFS=','
+    filelist=$(echo "[${file_paths[*]}]")
+
+    attempt=1
+    while [ $attempt -le $max_attempts ]; do
+        cookies=$(cat ./cookies-$1.json)
+        
+        # Fix JSON formatting by ensuring proper commas and quotes are placed
+        echo "{\"text\":\"$message\",\"image\":$filelist,\"cookies\":$cookies}" > ./qzone_in_fifo
+        
+        echo "$postcommand"
+        
+        # Execute the command
+        eval $postcommand
+        
+        # Check the status
+        post_statue=$(cat ./qzone_out_fifo)
+        if echo "$post_statue"  | grep -q "success"; then
+            goingtosendid=("${goingtosendid[@]/$qqid}")
+            echo "$1发送完毕"
+            sendmsggroup "$1已发送"
             break
+        elif echo "$post_statue"  | grep -q "failed"; then
+            if [ $attempt -lt $max_attempts ]; then
+                renewqzoneloginauto $1
+            else
+                sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,内部编号$object,请发送指令"
+                exit 1
+            fi
         else
-            echo "File not found, running Python LM script..."
-            python3 ./getmsgserv/LM_work/sendtoLM$LMarg.py "${numnext}"
+            if [ $attempt -lt $max_attempts ]; then
+                renewqzoneloginauto $1
+            else
+                sendmsggroup "系统错误：$post_statue"
+                exit 1
+            fi
         fi
-
-        if [ "$i" -eq 3 ] && [ ! -f "./getmsgserv/post-step2/${numnext}.json" ]; then
-            sendmsggroup LLM处理错误，请检查相关信息
-        fi
+        attempt=$((attempt+1))
     done
-    json_path="./getmsgserv/post-step2/$numnext.json"
-    need_priv=$(jq -r '.needpriv' "$json_path")
-    numfinal=$(cat ./"$groupname"_numfinal.txt)
-    echo LM-workdone
-    json_file=./getmsgserv/post-step2/${numnext}.json
-    isover=$(jq -r '.isover' "$json_file")
-    notregular=$(jq -r '.notregular' "$json_file")
-    safemsg=$(jq -r '.safemsg' "$json_file")
-
-    python3 ./getmsgserv/HTMLwork/gotohtml.py "$numnext"
-    ./getmsgserv/HTMLwork/gotopdf.sh "$numnext"
-    ./getmsgserv/HTMLwork/gotojpg.sh "$numnext"
-
-    if [ "$isover" = "true" ] && [ "$notregular" = "false" ]; then
-        sendmsggroup 有常规消息
-    elif [ "$isover" = "true" ] && [ "$notregular" = "true" ]; then
-        sendmsggroup 有非常规消息
-    elif [ "$isover" = "false" ] && [ "$notregular" = "true" ]; then
-        sendmsggroup 有常规但疑似未写完帖子
-    elif [ "$isover" = "false" ] && [ "$notregular" = "false" ]; then
-        sendmsggroup 有非常规且疑似未写完帖子
-    else
-        sendmsggroup 有需要审核的消息
-    fi
-    content=$(<"$id_file")
-    sendmsggroup "原始信息: $content /n $numnext"
-    if [ "$safemsg" = "true" ]; then
-        sendmsggroup AI审核判定安全
-    elif [ "$safemsg" = "false" ]; then
-        sendmsggroup AI审核判定不安全
-    fi
-    sendimagetoqqgroup
-    numfinal=$(cat ./"$groupname"_numfinal.txt)
-    sendmsggroup 内部编号$numnext，外部编号$numfinal
-    echo askforgroup...
-    askforintro
 }
-echo "开始处理来自$id的消息,账号$self_id,内部编号$numnext"
-#初步处理文本消息
-processsend
-echo "来自$id的消息,内部编号$numnext,处理完毕"
+
+max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+echo processsend收到审核指令:$1
+object=$(echo $1 | awk '{print $1}')
+command=$(echo $1 | awk '{print $2}')
+flag=$(echo $1 | awk '{print $3}')
+senderid=$(timeout 10s sqlite3 'cache/OQQWall.db' "select senderid from preprocess where tag=$object;")
+groupname=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$object';")
+last_mod_time_id=$(timeout 10s sqlite3 'cache/OQQWall.db' "select processtime from sender where senderid=$senderid;")
+receiver=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$object';")
+
+group_info=$(jq -r --arg receiver "$receiver" '
+  to_entries[] | select(.value.mainqqid == $receiver or (.value.minorqqid[]? == $receiver))
+' "AcountGroupcfg.json")
+# 检查是否找到了匹配的组
+if [ -z "$group_info" ]; then
+  echo "未找到ID为 $receiver 的相关信息。"
+  exit 1
+fi
+groupid=$(echo "$group_info" | jq -r '.value.mangroupid')
+mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
+mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
+sendmsggroup 已收到指令
+minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
+minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
+port=""
+# 检查输入ID是否为mainqqid
+if [ "$receiver" == "$mainqqid" ]; then
+  port=$mainqq_http_port
+else
+  # 遍历 minorqqid 数组并找到对应的端口
+  i=0
+  for minorqqid in $minorqqid; do
+    if [ "$receiver" == "$minorqqid" ]; then
+      port=$(echo "$minorqq_http_ports" | sed -n "$((i+1))p")
+      break
+    fi
+    ((i++))
+  done
+fi
+echo port=$port
+goingtosendid=("$mainqqid")
+# 将minorqqid解析为数组并添加到goingtosendid
+IFS=',' read -ra minorqqids <<< "$minorqqid"
+for qqid in "${minorqqids[@]}"; do
+    goingtosendid+=("$qqid")
+done
+touch ./cache/numb/"$groupname"_numfinal.txt
+numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
+
+case $command in
+    是)
+        postcmd="true"
+        numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
+        postqzone
+        echo 结束发件流程,是
+        ;;
+    否)
+        postcmd="false"
+        rm -rf ./cache/prepost/$object
+        timeout 10s sqlite3 "./cache/OQQWall.db" ".param set :id $senderid" "DELETE FROM sender WHERE senderid = :id;"
+        rm -rf cache/prepost/$object
+        numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
+        numfinal=$((numfinal + 1))
+        echo $numfinal > ./cache/numb/"$groupname"_numfinal.txt
+        echo 结束发件流程,否
+        ;;
+    等)
+        postcmd="wait"
+        sleep 180
+        getmsgserv/preprocess.sh $object
+        ;;
+    删)
+        postcmd="del"
+        rm -rf ./cache/prepost/$object
+        timeout 10s sqlite3 "./cache/OQQWall.db" ".param set :id $senderid" "DELETE FROM sender WHERE senderid = :id;"
+        ;;
+    拒)
+        postcmd="ref"
+        rm -rf ./cache/prepost/$object
+        timeout 10s sqlite3 "./cache/OQQWall.db" ".param set :id $senderid" "DELETE FROM sender WHERE senderid = :id;"
+        rm -rf cache/prepost/$object
+        sendmsgpriv $senderid '你的稿件被拒绝,请尝试修改后重新投稿'
+        echo 结束发件流程,拒
+        ;;
+    拉黑)
+        sendmsggroup 不再接收来自$senderid的投稿
+        rm -rf cache/prepost/$object
+        ;;
+    匿)
+        sendmsggroup 尝试切换匿名状态...
+        json_content=$(timeout 10s sqlite3 "./cache/OQQWall.db" "SELECT AfterLM FROM preprocess WHERE tag='$object';")
+        modified_json=$(echo "$json_content" | jq '.needpriv = (.needpriv == "true" | not | tostring)')
+        timeout 10s sqlite3 "./cache/OQQWall.db" "UPDATE preprocess SET AfterLM='$modified_json' WHERE tag='$object';"
+        getmsgserv/preprocess.sh $object randeronly
+        ;;
+    刷新)
+        getmsgserv/preprocess.sh $object nowaittime
+        ;;
+    重渲染)
+        getmsgserv/preprocess.sh $object randeronly
+        ;;
+    评论)
+        json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+        #need_priv=$(echo $json_data|jq -r '.needpriv')
+        # if [[ "$need_priv" == "false" ]]; then
+        #     message="#$numfinal @{uin:$senderid,nick:,who:1}"
+        # else
+        #     message="#$numfinal"
+        # fi
+        if [ -n "$flag" ]; then
+            timeout 10s sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET comment='$flag' WHERE tag = '$object';"
+            sendmsggroup "已储存评论内容：\n $flag"
+            sendmsggroup "内部编号$object, 请发送指令"
+        else
+            # if [[ "$need_priv" == "false" ]]; then
+            #     message="#$numfinal @{uin:$senderid,nick:,who:1}"
+            # else
+            #     message="#$numfinal"
+            # fi
+            timeout 10s sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET comment='' WHERE tag = '$object';"
+            sendmsggroup "没有找到评论内容，评论已清空"
+            sendmsggroup "内部编号$object, 请发送指令"
+        fi
+        ;;
+    回复)
+        sendmsgpriv $senderid $flag
+        ;;
+    展示)
+        sendimagetoqqgroup
+        ;;
+    *)
+        sendmsggroup "没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助"
+        sendmsggroup "内部编号$object, 请发送指令"
+        ;;
+esac

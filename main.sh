@@ -158,7 +158,9 @@ if [[ ! -f "oqqwall.config" ]]; then
     echo 'http-serv-port=
 apikey=""
 process_waittime=120
-max_attempts_qzone_autologin=3' >> "oqqwall.config"
+max_attempts_qzone_autologin=3
+max_post_stack=1
+max_imaga_number_one_post=30' >> "oqqwall.config"
     echo "已创建文件: oqqwall.config"
     echo "请参考wiki填写配置文件后再启动"
     exit 0
@@ -196,12 +198,17 @@ fi
 apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 http_serv_port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"[:space:]')
 waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+max_post_stack=$(grep 'max_post_stack' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+max_imaga_number_one_post=$(grep 'max_imaga_number_one_post' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+
 DIR="./getmsgserv/rawpost/"
 
 # 检查关键变量是否设置
 check_variable "apikey" "$apikey"
 check_variable "http-serv-port" "$http-serv-port"
-check_variable "process_waittime" "$waittime"
+check_variable "max_post_stack" "$max_post_stack"
+check_variable "max_imaga_number_one_post" "$max_imaga_number_one_post"
+
 # 定义 JSON 文件名
 json_file="AcountGroupcfg.json"
 errors=()  # 用于存储所有错误信息
@@ -301,6 +308,16 @@ jq -r '. | keys[]' "$json_file" | while read -r group; do
   if [ "$minorqq_count" -ne "$minorqq_port_count" ]; then
     errors+=("错误：在 $group 中，minorqqid 的数量 ($minorqq_count) 与 minorqq-http-port 的数量 ($minorqq_port_count) 不匹配。")
   fi
+
+  #检查与创建发送调度工作表
+  sqlite3 $DB_NAME <<EOF
+CREATE TABLE IF NOT EXISTS sendstorge_$group(
+    tag INT, 
+    num INT, 
+    port INT, 
+    senderid INT
+);
+EOF
 done
 
 # 打印所有错误
