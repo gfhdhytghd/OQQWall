@@ -25,7 +25,7 @@ check_variable() {
     var_name=$1
     var_value=$2
     if [ -z "$var_value" ] || [ "$var_value" == "xxx" ]; then
-        echo "变量 $var_name 未正确设置。请参考OQQWall文档设定初始变量,如果你刚刚进行了更新,请删除现有oqqwall.config中的所有内容,到github仓库复制oqqwall.config到你现有的oqqwall.config文件中,并填写。"
+        echo "变量 $var_name 未正确设置。请参考OQQWall文档设定初始变量,如果你刚刚进行了更新,请删除现有oqqwall.config中的所有内容,再次运行main.sh以重新生成配置文件,并填写。"
         exit 1
     fi
 }
@@ -148,7 +148,7 @@ else
 
     # 安装所需的包
     echo "正在安装所需的 Python 包..."
-    pip install dashscope re101 bs4 httpx uvicorn fastapi pydantic
+    pip install dashscope re101 bs4 httpx uvicorn fastapi pydantic requests -i https://pypi.tuna.tsinghua.edu.cn/simple
     if [ $? -ne 0 ]; then
         echo "安装 Python 包失败."
         exit 1
@@ -164,7 +164,8 @@ apikey=""
 process_waittime=120
 max_attempts_qzone_autologin=3
 max_post_stack=1
-max_imaga_number_one_post=30' >> "oqqwall.config"
+max_imaga_number_one_post=30
+at_unprived_sender=true' >> "oqqwall.config"
     echo "已创建文件: oqqwall.config"
     echo "请参考wiki填写配置文件后再启动"
     exit 0
@@ -208,9 +209,12 @@ max_imaga_number_one_post=$(grep 'max_imaga_number_one_post' oqqwall.config | cu
 DIR="./getmsgserv/rawpost/"
 
 # 检查关键变量是否设置
-check_variable "apikey" "$apikey"
 check_variable "http-serv-port" "$http-serv-port"
+check_variable "apikey" "$apikey"
+check_variable "process_waittime" "$process_waittime"
+check_variable "max_attempts_qzone_autologin" "$max_attempts_qzone_autologin"
 check_variable "max_post_stack" "$max_post_stack"
+check_variable "at_unprived_sender" "$at_unprived_sender"
 check_variable "max_imaga_number_one_post" "$max_imaga_number_one_post"
 
 # 定义 JSON 文件名
@@ -409,7 +413,6 @@ else
     python3 ./SendQzone/qzone-serv-pipe.py &
     echo "qzone-serv-pipe.py started"
 fi
-./Sendcontrol/sendcontrol.sh
 
 if pgrep -f "./Sendcontrol/sendcontrol.sh" > /dev/null
 then

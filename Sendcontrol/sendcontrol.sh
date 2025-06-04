@@ -9,6 +9,10 @@ run_rules(){
     max_post_stack=$(grep 'max_post_stack' oqqwall.config | cut -d'=' -f2 | tr -d '"')
     max_imaga_number_one_post=$(grep 'max_imaga_number_one_post' oqqwall.config | cut -d'=' -f2 | tr -d '"')
     # 取出所有 tag，直接放进 tags 数组，同时计算总行数
+    if [[ -n $comment ]]; then
+    initsendstatue=now
+    commentsitu=withcomm
+    fi
     if [[ $initsendstatue == "now" ]]; then
         echo "立即发送..."
         postmanager all
@@ -20,7 +24,7 @@ run_rules(){
         echo "当前投稿数: $current_post_num"
         echo "当前总图片数: $current_image_num"
         # 再统一发送
-        postmanager all
+        postmanager $withcomm
     else
         savetostorge "$cur_tag" "$numfinal" "$port" "$senderid"
         readarray -t tags < <(sqlite3 "$db_path" "SELECT tag FROM sendstorge_$groupname;")
@@ -108,13 +112,13 @@ imglistgen() {
 }
 
 postmanager(){
-    sendmsggroup "执行发送..."
     local rowcount
     rowcount=$(sqlite3 "$db_path" "SELECT COUNT(*) FROM sendstorge_$groupname;")
     if (( rowcount == 0 )); then
         echo "数据库为空，跳过本次发送"
         return            # 若在独立脚本里单独执行，可改为 exit 0
     fi
+    sendmsggroup "执行发送..."
     send_list_gen
     #numfinal合并
     # 从数据库查询 min_num 和 max_num
@@ -131,6 +135,9 @@ postmanager(){
     echo "$message"
 
     message="${message} $(atgenerate "${tags[@]}")"
+    if [[ $1==withcomm ]];then
+        message="${message} ${comment}"
+    fi
     #图像列表创建
     file_arr=( $(imglistgen "${tags[@]}") )
     total=${#file_arr[@]}
