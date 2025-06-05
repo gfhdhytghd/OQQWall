@@ -239,7 +239,15 @@ fi
 jq -r '. | keys[]' "$json_file" | while read -r group; do
   # 调试：输出当前 group 名称，确保没有多余空白字符
   echo "正在检查 group: $group"
-  
+    #检查与创建发送调度工作表
+  sqlite3 ./cache/OQQWall.db <<EOF
+CREATE TABLE IF NOT EXISTS sendstorge_$group(
+    tag INT, 
+    num INT, 
+    port INT, 
+    senderid INT
+);
+EOF
   mangroupid=$(jq -r --arg group "$group" '.[$group].mangroupid' "$json_file")
   mainqqid=$(jq -r --arg group "$group" '.[$group].mainqqid' "$json_file")
   mainqq_http_port=$(jq -r --arg group "$group" '.[$group]["mainqq_http_port"]' "$json_file")
@@ -319,15 +327,6 @@ jq -r '. | keys[]' "$json_file" | while read -r group; do
     errors+=("错误：在 $group 中，minorqqid 的数量 ($minorqq_count) 与 minorqq-http-port 的数量 ($minorqq_port_count) 不匹配。")
   fi
 
-  #检查与创建发送调度工作表
-  sqlite3 $DB_NAME <<EOF
-CREATE TABLE IF NOT EXISTS sendstorge_$group(
-    tag INT, 
-    num INT, 
-    port INT, 
-    senderid INT
-);
-EOF
 done
 
 # 打印所有错误
