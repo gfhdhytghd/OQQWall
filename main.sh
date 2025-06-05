@@ -202,9 +202,11 @@ fi
 
 apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 http_serv_port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"[:space:]')
-waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+process_waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 max_post_stack=$(grep 'max_post_stack' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 max_imaga_number_one_post=$(grep 'max_imaga_number_one_post' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+max_attempts_qzone_autologin=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+at_unprived_sender=$(grep 'at_unprived_sender' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 
 DIR="./getmsgserv/rawpost/"
 
