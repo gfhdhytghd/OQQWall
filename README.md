@@ -35,39 +35,39 @@
 <table>
   <tr>
     <td align="center">
-      <img src="readme_Recorces/Screenshot_20250529_192801_TIM.jpg" width="220"><br/>
+      <img src="readme_Resources/Screenshot_20250529_192801_TIM.jpg" width="220"><br/>
       <sub>单次多投稿发送效果</sub>
     </td>
     <td align="center">
-      <img src="readme_Recorces/Screenshot_20250529_182106_TIM.jpg" width="220"><br/>
+      <img src="readme_Resources/Screenshot_20250529_182106_TIM.jpg" width="220"><br/>
       <sub>密集审核，队列发送</sub>
     </td>
     <td align="center">
-      <img src="readme_Recorces/Screenshot_20250529_182255_TIM.jpg" width="220"><br/>
+      <img src="readme_Resources/Screenshot_20250529_182255_TIM.jpg" width="220"><br/>
       <sub>允许处理时间段内再次投稿</sub>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="readme_Recorces/Screenshot_20250529_182031_TIM.jpg" width="220"><br/>
+      <img src="readme_Resources/Screenshot_20250529_182031_TIM.jpg" width="220"><br/>
       <sub>标准发送</sub>
     </td>
     <td align="center">
-      <img src="readme_Recorces/Screenshot_20250529_182129_TIM.jpg" width="220"><br/>
+      <img src="readme_Resources/Screenshot_20250529_182129_TIM.jpg" width="220"><br/>
       <sub>管理员评论</sub>
     </td>
     <td align="center">
-      <img src="readme_Recorces/Screenshot_20250529_193037_TIM.jpg" width="220"><br/>
+      <img src="readme_Resources/Screenshot_20250529_193037_TIM.jpg" width="220"><br/>
       <sub>自动匿名识别</sub>
     </td>
   </tr>
   <tr>
     <td align="center">
-      <img src="readme_Recorces/Screenshot_20250529_192908_TIM.jpg" width="220"><br/>
+      <img src="readme_Resources/Screenshot_20250529_192908_TIM.jpg" width="220"><br/>
       <sub>表情包渲染</sub>
     </td>
      <td align="center">
-      <img src="readme_Recorces/Screenshot_20250529_192949_TIM.jpg" width="220"><br/>
+      <img src="readme_Resources/Screenshot_20250529_192949_TIM.jpg" width="220"><br/>
       <sub>图片渲染与单独发送</sub>
     </td>
     <td></td>
