@@ -9,6 +9,9 @@ from dashscope.api_entities.dashscope_response import Role
 import re
 import sqlite3
 
+# File path used to save erroneous JSON output
+output_file_path_error = "./cache/LM_error.json"
+
 def read_config(file_path):
     config = {}
     with open(file_path, 'r') as f:
