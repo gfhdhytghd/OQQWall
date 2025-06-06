@@ -211,7 +211,7 @@ at_unprived_sender=$(grep 'at_unprived_sender' oqqwall.config | cut -d'=' -f2 | 
 DIR="./getmsgserv/rawpost/"
 
 # 检查关键变量是否设置
-check_variable "http-serv-port" "$http-serv-port"
+check_variable "http-serv-port" "$http_serv_port"
 check_variable "apikey" "$apikey"
 check_variable "process_waittime" "$process_waittime"
 check_variable "max_attempts_qzone_autologin" "$max_attempts_qzone_autologin"
