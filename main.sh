@@ -255,8 +255,8 @@ EOF
   # 检查 minorqqid 数组，处理 null 的情况
   minorqqids=$(jq -r --arg group "$group" '.[$group].minorqqid // [] | .[]' "$json_file")
   
-  # 检查 minorqq-http-port 数组，处理 null 的情况
-  minorqq_http_ports=$(jq -r --arg group "$group" '.[$group]["minorqq-http-port"] // [] | .[]' "$json_file")
+  # 检查 minorqq_http_port 数组，处理 null 的情况
+  minorqq_http_ports=$(jq -r --arg group "$group" '.[$group]["minorqq_http_port"] // [] | .[]' "$json_file")
 
   # 检查 mangroupid 是否存在并且是纯数字
   if [[ -z "$mangroupid" || ! "$mangroupid" =~ ^[0-9]+$ ]]; then
@@ -302,16 +302,16 @@ EOF
     done
   fi
 
-  # 检查 minorqq-http-port 数组是否存在且每个元素是纯数字，且不能重复
+  # 检查 minorqq_http_port 数组是否存在且每个元素是纯数字，且不能重复
   if [ -z "$minorqq_http_ports" ]; then
-    errors+=("警告：在 $group 中，minorqq-http-port 为空。")
+    errors+=("警告：在 $group 中，minorqq_http_port 为空。")
   else
     for minorport in $minorqq_http_ports; do
       if [[ ! "$minorport" =~ ^[0-9]+$ ]]; then
-        errors+=("错误：在 $group 中，minorqq-http-port 包含非数字值：$minorport")
+        errors+=("错误：在 $group 中，minorqq_http_port 包含非数字值：$minorport")
       else
         if [[ " ${http_ports_list[*]} " =~ " $minorport " ]]; then
-          errors+=("错误：minorqq-http-port $minorport 在多个组中重复！")
+          errors+=("错误：minorqq_http_port $minorport 在多个组中重复！")
         else
           http_ports_list+=("$minorport")
         fi
@@ -319,12 +319,12 @@ EOF
     done
   fi
 
-  # 检查 minorqqid 和 minorqq-http-port 数量是否一致
+  # 检查 minorqqid 和 minorqq_http_port 数量是否一致
   minorqq_count=$(jq -r --arg group "$group" '.[$group].minorqqid | length' "$json_file")
-  minorqq_port_count=$(jq -r --arg group "$group" '.[$group]["minorqq-http-port"] | length' "$json_file")
+  minorqq_port_count=$(jq -r --arg group "$group" '.[$group]["minorqq_http_port"] | length' "$json_file")
 
   if [ "$minorqq_count" -ne "$minorqq_port_count" ]; then
-    errors+=("错误：在 $group 中，minorqqid 的数量 ($minorqq_count) 与 minorqq-http-port 的数量 ($minorqq_port_count) 不匹配。")
+    errors+=("错误：在 $group 中，minorqqid 的数量 ($minorqq_count) 与 minorqq_http_port 的数量 ($minorqq_port_count) 不匹配。")
   fi
 
 done
