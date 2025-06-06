@@ -4,10 +4,8 @@
 source ./Global_toolkit.sh
 
 run_rules(){
-    tag=$(echo "$in_json_data" | jq -r '.tag') 
+    tag=$(echo "$in_json_data" | jq -r '.tag')
     local cur_tag="$tag"
-    max_post_stack=$(grep 'max_post_stack' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-    max_imaga_number_one_post=$(grep 'max_imaga_number_one_post' oqqwall.config | cut -d'=' -f2 | tr -d '"')
     # 取出所有 tag，直接放进 tags 数组，同时计算总行数
     if [[ -n $comment ]]; then
         initsendstatue=now
@@ -46,18 +44,16 @@ run_rules(){
 
 # 根据组名获取群组和账号发送参数
 get_send_info(){
-    receiver=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$1';")
-    comment=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT comment FROM preprocess WHERE tag = $1;")
-    json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$1';")
-    need_priv=$(echo $json_data|jq -r '.needpriv')
-    groupname=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$1';")
+    IFS='|' read -r senderid receiver comment json_data groupname \
+        <<< "$(timeout 10s sqlite3 -separator '|' 'cache/OQQWall.db' "SELECT senderid, receiver, comment, AfterLM, ACgroup FROM preprocess WHERE tag = '$1';")"
+    need_priv=$(echo "$json_data" | jq -r '.needpriv')
     group_info=$(jq -r --arg groupname "$groupname" '.[$groupname]' AcountGroupcfg.json)
     if [ -z "$group_info" ] || [ "$group_info" = "null" ]; then
         echo "未找到组名为 $groupname 的账户配置！"
         exit 1
     fi
 
-    echo $group_info
+    echo "$group_info"
     groupid=$(echo "$group_info" | jq -r '.mangroupid')
     echo "groupid:$groupid"
     mainqqid=$(echo "$group_info" | jq -r '.mainqqid')
@@ -66,10 +62,10 @@ get_send_info(){
     minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
     # 设置需要发送说说的账号列表（主账号 + 副账号）
     echo "doing qq to port"
-    qqidtoport $receiver
+    qqidtoport "$receiver"
     echo "receiver:$receiver"
     echo "mainqqid:$mainqqid"
-    echo $port
+    echo "$port"
     run_rules 
 }
 
@@ -85,15 +81,13 @@ image_counter(){
     echo "$total_count"
 }
 atgenerate(){
-    if [[ "$at_unprived_sender" == "false" ]]; then
-        return 1
-    fi
+    [[ "$at_unprived_sender" == "false" ]] && return 1
     final_at=''
-    local t       
+    local t
     for t in "$@"; do
-        local json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$t';")
-        local atsenderid=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = '$t';")
-        need_priv=$(echo $json_data|jq -r '.needpriv')
+        IFS='|' read -r json_data atsenderid \
+            <<< "$(timeout 10s sqlite3 -separator '|' 'cache/OQQWall.db' "SELECT AfterLM,senderid FROM preprocess WHERE tag = '$t';")"
+        need_priv=$(echo "$json_data" | jq -r '.needpriv')
         if [[ "$need_priv" == "false" ]]; then
             final_at+=", @{uin:$atsenderid,nick:,who:1}"
         fi
@@ -142,7 +136,7 @@ postmanager(){
         message="${message} ${2}"
     fi
     #图像列表创建
-    file_arr=( $(imglistgen "${tags[@]}") )
+    mapfile -t file_arr < <(imglistgen "${tags[@]}")
     total=${#file_arr[@]}
     (( total == 0 )) && file_arr+=( )
 
@@ -224,14 +218,14 @@ send_list_gen(){
 postprocess_pipe(){
     if [ ! -f "./cookies-$1.json" ]; then
         echo "Cookies file does not exist. Executing relogin script."
-        renewqzoneloginauto $1
+        renewqzoneloginauto "$1"
     else
         echo "Cookies file exists. No action needed."
     fi
 
     attempt=1
-    while [ $attempt -le $max_attempts ]; do
-        cookies=$(cat ./cookies-$1.json)
+    while [ "$attempt" -le "$max_attempts" ]; do
+        cookies=$(cat ./cookies-"$1".json)
         # Fix JSON formatting by ensuring proper commas and quotes are placed
         echo "{\"text\":\"$2\",\"image\":$3,\"cookies\":$cookies}" > ./qzone_in_fifo   
         # Check the status
@@ -242,15 +236,15 @@ postprocess_pipe(){
             sendmsggroup "$1已发送"
             break
         elif echo "$post_statue"  | grep -q "failed"; then
-            if [ $attempt -lt $max_attempts ]; then
-                renewqzoneloginauto $1
+            if [ "$attempt" -lt "$max_attempts" ]; then
+                renewqzoneloginauto "$1"
             else
                 sendmsggroup "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,内部编号$tag,请发送指令"
                 exit 1
             fi
         else
-            if [ $attempt -lt $max_attempts ]; then
-                renewqzoneloginauto $1
+            if [ "$attempt" -lt "$max_attempts" ]; then
+                renewqzoneloginauto "$1"
             else
                 sendmsggroup "系统错误：$post_statue"
                 exit 1
@@ -266,6 +260,8 @@ initialize(){
     db_path="./cache/OQQWall.db"
     max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
     at_unprived_sender=$(grep 'at_unprived_sender' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+    max_post_stack=$(grep 'max_post_stack' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+    max_imaga_number_one_post=$(grep 'max_imaga_number_one_post' oqqwall.config | cut -d'=' -f2 | tr -d '"')
     [ -z "$max_attempts" ] && max_attempts=3
     # 创建发送控制输入FIFO管道
     if [ ! -p ./presend_in_fifo ]; then
@@ -286,15 +282,14 @@ main_loop(){
         unset tag numfinal initsendstatue senderid receiver comment json_data need_priv groupname group_info groupid mainqqid mainqq_http_port minorqq_http_ports minorqqid port message file_arr goingtosendid
         groupname=""
         initsendstatue=""
-        in_json_data=$(cat ./presend_in_fifo)
+        read -r in_json_data < ./presend_in_fifo
         echo "$in_json_data"
         # 解析输入JSON字段
-        tag=$(echo "$in_json_data" | jq -r '.tag') 
-        numfinal=$(echo "$in_json_data" | jq -r '.numb')      
+        tag=$(echo "$in_json_data" | jq -r '.tag')
+        numfinal=$(echo "$in_json_data" | jq -r '.numb')
         initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue')
-        senderid=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = '$tag';")
         # 获取该群组对应的发送参数（群号、端口等）
-        get_send_info $tag
+        get_send_info "$tag"
     done
 }
 
