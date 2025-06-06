@@ -82,6 +82,33 @@ case $object in
             sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
         fi
         ;;
+    "信息")
+        max_tag=$(sqlite3 "cache/OQQWall.db" "SELECT MAX(tag) FROM preprocess;")
+        if [[ $command =~ ^[0-9]+$ ]]; then
+            echo max:$max_tag
+            if [[ $command -le $max_tag ]];then
+                receiver=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$command';")
+                senderid=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = $command;")
+                json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$command';")
+                need_priv=$(echo $json_data|jq -r '.needpriv')
+                groupname=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$command';")
+                orin_json=sqlite3 "cache/OQQWall.db" "SELECT rawmsg FROM sender WHERE senderid='$senderid';"
+                if [[ $? -ne 0 || -z "$orin_json" ]]; then
+                    orin_json="不存在"
+                fi
+                sendmsggroup "接收者：$receiver
+发送者：$senderid
+所属组：$groupname
+处理后 json 消息：$json_data
+此人当前 json 消息：$orin_json"
+            else
+                 sendmsggroup "当前编号不在数据库中"
+            fi
+        else
+            echo "Error: arg is not a pure number."
+            sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
+        fi
+        ;;
     "待处理")
         numbpending=$(find ./cache/prepost -mindepth 1 -maxdepth 1 -type d -exec basename {} \;)
         if [ -z $numbpending ]; then
@@ -93,6 +120,7 @@ $numbpending"
         ;;
     "删除待处理")
         rm -rf ./cache/prepost/*
+        sqlite3 ./cache/OQQWall.db "delete from sender;" 
         sendmsggroup 已清空待处理列表
         ;;
     "自检")

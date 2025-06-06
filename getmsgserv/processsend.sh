@@ -148,8 +148,9 @@ case $command in
         echo 结束发件流程,拒
         ;;
     拉黑)
-        sendmsggroup 不再接收来自$senderid的投稿
-        rm -rf cache/prepost/$object
+        sendmsggroup 拉黑暂不可用，请登陆账号后去qq中拉黑。
+        # sendmsggroup 不再接收来自$senderid的投稿
+        # rm -rf cache/prepost/$object
         ;;
     匿)
         sendmsggroup 尝试切换匿名状态...
