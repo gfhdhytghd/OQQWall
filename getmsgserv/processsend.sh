@@ -3,8 +3,10 @@ source ./Global_toolkit.sh
 postqzone(){
     #传给sendcontrol
     echo "开始传递给sendcontrol"
-    jq -n --arg tag "$object" --arg numb "$numfinal" --arg initsendstatue "$initsendstatus" \
-    '{tag:$tag, numb: $numb, initsendstatue: $initsendstatue}' > ./presend_in_fifo
+    json_data=$(jq -n --arg tag "$object" --arg numb "$numfinal" --arg initsendstatue "$initsendstatus" \
+        '{tag:$tag, numb: $numb, initsendstatue: $initsendstatue}')
+    echo "$json_data"
+    echo "$json_data" > ./presend_in_fifo
     echo 已传递给sendcontrol
     # Check the status
     post_statue=$(cat ./presend_out_fifo)
