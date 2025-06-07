@@ -6,6 +6,19 @@ source ./Global_toolkit.sh
 run_rules(){
     max_post_stack=$(grep 'max_post_stack' oqqwall.config | cut -d'=' -f2 | tr -d '"')
     max_imaga_number_one_post=$(grep 'max_imaga_number_one_post' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+
+    # 检查 max_post_stack 是否为数字且非空
+    if ! [[ "$max_post_stack" =~ ^[0-9]+$ ]] || [ -z "$max_post_stack" ]; then
+        max_post_stack=1
+        sendmsggroup "警告: max_post_stack 配置无效，已使用默认值 1"
+    fi
+
+    # 检查 max_imaga_number_one_post 是否为数字且非空
+    if ! [[ "$max_imaga_number_one_post" =~ ^[0-9]+$ ]] || [ -z "$max_imaga_number_one_post" ]; then
+        max_imaga_number_one_post=30
+        sendmsggroup "警告: max_imaga_number_one_post 配置无效，已使用默认值 30"
+    fi
+
     echo "max_post_stack: $max_post_stack"
     echo "max_imaga_number_one_post: $max_imaga_number_one_post"
     tag=$(echo "$in_json_data" | jq -r '.tag')
