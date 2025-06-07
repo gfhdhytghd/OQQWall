@@ -307,8 +307,7 @@ main_loop(){
 # 错误处理函数
 log_and_continue() {
     local errmsg="$1"
-    mkdir -p ./Cache
-    echo "$(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/SendControl_CrashReport.txt
+    echo "sendcontrol $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/SendControl_CrashReport.txt
     echo "sendcontrol 错误已记录: $errmsg"
 }
 

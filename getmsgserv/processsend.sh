@@ -1,5 +1,12 @@
 source ./Global_toolkit.sh
 
+log_and_continue() {
+    local errmsg="$1"
+    mkdir -p ./cache
+    echo "processsend $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/Processsend_CrashReport.txt
+    echo "processsend 错误已记录: $errmsg"
+}
+
 postqzone(){
     #传给sendcontrol
     echo "开始传递给sendcontrol"
@@ -72,7 +79,7 @@ group_info=$(jq -r --arg receiver "$receiver" '
 ' "AcountGroupcfg.json")
 # 检查是否找到了匹配的组
 if [ -z "$group_info" ]; then
-  echo "未找到ID为 $receiver 的相关信息。"
+  log_and_continue "未找到ID为 $receiver 的相关信息。"
   exit 1
 fi
 groupid=$(echo "$group_info" | jq -r '.value.mangroupid')

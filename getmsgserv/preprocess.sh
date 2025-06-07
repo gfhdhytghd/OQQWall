@@ -1,5 +1,11 @@
 #!/bin/bash
 source ./Global_toolkit.sh
+log_and_continue() {
+    local errmsg="$1"
+    mkdir -p ./cache
+    echo "preprocess $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/Preprocess_CrashReport.txt
+    echo "preprocess 错误已记录: $errmsg"
+}
 tag=$1
 flag=$2
 receiver=$(sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$tag';")
@@ -11,7 +17,7 @@ group_info=$(jq -r --arg receiver "$receiver" '
   to_entries[] | select(.value.mainqqid == $receiver or (.value.minorqqid[]? == $receiver))
 ' "$json_file")
 if [ -z "$group_info" ]; then
-  echo "未找到ID为 $tag 的相关信息。"
+  log_and_continue "未找到ID为 $tag 的相关信息。"
   exit 1
 fi
 echo "开始处理来自$senderid的消息,账号$receiver,内部编号$tag"
@@ -79,7 +85,7 @@ fi
 folder=./cache/prepost/${tag}
 json_data=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$tag';")
 if [[ -z "$json_data" ]]; then
-    echo "No data found for tag $tag"
+    log_and_continue "No data found for tag $tag"
     exit 1
 fi
 rm -rf $folder
@@ -144,7 +150,7 @@ MSGcache+=，内部编号$tag，请发送指令
 folder_path="$(pwd)/cache/prepost/$tag"
 # 检查文件夹是否存在
 if [ ! -d "$folder_path" ]; then
-echo "文件夹 $folder_path 不存在"
+  log_and_continue "文件夹 $folder_path 不存在"
 fi
 echo $MSGcache
 for file_path in $(find "$folder_path" -maxdepth 1 -type f | sort); do
