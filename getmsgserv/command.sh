@@ -1,5 +1,13 @@
 #!/bin/bash
 source ./Global_toolkit.sh
+
+log_and_continue() {
+    local errmsg="$1"
+    mkdir -p ./cache
+    echo "command $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/Command_CrashReport.txt
+    echo "command 错误已记录: $errmsg"
+}
+
 file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
 litegettag=$(grep 'use_lite_tag_generator' oqqwall.config | cut -d'=' -f2 | tr -d '"')
@@ -15,7 +23,7 @@ input_id="$self_id"
 #echo self_id:$self_id
 json_file="./AcountGroupcfg.json"
 if [ -z "$input_id" ]; then
-  echo "请提供mainqqid或minorqqid。"
+  log_and_continue "请提供mainqqid或minorqqid。"
   exit 1
 fi
 # 使用 jq 查找输入ID所属的组信息
@@ -24,7 +32,7 @@ group_info=$(jq -r --arg id "$input_id" '
 ' "$json_file")
 # 检查是否找到了匹配的组
 if [ -z "$group_info" ]; then
-  echo "未找到ID为 $input_id 的相关信息。"
+  log_and_continue "未找到ID为 $input_id 的相关信息。"
   exit 1
 fi
 groupname=$(echo "$group_info" | jq -r '.key')
@@ -100,7 +108,7 @@ case $object in
 发送者：$senderid
 所属组：$groupname
 处理后 json 消息：$json_data
-此人当前 json 消息：$orin_json"
+此人当前 json 消消息：$orin_json"
             else
                  sendmsggroup "当前编号不在数据库中"
             fi
@@ -119,9 +127,82 @@ $numbpending"
         fi
         ;;
     "删除待处理")
-        rm -rf ./cache/prepost/*
-        sqlite3 ./cache/OQQWall.db "delete from sender;" 
+        # 获取所有 sendstorge_* 表中的 tag
+        tags_to_keep=()
+        for tbl in $(sqlite3 ./cache/OQQWall.db ".tables" | tr ' ' '\n' | grep '^sendstorge_'); do
+            tags=$(sqlite3 ./cache/OQQWall.db "SELECT tag FROM $tbl;")
+            for tag in $tags; do
+                tags_to_keep+=("$tag")
+            done
+        done
+
+        # 构建要保留的 tag 列表
+        keep_pattern=""
+        if [ ${#tags_to_keep[@]} -gt 0 ]; then
+            for tag in "${tags_to_keep[@]}"; do
+                keep_pattern+=" -name $tag -o"
+            done
+            # 去掉最后一个 -o
+            keep_pattern=${keep_pattern::-3}
+            # 删除不在 tags_to_keep 中的目录
+            find ./cache/prepost -mindepth 1 -maxdepth 1 -type d ! \( $keep_pattern \) -exec rm -rf {} +
+        else
+            # 没有要保留的，全部删除
+            rm -rf ./cache/prepost/*
+        fi
+        # 查找正在运行的 preprocess.sh 的 tag
+        running_tags=()
+        while read -r pid cmdline; do
+            # Extract everything after the last '/' and then get the last argument
+            tag=$(echo "$cmdline" | sed 's/.*preprocess.sh //')
+            if [[ "$tag" =~ ^[0-9]+$ ]]; then
+            echo "Found running preprocess.sh with tag: $tag"
+            running_tags+=("$tag")
+            fi
+        done < <(pgrep -af "./getmsgserv/preprocess.sh")
+
+        # 查找这些 tag 的 senderid
+        running_senderids=()
+        for tag in "${running_tags[@]}"; do
+            senderid=$(sqlite3 ./cache/OQQWall.db "SELECT senderid FROM preprocess WHERE tag = '$tag';")
+            if [[ -n "$senderid" ]]; then
+            running_senderids+=("$senderid")
+            fi
+        done
+
+        # 构建 NOT IN 子句
+        not_in_clause=""
+        if [ ${#running_senderids[@]} -gt 0 ]; then
+            ids=$(printf "'%s'," "${running_senderids[@]}")
+            ids=${ids%,}
+            not_in_clause="WHERE senderid NOT IN ($ids)"
+        fi
+
+        # 删除 sender 表中未被占用的 senderid
+        sqlite3 ./cache/OQQWall.db "DELETE FROM sender $not_in_clause;"
         sendmsggroup 已清空待处理列表
+        ;;
+    "删除暂存区")
+        #获取sendstorge中最小的tag
+        min_num=$(sqlite3 ./cache/OQQWall.db "SELECT MIN(num) FROM sendstorge_$groupname;")
+        if [[ -z "$min_num" || "$min_num" == "NULL" ]]; then
+            sendmsggroup "暂存区没有数据"
+        else
+            #获取全部tag
+            all_tags=$(sqlite3 ./cache/OQQWall.db "SELECT tag FROM sendstorge_$groupname;")
+            #删除所有。/prepost/tag
+            while IFS= read -r tag; do
+                if [ ! -z "$tag" ]; then
+                    echo "tag=$tag"
+                    rm -rf "./cache/prepost/$tag"
+                fi
+            done <<< "$all_tags"
+            # 删除 sendstorge 中的所有数据
+            sqlite3 ./cache/OQQWall.db "DELETE FROM sendstorge_$groupname;"
+            #回滚numfinal为min_tag
+            echo $min_num > ./cache/numb/"$groupname"_numfinal.txt
+            sendmsggroup "已清空暂存区数据，当前外部编号为#$min_num"
+        fi
         ;;
     "自检")
         # 1. 先通过 printf -v 初始化 syschecklist，并确保每条后面都有真实换行符
