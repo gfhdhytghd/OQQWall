@@ -2,10 +2,12 @@ import json
 import time
 import sys
 import random
+import os
 import dashscope
 from http import HTTPStatus
-from dashscope import Generation
+from dashscope import Generation, MultiModalConversation
 from dashscope.api_entities.dashscope_response import Role
+from PIL import Image
 import re
 import sqlite3
 
@@ -48,6 +50,81 @@ def clean_json_output(output_content):
         except json.JSONDecodeError:
             # 如果仍然失败，返回纠正后的字符串以供手动检查
             return corrected_json
+
+
+def compress_image(path, max_pixels, size_limit):
+    """Resize and recompress the image so it satisfies pixel and size limits."""
+    with Image.open(path) as img:
+        width, height = img.size
+        pixels = width * height
+        if pixels > max_pixels:
+            ratio = (max_pixels / pixels) ** 0.5
+            new_size = (int(width * ratio), int(height * ratio))
+            img = img.resize(new_size, Image.Resampling.LANCZOS)
+            img.save(path)
+        if os.path.getsize(path) > size_limit:
+            quality = 90
+            while os.path.getsize(path) > size_limit and quality > 10:
+                img.save(path, quality=quality, optimize=True)
+                quality -= 5
+
+
+def image_safe(path, model, api_key):
+    """Check whether a local image contains unsafe content using DashScope."""
+    messages = [{
+        'role': 'user',
+        'content': [
+            {'image': 'file://' + os.path.abspath(path)},
+            {'text': '这张图片是否含有暴力、血腥、色情或其他违法内容？如果安全仅回答safe，否则回答unsafe'}
+        ]
+    }]
+    try:
+        rsp = MultiModalConversation.call(model=model, messages=messages, api_key=api_key)
+        if rsp.status_code == HTTPStatus.OK:
+            content = rsp.output.get('choices', [])[0].get('message', {}).get('content', '')
+            return 'unsafe' not in content.lower()
+    except Exception:
+        pass
+    return True
+
+
+def update_safemsg(tag, safe):
+    """Update the safemsg field in the database according to the result."""
+    conn = sqlite3.connect('./cache/OQQWall.db')
+    cur = conn.cursor()
+    row = cur.execute('SELECT AfterLM FROM preprocess WHERE tag=?', (tag,)).fetchone()
+    if not row:
+        conn.close()
+        return
+    data = json.loads(row[0])
+    if not safe:
+        data['safemsg'] = 'false'
+    updated = json.dumps(data, ensure_ascii=False)
+    cur.execute('UPDATE preprocess SET AfterLM=? WHERE tag=?', (updated, tag))
+    conn.commit()
+    conn.close()
+
+
+def process_image_safety(tag, config):
+    """Compress and scan all images for a tag and update safemsg."""
+    folder = os.path.join('cache/picture', str(tag))
+    # Skip if there is no picture directory or it is empty
+    if not os.path.isdir(folder) or not os.listdir(folder):
+        return
+    api_key = config.get('apikey')
+    max_pixels = int(config.get('vision_pixel_limit', 12000000))
+    size_limit = float(config.get('vision_size_limit_mb', 9.5)) * 1024 * 1024
+    model = config.get('vision_model', 'qwen-vl-max-latest')
+    dashscope.api_key = api_key
+
+    safe = True
+    for file in os.listdir(folder):
+        path = os.path.join(folder, file)
+        compress_image(path, max_pixels, size_limit)
+        if not image_safe(path, model, api_key):
+            safe = False
+
+    update_safemsg(tag, safe)
 
 
 def fetch_response_in_parts(prompt, max_rounds=5):
@@ -247,6 +324,9 @@ def main():
         
         # Save the result into the SQLite database
         save_to_sqlite(output_data, tag)
+
+        # Compress and scan associated images, if present, then update safemsg
+        process_image_safety(tag, config)
 
     except json.JSONDecodeError as e:
         print(f"JSON解析错误: {e}\n返回内容: {final_response}")
