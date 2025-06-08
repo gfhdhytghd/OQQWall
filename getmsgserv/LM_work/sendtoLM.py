@@ -88,7 +88,7 @@ def image_safe(path, model, api_key):
         'role': 'user',
         'content': [
             {'image': 'file://' + os.path.abspath(path)},
-            {'text': '这张图片是否含有暴力、血腥、色情、政治敏感，人生攻击或其他敏感内容？如果安全仅回答safe，否则回答unsafe'}
+            {'text': '这张图片是否含有暴力、血腥、色情、政治敏感，人生攻击或其他敏感内容(发到国内平台，被举报后会导致处罚的都算)？如果安全仅回答safe，否则回答unsafe'}
         ]
     }]
     try:
