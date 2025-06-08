@@ -165,6 +165,10 @@ process_waittime=120
 max_attempts_qzone_autologin=3
 max_post_stack=1
 max_imaga_number_one_post=30
+text_model=qwen-plus-latest
+vision_model=qwen-vl-max-latest
+vision_pixel_limit=12000000
+vision_size_limit_mb=9.5
 at_unprived_sender=true' >> "oqqwall.config"
     echo "已创建文件: oqqwall.config"
     echo "请参考wiki填写配置文件后再启动"
@@ -207,6 +211,10 @@ max_post_stack=$(grep 'max_post_stack' oqqwall.config | cut -d'=' -f2 | tr -d '"
 max_imaga_number_one_post=$(grep 'max_imaga_number_one_post' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 max_attempts_qzone_autologin=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 at_unprived_sender=$(grep 'at_unprived_sender' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+text_model=$(grep 'text_model' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+vision_model=$(grep 'vision_model' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+vision_pixel_limit=$(grep 'vision_pixel_limit' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+vision_size_limit_mb=$(grep 'vision_size_limit_mb' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 
 DIR="./getmsgserv/rawpost/"
 
@@ -218,6 +226,10 @@ check_variable "max_attempts_qzone_autologin" "$max_attempts_qzone_autologin"
 check_variable "max_post_stack" "$max_post_stack"
 check_variable "at_unprived_sender" "$at_unprived_sender"
 check_variable "max_imaga_number_one_post" "$max_imaga_number_one_post"
+check_variable "text_model" "$text_model"
+check_variable "vision_model" "$vision_model"
+check_variable "vision_pixel_limit" "$vision_pixel_limit"
+check_variable "vision_size_limit_mb" "$vision_size_limit_mb"
 
 # 定义 JSON 文件名
 json_file="AcountGroupcfg.json"
