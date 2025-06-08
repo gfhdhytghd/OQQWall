@@ -61,18 +61,21 @@
     </td>
   </tr>
   <tr>
-    <td align="center">
-      <img src="readme_Resources/Screenshot_20250529_192908_TIM.jpg" width="220"><br/>
-      <sub>表情包渲染</sub>
-    </td>
      <td align="center">
       <img src="readme_Resources/Screenshot_20250529_192949_TIM.jpg" width="220"><br/>
       <sub>图片渲染与单独发送</sub>
     </td>
+    <td align="center">
+      <img src="readme_Resources/Screenshot_20250529_192908_TIM.jpg" width="220"><br/>
+      <sub>表情包渲染</sub>
+    </td>
+    <td align="center">
+      <img src="readme_Resources/Screenshot_20250608_082047_TIM.jpg" width="220"><br/>
+      <sub>支持多投稿合并发送</sub>
+    </td>
     <td></td>
   </tr>
 </table>
-
 
 
 
