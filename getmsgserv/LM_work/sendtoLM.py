@@ -65,7 +65,7 @@ def fetch_response_in_parts(prompt, max_rounds=5):
 
         # 使用流式输出方式调用生成模型
         responses = Generation.call(
-            model='qwen-plus-latest',
+            model=config.get('text_model', 'qwen-plus-latest'),
             messages=messages,
             seed=seed,
             result_format='message',

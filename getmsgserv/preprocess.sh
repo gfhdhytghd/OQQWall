@@ -71,6 +71,8 @@ else
   done
   if [ "$success" = false ]; then
     sendmsggroup LLM处理错误，请检查相关信息
+  else
+    python3 getmsgserv/LM_work/check_image_safety.py "$tag"
   fi
 fi
 # Step 2: Lock the cache files and process HTML to PDF
