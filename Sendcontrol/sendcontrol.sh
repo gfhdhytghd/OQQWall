@@ -71,6 +71,9 @@ get_send_info(){
     comment=$(jq -r '.[0].comment'  <<<"$json")
     AfterLM=$(jq -r '.[0].AfterLM'  <<<"$json")
     groupname=$(jq -r '.[0].ACgroup' <<<"$json")
+     if [[ "$comment" == "null" ]]; then
+        comment=""
+    fi
     #检查 ACgroup 是否获取成功
         
     if [ -z "$groupname" ]; then
