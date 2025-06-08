@@ -3,18 +3,22 @@ import time
 import sys
 import random
 import os
+import logging
 import dashscope
 from http import HTTPStatus
 from dashscope import Generation, MultiModalConversation
 from dashscope.api_entities.dashscope_response import Role
 from PIL import Image
+from PIL import ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 import re
 import sqlite3
 
-# File path used to save erroneous JSON output
+# 错误JSON输出的文件路径
 output_file_path_error = "./cache/LM_error.json"
 
 def read_config(file_path):
+    # 读取配置文件，返回字典
     config = {}
     with open(file_path, 'r') as f:
         for line in f:
@@ -24,7 +28,7 @@ def read_config(file_path):
 
 
 def insert_missing_commas(json_like_string):
-    # 正则表达式检测可能缺少逗号的地方
+    # 用正则表达式检测并插入可能缺少的逗号
     missing_comma_pattern = re.compile(r'(\})(\s*[\{\[])')
     
     # 在可能缺少逗号的地方插入逗号
@@ -34,6 +38,7 @@ def insert_missing_commas(json_like_string):
 
 
 def clean_json_output(output_content):
+    # 清理和修正模型输出的JSON字符串
     try:
         # 尝试解析JSON以确保其有效
         parsed_output = json.loads(output_content)
@@ -53,43 +58,58 @@ def clean_json_output(output_content):
 
 
 def compress_image(path, max_pixels, size_limit):
-    """Resize and recompress the image so it satisfies pixel and size limits."""
+    """调整图片尺寸和压缩图片大小，确保不超过像素和文件大小限制。"""
+    logging.info(f"开始处理图片: {path}")
     with Image.open(path) as img:
         width, height = img.size
         pixels = width * height
+        logging.info(f"图片尺寸: {width}x{height}, 总像素: {pixels}")
         if pixels > max_pixels:
             ratio = (max_pixels / pixels) ** 0.5
             new_size = (int(width * ratio), int(height * ratio))
+            logging.info(f"图片超过像素限制，调整至: {new_size[0]}x{new_size[1]}")
             img = img.resize(new_size, Image.Resampling.LANCZOS)
             img.save(path)
-        if os.path.getsize(path) > size_limit:
+        
+        file_size = os.path.getsize(path)
+        if file_size > size_limit:
+            logging.info(f"图片大小({file_size/1024/1024:.2f}MB)超过限制({size_limit/1024/1024:.2f}MB)，开始压缩")
             quality = 90
             while os.path.getsize(path) > size_limit and quality > 10:
                 img.save(path, quality=quality, optimize=True)
+                logging.info(f"压缩质量: {quality}, 当前大小: {os.path.getsize(path)/1024/1024:.2f}MB")
                 quality -= 5
 
 
 def image_safe(path, model, api_key):
-    """Check whether a local image contains unsafe content using DashScope."""
+    """使用DashScope检测本地图片是否含有不安全内容。"""
+    logging.info(f"检测图片安全性: {path}")
     messages = [{
         'role': 'user',
         'content': [
             {'image': 'file://' + os.path.abspath(path)},
-            {'text': '这张图片是否含有暴力、血腥、色情或其他违法内容？如果安全仅回答safe，否则回答unsafe'}
+            {'text': '这张图片是否含有暴力、血腥、色情、政治敏感，人生攻击或其他敏感内容？如果安全仅回答safe，否则回答unsafe'}
         ]
     }]
     try:
-        rsp = MultiModalConversation.call(model=model, messages=messages, api_key=api_key)
-        if rsp.status_code == HTTPStatus.OK:
-            content = rsp.output.get('choices', [])[0].get('message', {}).get('content', '')
-            return 'unsafe' not in content.lower()
-    except Exception:
-        pass
-    return True
+        response = MultiModalConversation.call(model=model, messages=messages, api_key=api_key)
+        if response.status_code == HTTPStatus.OK:
+            content = response.output.choices[0].message.content
+            if isinstance(content, list):
+                content = " ".join(map(str, content))
+            result = 'unsafe' not in content.lower()
+            logging.info(f"图片安全检测结果: {result}, 原始响应: {content}")
+            return result
+        else:
+            logging.warning(f"图片安全检测返回非200状态码: {response.status_code}")
+            return False
+    except Exception as e:
+        logging.error(f"图片安全检测发生错误: {str(e)}, 错误类型: {type(e)}", exc_info=True)
+        return True
 
 
 def update_safemsg(tag, safe):
-    """Update the safemsg field in the database according to the result."""
+    """根据图片安全性结果，更新数据库中的safemsg字段。"""
     conn = sqlite3.connect('./cache/OQQWall.db')
     cur = conn.cursor()
     row = cur.execute('SELECT AfterLM FROM preprocess WHERE tag=?', (tag,)).fetchone()
@@ -106,10 +126,12 @@ def update_safemsg(tag, safe):
 
 
 def process_image_safety(tag, config):
-    """Compress and scan all images for a tag and update safemsg."""
+    """对指定tag的所有图片进行压缩和安全检测，并更新safemsg。"""
     folder = os.path.join('cache/picture', str(tag))
-    # Skip if there is no picture directory or it is empty
+    logging.info(f"处理tag {tag}的图片安全性检查")
+    
     if not os.path.isdir(folder) or not os.listdir(folder):
+        logging.info(f"目录 {folder} 不存在或为空，跳过图片处理")
         return
     api_key = config.get('apikey')
     max_pixels = int(config.get('vision_pixel_limit', 12000000))
@@ -120,14 +142,18 @@ def process_image_safety(tag, config):
     safe = True
     for file in os.listdir(folder):
         path = os.path.join(folder, file)
+        logging.info(f"处理图片: {file}")
         compress_image(path, max_pixels, size_limit)
         if not image_safe(path, model, api_key):
+            logging.warning(f"图片 {file} 被标记为不安全")
             safe = False
-
+    
+    logging.info(f"图片安全检查完成，结果: {'安全' if safe else '不安全'}")
     update_safemsg(tag, safe)
 
 
-def fetch_response_in_parts(prompt, max_rounds=5):
+def fetch_response_in_parts(prompt, config, max_rounds=5):
+    # 分多轮流式获取大模型响应，拼接完整输出
     messages = [{'role': 'system', 'content': '你是一个校园墙投稿管理员'},
                 {'role': 'user', 'content': prompt}]
 
@@ -155,74 +181,73 @@ def fetch_response_in_parts(prompt, max_rounds=5):
 
         # 处理流式响应
         output_content = ""
-        for response in responses:
-            if response.status_code == HTTPStatus.OK:
+        try:
+            for response in responses:
+                # 只拼接内容，不访问status_code
                 chunk = response.output.get('choices', [])[0].get('message', {}).get('content', '')
                 output_content += chunk
-                #sys.stdout.write(chunk)  # 实时打印每个chunk
                 sys.stdout.flush()
-            else:
-                print(f"Ecesrror in API call: {response.status_code}, {response.message}")
-                break
-        #print(output_content)
+        except Exception as e:
+            print(f"Error in API call: {e}")
+            break
+
         if previous_output:
-            # Get the last 100 characters of the previous output
+            # 获取上一次输出的最后100个字符
             overlap_content = previous_output[-100:]
-            # Search for these 100 characters within the first 500 characters of the current output
+            # 在当前输出的前500字符中查找重叠部分
             start_index = output_content[:500].find(overlap_content)
             if start_index != -1:
-                # If found, remove everything before this occurrence
+                # 如果找到，去除重叠部分
                 output_content = output_content[start_index + len(overlap_content):]
 
-        # Update the full response
+        # 更新完整响应
         full_response += output_content
         previous_output = output_content
 
-        # Check if the response contains the ending indicator '```'
+        # 检查输出是否以结束标志'```'结尾
         if output_content.endswith('```'):
             print("complete!")
             is_complete = True
         else:
-            # Truncate the last 100 characters before adding to messages
+            # 截断最后100字符后加入messages，防止重复
             truncated_output = output_content[:-100] if len(output_content) > 100 else output_content
             messages.append({
                 'role': Role.ASSISTANT,
                 'content': truncated_output
             })
-            # Prompt the model to continue without repeating content
+            # 提示模型继续输出，不要重复内容
             messages.append({'role': Role.USER, 'content': '接着上次停下的地方继续输出，不要重复之前的内容，不要重复sender和needpriv等内容，不要在开头重复一遍```json {"time": },{"message": [{"type": ,"data": {，不要在开头重复任何格式内容，直接接着上次结束的那个字继续,但是如果json已经到达末尾，请用\n```结束输出'})
         round_count += 1
 
     return full_response
 
 def save_to_sqlite(output_data, tag):
-    # SQLite database file path
+    # 将结果保存到SQLite数据库
     db_path = './cache/OQQWall.db'
-    
-    # Connect to the SQLite database
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
-
-    # Update the `AfterLM` column in the table for the given tag
     try:
-        # Prepare the SQL update statement
         sql_update_query = '''UPDATE preprocess SET AfterLM = ? WHERE tag = ?'''
-        # Execute the update query with the final_response_json and tag
         cursor.execute(sql_update_query, (output_data, tag))
-        
-        # Commit the transaction
         conn.commit()
-        
-        # Print success message
         print(f"Data successfully saved to SQLite for tag: {tag}")
     except sqlite3.Error as e:
         print(f"SQLite error occurred: {e}")
     finally:
-        # Close the cursor and connection
         cursor.close()
         conn.close()
 
 def main():
+    # 配置日志输出
+    logging.basicConfig(
+        level=logging.INFO,
+        format='LMWork:%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+        ]
+    )
+
+    # 主入口，处理输入、调用模型、保存结果
     config = read_config('oqqwall.config')
     dashscope.api_key = config.get('apikey')
     data = json.load(sys.stdin)
@@ -248,6 +273,7 @@ def main():
     input_content = json.dumps(output_data, ensure_ascii=False, indent=4)
     timenow = time.time()
 
+    # 构造prompt，详细说明分组和输出要求
     prompt = f"""当前时间 {timenow}
     以下内容是一组按时间顺序排列的校园墙投稿聊天记录：
 
@@ -301,7 +327,7 @@ def main():
     """
 
     # 使用流式传输获取模型响应
-    final_response = fetch_response_in_parts(prompt)
+    final_response = fetch_response_in_parts(prompt, config)
     final_response = clean_json_output(final_response)
     print(f"final response:{final_response}")
     # 解析并保存最终的JSON响应
@@ -319,13 +345,13 @@ def main():
         # 用完整的消息数据替换final_response_json中的message_id
         final_response_json["messages"] = [message_lookup[msg_id] for msg_id in final_response_json["messages"] if msg_id in message_lookup]
 
-        # Convert the final JSON response to a string for storage
+        # 转换为字符串以便存储
         output_data = json.dumps(final_response_json, ensure_ascii=False, indent=4)
         
-        # Save the result into the SQLite database
+        # 保存到SQLite数据库
         save_to_sqlite(output_data, tag)
 
-        # Compress and scan associated images, if present, then update safemsg
+        # 压缩并检测图片安全性，更新safemsg
         process_image_safety(tag, config)
 
     except json.JSONDecodeError as e:

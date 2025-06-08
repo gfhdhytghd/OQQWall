@@ -201,7 +201,7 @@ case $command in
         sendmsgpriv $senderid $flag
         ;;
     展示)
-        sendimagetoqqgroup
+        sendimagetoqqgroup $object
         sendmsggroup "内部编号$object, 请发送指令"
         ;;
     *)
