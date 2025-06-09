@@ -187,7 +187,8 @@ CREATE TABLE sender (
     ACgroup TEXT,
     rawmsg TEXT,
     modtime TEXT,
-    processtime TEXT
+    processtime TEXT,
+    UNIQUE(senderid, receiver)
 );
 CREATE TABLE preprocess (
     tag INT,
