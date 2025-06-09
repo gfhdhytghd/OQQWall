@@ -188,6 +188,7 @@ CREATE TABLE sender (
     rawmsg TEXT,
     modtime TEXT,
     processtime TEXT
+    PRIMARY KEY (senderid, receiver)
 );
 CREATE TABLE preprocess (
     tag INT,
