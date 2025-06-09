@@ -51,8 +51,9 @@ COMMU_DIR = './getmsgserv/all/'
 os.makedirs(RAWPOST_DIR, exist_ok=True)
 os.makedirs(ALLPOST_DIR, exist_ok=True)
 
-# 添加文件锁
+# 添加文件锁和数据库锁
 file_lock = Lock()
+db_lock = Lock()
 
 # 数据库连接管理
 @contextmanager
@@ -386,14 +387,13 @@ class RequestHandler(BaseHTTPRequestHandler):
             ACgroup = self_id_to_acgroup.get(self_id, 'Unknown')
 
             try:
-                with get_db_connection() as conn:
+                with db_lock, get_db_connection() as conn:
                     cursor = conn.cursor()
                     try:
                         # 检查是否已存在该发送者和接收者的记录
                         cursor.execute('SELECT rawmsg FROM sender WHERE senderid=? AND receiver=?', (user_id, self_id))
                         row = cursor.fetchone()
                         if row:
-                            # 如果存在，加载现有的 rawmsg 并追加新消息
                             rawmsg_json = row[0]
                             try:
                                 message_list = json.loads(rawmsg_json)
@@ -401,26 +401,24 @@ class RequestHandler(BaseHTTPRequestHandler):
                                     message_list = []
                             except json.JSONDecodeError:
                                 message_list = []
-
-                            message_list.append(simplified_data)
-                            # 按时间排序消息
-                            message_list = sorted(message_list, key=lambda x: x.get('time', 0))
-
-                            updated_rawmsg = json.dumps(message_list, ensure_ascii=False)
-                            cursor.execute('''
-                                UPDATE sender 
-                                SET rawmsg=?, modtime=CURRENT_TIMESTAMP 
-                                WHERE senderid=? AND receiver=?
-                            ''', (updated_rawmsg, user_id, self_id))
                         else:
-                            # 如果不存在，插入新记录
-                            message_list = [simplified_data]
-                            rawmsg_json = json.dumps(message_list, ensure_ascii=False)
-                            cursor.execute('''
-                                INSERT INTO sender (senderid, receiver, ACgroup, rawmsg, modtime) 
-                                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                            ''', (user_id, self_id, ACgroup, rawmsg_json))
+                            message_list = []
 
+                        message_list.append(simplified_data)
+                        # 按时间排序消息
+                        message_list = sorted(message_list, key=lambda x: x.get('time', 0))
+
+                        updated_rawmsg = json.dumps(message_list, ensure_ascii=False)
+                        cursor.execute('''
+                            INSERT INTO sender (senderid, receiver, ACgroup, rawmsg, modtime)
+                            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                            ON CONFLICT(senderid, receiver) DO UPDATE SET
+                                ACgroup=excluded.ACgroup,
+                                rawmsg=excluded.rawmsg,
+                                modtime=CURRENT_TIMESTAMP
+                        ''', (user_id, self_id, ACgroup, updated_rawmsg))
+
+                        if not row:
                             # 检查 preprocess 表中的最大 tag
                             cursor.execute('SELECT MAX(tag) FROM preprocess')
                             max_tag = cursor.fetchone()[0] or 0
@@ -428,11 +426,10 @@ class RequestHandler(BaseHTTPRequestHandler):
 
                             # 插入 preprocess 表
                             cursor.execute('''
-                                INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup) 
+                                INSERT INTO preprocess (tag, senderid, nickname, receiver, ACgroup)
                                 VALUES (?, ?, ?, ?, ?)
                             ''', (new_tag, user_id, nickname, self_id, ACgroup))
 
-                            # 提交更改
                             conn.commit()
 
                             # 调用 preprocess.sh 脚本
