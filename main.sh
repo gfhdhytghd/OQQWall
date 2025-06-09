@@ -24,9 +24,66 @@ check_and_create() {
 check_variable() {
     var_name=$1
     var_value=$2
+    config_file="./oqqwall.config"
+    
+    # 检查配置文件是否存在
+    if [ ! -f "$config_file" ]; then
+        echo "错误：配置文件 $config_file 不存在"
+        return 1
+    fi
+    
     if [ -z "$var_value" ] || [ "$var_value" == "xxx" ]; then
-        echo "变量 $var_name 未正确设置。请参考OQQWall文档设定初始变量,如果你刚刚进行了更新,请删除现有oqqwall.config中的所有内容,再次运行main.sh以重新生成配置文件,并填写。"
-        exit 1
+        echo "变量 $var_name 未正确设置，正在重置为默认值..."
+        case "$var_name" in
+            "http-serv-port")
+                default_value="8082"
+                ;;
+            "apikey")
+                default_value='""'
+                ;;
+            "process_waittime")
+                default_value="120"
+                ;;
+            "max_attempts_qzone_autologin")
+                default_value="3"
+                ;;
+            "max_post_stack")
+                default_value="1"
+                ;;
+            "max_imaga_number_one_post")
+                default_value="30"
+                ;;
+            "text_model")
+                default_value="qwen-plus-latest"
+                ;;
+            "vision_model")
+                default_value="qwen-vl-max-latest"
+                ;;
+            "vision_pixel_limit")
+                default_value="12000000"
+                ;;
+            "vision_size_limit_mb")
+                default_value="9.5"
+                ;;
+            "at_unprived_sender")
+                default_value="true"
+                ;;
+            *)
+                default_value=""
+                ;;
+        esac
+        
+        if [ -n "$default_value" ]; then
+            # 检查变量是否存在于配置文件中
+            if grep -q "^${var_name}=" "$config_file"; then
+                # 如果存在，则更新值
+                sed -i "s|^${var_name}=.*|${var_name}=${default_value}|" "$config_file"
+            else
+                # 如果不存在，则添加新行
+                echo "${var_name}=${default_value}" >> "$config_file"
+            fi
+            echo "已将 $var_name 重置为默认值: $default_value"
+        fi
     fi
 }
 
