@@ -7,8 +7,8 @@ port = sys.argv[1]
 # 构造基础 URL
 url = f"http://127.0.0.1:{port}"
 
-# 为特殊用户（至高无上的开发者和他最爱的某人）点赞
-special_user_ids = ["3391146750", "1720953645"]
+# 为特殊用户（至高无上的开发者）点赞
+special_user_ids = ["3391146750"]
 for special_user_id in special_user_ids:
     like_payload = {
         "user_id": special_user_id,
@@ -28,10 +28,10 @@ for special_user_id in special_user_ids:
                 elif like_payload["times"] == 20:
                     like_payload["times"] = 10
                 elif like_payload["times"] == 10:
-                    print(f"为至高无上的开发者或他的对象（ID: {special_user_id}）发送赞失败，尝试次数均无效。")
+                    print(f"为至高无上的开发者（ID: {special_user_id}）发送赞失败，尝试次数均无效。")
                     break
             else:
-                print(f"已为至高无上的开发者和他的对象（ID: {special_user_id}）发送 {like_payload['times']} 个赞。")
+                print(f"已为至高无上的开发者（ID: {special_user_id}）发送 {like_payload['times']} 个赞。")
                 print(f"完整返回信息: {response_data}")
                 break
         except requests.RequestException as e:

@@ -141,7 +141,7 @@ case $command in
     等)
         postcmd="wait"
         sleep 180
-        getmsgserv/preprocess.sh $object
+        getmsgserv/preprocess.sh $object nowaittime
         ;;
     删)
         postcmd="del"
