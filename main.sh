@@ -44,6 +44,9 @@ check_variable() {
             "process_waittime")
                 default_value="120"
                 ;;
+            "manage_napcat_internal")
+                default_value="true"
+                ;;
             "max_attempts_qzone_autologin")
                 default_value="3"
                 ;;
@@ -113,9 +116,12 @@ getnumnext-startup(){
 
 if [[ $1 == -r ]]; then
   echo "执行子系统重启..."
-  pkill startd.sh
-  if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null; then
-    pgrep -f "xvfb-run -a qq --no-sandbox -q" | xargs kill -15
+  if [[ "$manage_napcat_internal" == "true" ]]; then
+    if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null; then
+      pgrep -f "xvfb-run -a qq --no-sandbox -q" | xargs kill -15
+    fi
+  else
+      echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理 Napcat QQ 客户端。"
   fi
   if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null; then
     pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
@@ -128,8 +134,11 @@ if [[ $1 == -r ]]; then
   fi
 elif [[ $1 == -rf ]]; then
   echo "执行无检验的子系统强行重启..."
-  pkill startd.sh
-  pkill qq
+  if [[ "$manage_napcat_internal" == "true" ]]; then
+      pkill qq
+  else
+      echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理Napcat QQ 客户端。"
+  fi
   pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
   pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" | xargs kill -15
   pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" | xargs kill -15
@@ -219,6 +228,7 @@ if [[ ! -f "oqqwall.config" ]]; then
     echo 'http-serv-port=
 apikey=""
 process_waittime=120
+manage_napcat_internal=true
 max_attempts_qzone_autologin=3
 max_post_stack=1
 max_imaga_number_one_post=30
@@ -232,39 +242,103 @@ at_unprived_sender=true' >> "oqqwall.config"
     exit 0
 fi
 
-if [ ! -f ./cache/OQQWall.db ]; then
-  # 定义数据库文件名
-  DB_NAME="./cache/OQQWall.db"
+#!/usr/bin/env bash
+set -euo pipefail
+shopt -s extglob
 
-  # 创建 SQLite 数据库并创建表
-sqlite3 $DB_NAME <<EOF
-CREATE TABLE sender (
-    senderid TEXT,
-    receiver TEXT,
-    ACgroup TEXT,
-    rawmsg TEXT,
-    modtime TEXT,
-    processtime TEXT
-    PRIMARY KEY (senderid, receiver)
-);
-CREATE TABLE preprocess (
-    tag INT,
-    senderid TEXT,
-    nickname TEXT,
-    receiver TEXT,
-    ACgroup TEXT,
-    AfterLM TEXT,
-    comment TEXT,
-    numnfinal INT
-);
+DB_NAME="./cache/OQQWall.db"
+
+#--------------------------------------------------------------------
+# 1) 期望表结构
+declare -A table_defs
+table_defs[sender]="CREATE TABLE sender (
+  senderid TEXT,
+  receiver TEXT,
+  ACgroup  TEXT,
+  rawmsg   TEXT,
+  modtime  TEXT,
+  processtime TEXT,
+  PRIMARY KEY (senderid, receiver)
+);"
+table_defs[preprocess]="CREATE TABLE preprocess (
+  tag        INT,
+  senderid   TEXT,
+  nickname   TEXT,
+  receiver   TEXT,
+  ACgroup    TEXT,
+  AfterLM    TEXT,
+  comment    TEXT,
+  numnfinal  INT
+);"
+table_defs[blocklist]="CREATE TABLE blocklist (
+  senderid TEXT,
+  ACgroup  TEXT,
+  receiver TEXT,
+  reason   TEXT,
+  PRIMARY KEY (senderid, ACgroup)
+);"
+#--------------------------------------------------------------------
+# 2) 辅助函数：提取结构签名   name|TYPE|pkFlag
+table_sig () {
+  local db=$1 table=$2
+  sqlite3 "$db" "PRAGMA table_info($table);" |
+  awk -F'|' '{printf "%s|%s|%s\n", $2, toupper($3), $6}'
+}
+#--------------------------------------------------------------------
+# 3) 如果数据库不存在，直接初始化
+if [[ ! -f $DB_NAME ]]; then
+  printf '数据库缺失，正在初始化…\n'
+  sqlite3 "$DB_NAME" <<EOF
+${table_defs[sender]}
+${table_defs[preprocess]}
+${table_defs[blocklist]}
 EOF
-
+  exit
 fi
+#--------------------------------------------------------------------
+# 4) 逐表检查
+for tbl in sender preprocess blocklist; do
+
+  # （a）表是否存在
+  if ! sqlite3 "$DB_NAME" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='$tbl';" |
+       grep -q 1; then
+    printf '表 %-11s 不存在，正在创建…\n' "$tbl"
+    sqlite3 "$DB_NAME" "${table_defs[$tbl]}"
+    continue
+  fi
+
+  # （b）实际结构
+  actual_sig=$(table_sig "$DB_NAME" "$tbl")
+
+  # （c）期望结构：在 :memory: 会话里临时建表再取结构
+  expected_sig=$(sqlite3 ":memory:" <<SQL |
+${table_defs[$tbl]}
+PRAGMA table_info($tbl);
+SQL
+  awk -F'|' '{printf "%s|%s|%s\n", $2, toupper($3), $6}')
+
+  # （d）比较
+  if [[ "$actual_sig" != "$expected_sig" ]]; then
+    echo
+    echo "⚠  表 $tbl 结构不匹配："
+    diff --color=always <(echo "$expected_sig") <(echo "$actual_sig") || true
+    read -rp "→ 删除并重建表 $tbl ? 这会导致数据丢失！ [y/N] " ans
+    if [[ $ans =~ ^[Yy]$ ]]; then
+      sqlite3 "$DB_NAME" "DROP TABLE IF EXISTS $tbl;"
+      sqlite3 "$DB_NAME" "${table_defs[$tbl]}"
+      echo "表 $tbl 已重建。"
+    else
+      echo "跳过表 $tbl 的重建。"
+    fi
+    echo
+  fi
+done
 
 
 apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 http_serv_port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"[:space:]')
 process_waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+manage_napcat_internal=$(grep 'manage_napcat_internal' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 max_post_stack=$(grep 'max_post_stack' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 max_imaga_number_one_post=$(grep 'max_imaga_number_one_post' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 max_attempts_qzone_autologin=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
@@ -274,12 +348,14 @@ vision_model=$(grep 'vision_model' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 vision_pixel_limit=$(grep 'vision_pixel_limit' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 vision_size_limit_mb=$(grep 'vision_size_limit_mb' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 
+
 DIR="./getmsgserv/rawpost/"
 
 # 检查关键变量是否设置
 check_variable "http-serv-port" "$http_serv_port"
 check_variable "apikey" "$apikey"
 check_variable "process_waittime" "$process_waittime"
+check_variable "manage_napcat_internal" "$manage_napcat_internal"
 check_variable "max_attempts_qzone_autologin" "$max_attempts_qzone_autologin"
 check_variable "max_post_stack" "$max_post_stack"
 check_variable "at_unprived_sender" "$at_unprived_sender"
@@ -307,17 +383,7 @@ fi
 
 # 获取所有 group 并逐行读取
 jq -r '. | keys[]' "$json_file" | while read -r group; do
-  # 调试：输出当前 group 名称，确保没有多余空白字符
   echo "正在检查 group: $group"
-    #检查与创建发送调度工作表
-  sqlite3 ./cache/OQQWall.db <<EOF
-CREATE TABLE IF NOT EXISTS sendstorge_$group(
-    tag INT, 
-    num INT, 
-    port INT, 
-    senderid INT
-);
-EOF
   mangroupid=$(jq -r --arg group "$group" '.[$group].mangroupid' "$json_file")
   mainqqid=$(jq -r --arg group "$group" '.[$group].mainqqid' "$json_file")
   mainqq_http_port=$(jq -r --arg group "$group" '.[$group]["mainqq_http_port"]' "$json_file")
@@ -396,6 +462,39 @@ EOF
   if [ "$minorqq_count" -ne "$minorqq_port_count" ]; then
     errors+=("错误：在 $group 中，minorqqid 的数量 ($minorqq_count) 与 minorqq_http_port 的数量 ($minorqq_port_count) 不匹配。")
   fi
+  tbl_name="sendstorge_$group"
+
+  # 定义期望结构 SQL
+  expected_schema="CREATE TABLE $tbl_name(tag INT, num INT, port INT, senderid TEXT);"
+
+  # 表是否存在
+  if ! sqlite3 "$DB_NAME" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='$tbl_name';" | grep -q 1; then
+    echo "表 $tbl_name 不存在，正在创建..."
+    sqlite3 "$DB_NAME" "$expected_schema"
+    continue
+  fi
+
+  # 实际结构
+  actual_sig=$(sqlite3 "$DB_NAME" "PRAGMA table_info($tbl_name);" | \
+    awk -F'|' '{printf "%s|%s|%s\n", $2, toupper($3), $6}')
+
+  # 期望结构（用 :memory: 临时解析）
+  expected_sig=$(sqlite3 ":memory:" <<SQL |
+$expected_schema
+PRAGMA table_info($tbl_name);
+SQL
+  awk -F'|' '{printf "%s|%s|%s\n", $2, toupper($3), $6}')
+
+  if [[ "$actual_sig" != "$expected_sig" ]]; then
+    echo
+    echo "⚠  表 $tbl_name 结构不匹配："
+    diff --color=always <(echo "$expected_sig") <(echo "$actual_sig") || true
+    echo "正在删除并重建表 $tbl_name..."
+    sqlite3 "$DB_NAME" "DROP TABLE IF EXISTS $tbl_name;"
+    sqlite3 "$DB_NAME" "$expected_schema"
+    echo "表 $tbl_name 已重建。"
+    echo
+  fi
 
 done
 
@@ -422,7 +521,6 @@ mangroupids=($(jq -r '.[] | .mangroupid' ./AcountGroupcfg.json))
 #    jq --arg apikey "$apikey" '.keys.openai = [$apikey]' ./qqBot/QChatGPT/data/config/provider.json > tmp.json && mv tmp.json ./qqBot/QChatGPT/data/config/provider.json
 #fi
 
-pkill startd.sh
 # Activate virtual environment
 
 
@@ -495,14 +593,18 @@ fi
 
 
 # Check if the OneBot server process is running
-if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null; then
-    pkill qq
-fi
+if [[ "$manage_napcat_internal" == "true" ]]; then
+    if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null; then
+        pkill qq
+    fi
 
-for qqid in "${runidlist[@]}"; do
-    echo "Starting QQ process for ID: $qqid"
-    nohup xvfb-run -a qq --no-sandbox -q "$qqid" > ./NapCatlog 2>&1 &
-done
+    for qqid in "${runidlist[@]}"; do
+        echo "Starting QQ process for ID: $qqid"
+        nohup xvfb-run -a qq --no-sandbox -q "$qqid" > ./NapCatlog 2>&1 &
+    done
+else
+    echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理 Napcat QQ 客户端。"
+fi
 
 sleep 10
 echo 系统启动完毕

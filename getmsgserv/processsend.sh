@@ -157,9 +157,19 @@ case $command in
         echo 结束发件流程,拒
         ;;
     拉黑)
-        sendmsggroup 拉黑暂不可用，请登陆账号后去qq中拉黑。
-        # sendmsggroup 不再接收来自$senderid的投稿
-        # rm -rf cache/prepost/$object
+        # 允许拉黑，即使 flag 为空，但记录无拉黑理由
+        if [ -z "$flag" ]; then
+            reason="未提供"
+        else
+            reason="$flag"
+        fi
+        timeout 10s sqlite3 "./cache/OQQWall.db" <<EOF
+INSERT OR IGNORE INTO blocklist (senderid, ACgroup, receiver, reason)
+VALUES ('$senderid', '$groupname', '$receiver', '$reason');
+EOF
+        sendmsggroup 已拉黑$senderid
+        sendmsgpriv $senderid '你已被拉黑,请勿再尝试投稿'
+        rm -rf cache/prepost/$object
         ;;
     匿)
         sendmsggroup 尝试切换匿名状态...

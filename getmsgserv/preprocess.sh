@@ -27,6 +27,16 @@ mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
 minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
 mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
 minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
+
+
+# 拉黑检查：如果 senderid 在 blocklist 表中被拉黑，则删除 preprocess 表中的该 tag 行并退出
+is_blocked=$(sqlite3 'cache/OQQWall.db' "SELECT 1 FROM blocklist WHERE senderid = '$senderid' AND ACgroup = '$groupname' LIMIT 1;")
+if [[ "$is_blocked" == "1" ]]; then
+  echo "发件人 $senderid 在账户组 $groupname 已被拉黑，忽略本次投稿。"
+  sqlite3 'cache/OQQWall.db' "DELETE FROM preprocess WHERE tag = '$tag';"
+  exit 0
+fi
+
 # 初始化端口变量
 port=""
 # 检查输入ID是否为mainqqid

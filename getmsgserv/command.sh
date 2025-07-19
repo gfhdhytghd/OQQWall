@@ -257,6 +257,28 @@ $numbpending"
         # 7. 调用已存在的发送函数，注意这里不修改 sendmsggroup 的定义
         sendmsggroup "$syschecklist"
         ;;
+    "取消拉黑")
+        if [[ -z "$command" ]]; then
+            sendmsggroup "请提供要取消拉黑的 senderid"
+            exit 1
+        fi
+        sqlite3 'cache/OQQWall.db' "DELETE FROM blocklist WHERE senderid = '$command' AND ACgroup = '$groupname';"
+        sqlite3 'cache/OQQWall.db' "DELETE FROM sender WHERE senderid = '$command' AND ACgroup = '$groupname';"
+        sendmsggroup "已取消拉黑 senderid: $command"
+        ;;
+    "列出拉黑")
+        blocklist=$(sqlite3 'cache/OQQWall.db' "SELECT senderid, reason FROM blocklist WHERE ACgroup = '$groupname';")
+        if [[ -z "$blocklist" ]]; then
+            sendmsggroup "当前账户组没有被拉黑的账号"
+        else
+            msg="被拉黑账号列表："
+            while IFS='|' read -r senderid reason; do
+                msg+="
+账号: $senderid，理由: $reason"
+            done <<< "$blocklist"
+            sendmsggroup "$msg"
+        fi
+        ;;
     "帮助")
         help='全局指令:
 语法: @本账号/次要账号 指令
