@@ -168,7 +168,6 @@ INSERT OR IGNORE INTO blocklist (senderid, ACgroup, receiver, reason)
 VALUES ('$senderid', '$groupname', '$receiver', '$reason');
 EOF
         sendmsggroup 已拉黑$senderid
-        sendmsgpriv $senderid '你已被拉黑,请勿再尝试投稿'
         rm -rf cache/prepost/$object
         ;;
     匿)
@@ -184,6 +183,34 @@ EOF
     重渲染)
         getmsgserv/preprocess.sh $object randeronly
         ;;
+    扩列审查)
+        response=$(curl -s "http://127.0.0.1:$port/get_stranger_info?user_id=$senderid")
+        # 使用 jq 提取 qqLevel
+        qqLevel=$(echo "$response" | jq '.data.qqLevel')
+        qzoneopenstatus=$(check_qzone_open "$senderid")
+        src_dir="cache/picture/$object"
+        work_dir="$src_dir/qrscan_workdir"
+        mkdir -p "$work_dir"
+
+        # 1) 预处理：γ=0.65 + 二值化 85%
+        for img in "$src_dir"/*.{jpg,jpeg,png}; do
+            [[ -f $img ]] || continue
+            fname=$(basename "${img%.*}")        # 去掉扩展名
+            # 保持输出为 PNG，方便 zbarimg
+            magick "$img" -gamma 0.65 -threshold 85% "$work_dir/${fname}.png"
+        done
+
+        # 2) 扫描所有处理后的图片
+        scan_result=$(zbarimg --raw -Sqrcode.enable "$work_dir"/* 2>/dev/null || true)
+        if [[ -z "$scan_result" ]]; then
+            scan_result="没有找到二维码"
+        fi
+        sendmsggroup "用户的QQ等级为: $qqLevel
+对方空间对主账号$qzoneopenstatus
+二维码扫描结果：$scan_result"
+        getandsendcard "$senderid"
+        sendmsggroup "内部编号$object, 请发送指令"
+    ;;
     评论)
         json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
         #need_priv=$(echo $json_data|jq -r '.needpriv')

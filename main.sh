@@ -602,11 +602,11 @@ if [[ "$manage_napcat_internal" == "true" ]]; then
         echo "Starting QQ process for ID: $qqid"
         nohup xvfb-run -a qq --no-sandbox -q "$qqid" > ./NapCatlog 2>&1 &
     done
+    sleep 10
 else
     echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理 Napcat QQ 客户端。"
 fi
 
-sleep 10
 echo 系统启动完毕
 echo -e "\033[1;34m powered by \033[0m"
 echo -e "\033[1;34m   ____  ____  ____ _       __      ____\n  / __ \/ __ \/ __ \ |     / /___ _/ / /\n / / / / / / / / / / | /| / / __ \`/ / /\n/ /_/ / /_/ / /_/ /| |/ |/ / /_/ / / /\n\____/\___\_\___\_\|__/|__/\__,_/_/_/\n\033[0m"

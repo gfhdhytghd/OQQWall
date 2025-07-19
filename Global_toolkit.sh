@@ -4,6 +4,34 @@ sendmsggroup() {
     # 构建 curl 命令，并发送编码后的消息
     curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
 }
+getandsendcard() {
+    response=$(curl -s "http://127.0.0.1:$mainqq_http_port/ArkSharePeer?user_id=$1")
+    # 使用 jq 提取 qqLevel
+    arkMsg=$(echo "$response" | jq -r '.data.arkMsg')
+    # 获取用户信息
+    # 构造 JSON 请求体
+    json_payload=$(jq -n \
+    --arg group_id "$groupid" \
+    --arg ark "$arkMsg" \
+    '{
+        group_id: $group_id,
+        message: [
+        {
+            type: "json",
+            data: {
+            data: $ark
+            }
+        }
+        ]
+    }'
+    )
+
+    # 使用 curl 发送 POST 请求
+    curl --location --request POST "http://127.0.0.1:$port/send_group_msg" \
+--header 'Content-Type: application/json' \
+--data-raw "$json_payload"
+
+}
 sendmsgpriv(){
     msg=$2
     encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$msg")
@@ -91,4 +119,35 @@ renewqzonelogin(){
     postqzone
     sleep 2
     sleep 60
+}
+check_qzone_open() {
+    local target_qq="$1"
+    local api_url="http://127.0.0.1:$mainqq_http_port/get_cookies?domain=user.qzone.qq.com"
+
+    # 最新 Chrome UA（Win10）
+    local ua="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.127 Safari/537.36"
+
+    # 获取 cookies JSON 并提取 cookie 字符串
+    local cookies_json
+    cookies_json=$(curl -s "$api_url")
+
+    local cookie
+    cookie=$(echo "$cookies_json" | jq -r '.data.cookies')
+
+    # 判断 Cookie 是否为空
+    if [[ -z "$cookie" || "$cookie" == "null" ]]; then
+        echo "不开放"
+        return
+    fi
+
+    # 请求目标空间页面
+    local html
+    html=$(curl -s -A "$ua" -H "Cookie: $cookie" "https://user.qzone.qq.com/$target_qq")
+
+    # 判断是否含有限制访问的提示
+    if echo "$html" | grep -q "主人设置了权限，您可通过以下方式访问"; then
+        echo "不开放"
+    else
+        echo "开放"
+    fi
 }
