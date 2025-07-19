@@ -26,7 +26,7 @@ check_and_create() {
 #   $2 = 变量名
 #   $3 = 默认值
 check_variable() {
-    cfg_file='/home/admin/OQQWall/oqqwall.config'
+    cfg_file='./oqqwall.config'
     local var_name="$1"
     local default_value="$2"
 
@@ -159,8 +159,8 @@ check_variable "manage_napcat_internal" "true"
 check_variable "max_attempts_qzone_autologin"  "3"
 check_variable "max_post_stack" "1"
 check_variable "at_unprived_sender" "true"
-check_variable "max_imaga_number_one_post""9"
-check_variable "text_model""qwen-plus-latest"
+check_variable "max_imaga_number_one_post" "9"
+check_variable "text_model" "qwen-plus-latest"
 check_variable "vision_model" "qwen-vl-max-latest"
 check_variable "vision_pixel_limit" "12000000"
 check_variable "vision_size_limit_mb" "9.5"
