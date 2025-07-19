@@ -21,74 +21,42 @@ check_and_create() {
     fi
 }
 
+# 仅依赖 3 个位置参数：
+#   $1 = 配置文件路径
+#   $2 = 变量名
+#   $3 = 默认值
 check_variable() {
-    var_name=$1
-    var_value=$2
-    config_file="./oqqwall.config"
-    
-    # 检查配置文件是否存在
-    if [ ! -f "$config_file" ]; then
-        echo "错误：配置文件 $config_file 不存在"
+    cfg_file='/home/admin/OQQWall/oqqwall.config'
+    local var_name="$1"
+    local default_value="$2"
+
+    # 基础校验 ---------------------------------------------------------
+    if [[ -z "$cfg_file" || -z "$var_name" ]]; then
+        echo "[check_variable] 用法: check_variable <var_name> <default_value>"
         return 1
     fi
-    
-    if [ -z "$var_value" ] || [ "$var_value" == "xxx" ]; then
-        echo "变量 $var_name 未正确设置，正在重置为默认值..."
-        case "$var_name" in
-            "http-serv-port")
-                default_value="8082"
-                ;;
-            "apikey")
-                default_value='""'
-                ;;
-            "process_waittime")
-                default_value="120"
-                ;;
-            "manage_napcat_internal")
-                default_value="true"
-                ;;
-            "max_attempts_qzone_autologin")
-                default_value="3"
-                ;;
-            "max_post_stack")
-                default_value="1"
-                ;;
-            "max_imaga_number_one_post")
-                default_value="30"
-                ;;
-            "text_model")
-                default_value="qwen-plus-latest"
-                ;;
-            "vision_model")
-                default_value="qwen-vl-max-latest"
-                ;;
-            "vision_pixel_limit")
-                default_value="12000000"
-                ;;
-            "vision_size_limit_mb")
-                default_value="9.5"
-                ;;
-            "at_unprived_sender")
-                default_value="true"
-                ;;
-            *)
-                default_value=""
-                ;;
-        esac
-        
-        if [ -n "$default_value" ]; then
-            # 检查变量是否存在于配置文件中
-            if grep -q "^${var_name}=" "$config_file"; then
-                # 如果存在，则更新值
-                sed -i "s|^${var_name}=.*|${var_name}=${default_value}|" "$config_file"
-            else
-                # 如果不存在，则添加新行
-                echo "${var_name}=${default_value}" >> "$config_file"
-            fi
-            echo "已将 $var_name 重置为默认值: $default_value"
+    [[ ! -f "$cfg_file" ]] && {
+        echo "[check_variable] 错误: 配置文件 $cfg_file 不存在"
+        return 1
+    }
+
+    # 取当前值；grep -m1 只取首行，防止重复定义干扰
+    local current_value
+    current_value=$(grep -m1 "^${var_name}=" "$cfg_file" | cut -d'=' -f2-)
+
+    # 若值为空、缺失或占位符，则写入默认值 ------------------------------
+    if [[ -z "$current_value" || "$current_value" == "xxx" ]]; then
+        if grep -q "^${var_name}=" "$cfg_file"; then
+            # 已存在行 → 就地替换
+            sed -i "s|^${var_name}=.*|${var_name}=${default_value}|" "$cfg_file"
+        else
+            # 未出现过 → 追加
+            echo "${var_name}=${default_value}" >> "$cfg_file"
         fi
+        echo "[check_variable] 已将 ${var_name} 重置为默认值: ${default_value}"
     fi
 }
+
 
 getnumnext(){
     numnow=$(cat ./numb.txt)
@@ -182,7 +150,21 @@ if [[ ! -f "AcountGroupcfg.json" ]]; then
 }' > AcountGroupcfg.json
     echo "已创建文件: AcountGroupcfg.json"
 fi
-#!/bin/bash
+
+# 检查关键变量是否设置
+check_variable "http-serv-port" "8082"
+check_variable "apikey"  "sk-"
+check_variable "process_waittime" "120"
+check_variable "manage_napcat_internal" "true"
+check_variable "max_attempts_qzone_autologin"  "3"
+check_variable "max_post_stack" "1"
+check_variable "at_unprived_sender" "true"
+check_variable "max_imaga_number_one_post""9"
+check_variable "text_model""qwen-plus-latest"
+check_variable "vision_model" "qwen-vl-max-latest"
+check_variable "vision_pixel_limit" "12000000"
+check_variable "vision_size_limit_mb" "9.5"
+
 
 # 尝试激活现有的虚拟环境
 if source ./venv/bin/activate 2>/dev/null; then
@@ -242,9 +224,6 @@ at_unprived_sender=true' >> "oqqwall.config"
     exit 0
 fi
 
-#!/usr/bin/env bash
-set -euo pipefail
-shopt -s extglob
 
 DB_NAME="./cache/OQQWall.db"
 
@@ -350,20 +329,6 @@ vision_size_limit_mb=$(grep 'vision_size_limit_mb' oqqwall.config | cut -d'=' -f
 
 
 DIR="./getmsgserv/rawpost/"
-
-# 检查关键变量是否设置
-check_variable "http-serv-port" "$http_serv_port"
-check_variable "apikey" "$apikey"
-check_variable "process_waittime" "$process_waittime"
-check_variable "manage_napcat_internal" "$manage_napcat_internal"
-check_variable "max_attempts_qzone_autologin" "$max_attempts_qzone_autologin"
-check_variable "max_post_stack" "$max_post_stack"
-check_variable "at_unprived_sender" "$at_unprived_sender"
-check_variable "max_imaga_number_one_post" "$max_imaga_number_one_post"
-check_variable "text_model" "$text_model"
-check_variable "vision_model" "$vision_model"
-check_variable "vision_pixel_limit" "$vision_pixel_limit"
-check_variable "vision_size_limit_mb" "$vision_size_limit_mb"
 
 # 定义 JSON 文件名
 json_file="AcountGroupcfg.json"
