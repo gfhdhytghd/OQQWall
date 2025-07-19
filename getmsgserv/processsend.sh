@@ -188,29 +188,36 @@ EOF
         # 使用 jq 提取 qqLevel
         qqLevel=$(echo "$response" | jq '.data.qqLevel')
         qzoneopenstatus=$(check_qzone_open "$senderid")
-        src_dir="cache/picture/$object"
-        work_dir="$src_dir/qrscan_workdir"
-        mkdir -p "$work_dir"
+        #草料二维码
+        src_dir="./cache/picture/$object"
+        API_URL="https://api.2dcode.biz/v1/read-qr-code"
 
-        # 1) 预处理：γ=0.65 + 二值化 85%
+        scan_result=""
         for img in "$src_dir"/*.{jpg,jpeg,png}; do
-            [[ -f $img ]] || continue
-            fname=$(basename "${img%.*}")        # 去掉扩展名
-            # 保持输出为 PNG，方便 zbarimg
-            magick "$img" -gamma 0.65 -threshold 85% "$work_dir/${fname}.png"
+
+        # 上传文件并解析返回 JSON
+        resp=$(curl -s -F "file=@${img}" "$API_URL")
+        # 有些接口返回数组，有些返回字符串；统一兼容
+        content=$(echo "$resp" | jq -r '
+            .data.contents? //
+            empty | (if type=="array" then join("\n") else . end)')
+
+        # 若成功识别
+        if [[ -n $content ]]; then
+            # 扫描多张并全部汇总：
+            scan_result+="$img: $content"$'\n'
+        fi
         done
 
-        # 2) 扫描所有处理后的图片
-        scan_result=$(zbarimg --raw -Sqrcode.enable "$work_dir"/* 2>/dev/null || true)
-        if [[ -z "$scan_result" ]]; then
-            scan_result="没有找到二维码"
-        fi
+        # 去掉最后一个换行
+        scan_result=${scan_result%$'\n'}
+        [[ -z $scan_result ]] && scan_result="没有找到二维码"
         sendmsggroup "用户的QQ等级为: $qqLevel
 对方空间对主账号$qzoneopenstatus
 二维码扫描结果：$scan_result"
         getandsendcard "$senderid"
         sendmsggroup "内部编号$object, 请发送指令"
-    ;;
+        ;;
     评论)
         json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
         #need_priv=$(echo $json_data|jq -r '.needpriv')
