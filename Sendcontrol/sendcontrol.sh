@@ -122,9 +122,10 @@ atgenerate(){
     final_at=''
     local t
     for t in "$@"; do
-        IFS='|' read -r json_data atsenderid \
-            <<< "$(timeout 10s sqlite3 -separator '|' 'cache/OQQWall.db' "SELECT AfterLM,senderid FROM preprocess WHERE tag = '$t';")"
-        need_priv=$(echo "$json_data" | jq -r '.needpriv')
+        raw_output=$(timeout 10s sqlite3 -separator '|' 'cache/OQQWall.db' \
+            "SELECT AfterLM,senderid FROM preprocess WHERE tag = '$t';" | tr -d '\n')
+        IFS='|' read -r json_data atsenderid <<< "$raw_output"
+        need_priv=$(echo "$json_data" | jq -r '.needpriv' 2>/dev/null)
         if [[ "$need_priv" == "false" ]]; then
             final_at+=", @{uin:$atsenderid,nick:,who:1}"
         fi
