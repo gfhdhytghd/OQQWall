@@ -1,0 +1,15 @@
+[
+  {
+    "delay": 1,
+    "input": {
+      "user_id": "12345",
+      "self_id": "10001",
+      "message_type": "private",
+      "raw_message": "测试"
+    },
+    "expect": {
+      "path": "/send_private_msg",
+      "query": "user_id=12345"
+    }
+  }
+]
