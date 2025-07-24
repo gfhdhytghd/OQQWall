@@ -78,6 +78,9 @@
 
 
 </div>
+## 自动化测试
+执行 `tests/run_tests.sh` 将自动启动本项目并依照 `tests/test_plan.json` 与之交互，最终给出测试结果。
+
 
 <div align="center">
 
