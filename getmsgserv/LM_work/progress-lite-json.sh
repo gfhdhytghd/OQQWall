@@ -66,7 +66,7 @@ process_json() {
 # 判断原始 rawmsg 中是否含有不规则类型（不包含 file，因为后面会转）
 check_irregular_types() {
     local rawmsg="$1"
-    jq '[.[] | select(.message != null) | .message[].type] | any(. != "text" and . != "image" and . != "video" and . != "face" and . != "file" and . != "poke")' <<<"$rawmsg"
+    jq '[.[] | select(.message != null) | .message[].type] | any(. != "text" and . != "image" and . != "video" and . != "face" and . != "file" and . != "poke" . != "json")' <<<"$rawmsg"
 }
 
 # 将所有 file（图片扩展名）调用 NapCat /get_file 转换为 image

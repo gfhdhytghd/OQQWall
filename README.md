@@ -64,8 +64,8 @@
       <sub>图片渲染与单独发送</sub>
     </td>
     <td align="center">
-      <img src="readme_Resources/Screenshot_20250529_192908_TIM.jpg" width="220"><br/>
-      <sub>表情包渲染</sub>
+      <img src="readme_Resources/c215a239525b663314d1a49a2c7d1c70.jpg" width="220"><br/>
+      <sub>很牛逼的渲染器</sub>
     </td>
     <td align="center">
       <img src="readme_Resources/Screenshot_20250608_082047_TIM.jpg" width="220"><br/>
