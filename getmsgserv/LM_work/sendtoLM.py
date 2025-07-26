@@ -10,6 +10,7 @@ from dashscope import Generation, MultiModalConversation
 from dashscope.api_entities.dashscope_response import Role
 from PIL import Image
 from PIL import ImageFile
+from PIL import UnidentifiedImageError
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import re
 import sqlite3
@@ -57,28 +58,35 @@ def clean_json_output(output_content):
             return corrected_json
 
 
+from PIL import UnidentifiedImageError
+
 def compress_image(path, max_pixels, size_limit):
     """调整图片尺寸和压缩图片大小，确保不超过像素和文件大小限制。"""
     logging.info(f"开始处理图片: {path}")
-    with Image.open(path) as img:
-        width, height = img.size
-        pixels = width * height
-        logging.info(f"图片尺寸: {width}x{height}, 总像素: {pixels}")
-        if pixels > max_pixels:
-            ratio = (max_pixels / pixels) ** 0.5
-            new_size = (int(width * ratio), int(height * ratio))
-            logging.info(f"图片超过像素限制，调整至: {new_size[0]}x{new_size[1]}")
-            img = img.resize(new_size, Image.Resampling.LANCZOS)
-            img.save(path)
-        
-        file_size = os.path.getsize(path)
-        if file_size > size_limit:
-            logging.info(f"图片大小({file_size/1024/1024:.2f}MB)超过限制({size_limit/1024/1024:.2f}MB)，开始压缩")
-            quality = 90
-            while os.path.getsize(path) > size_limit and quality > 10:
-                img.save(path, quality=quality, optimize=True)
-                logging.info(f"压缩质量: {quality}, 当前大小: {os.path.getsize(path)/1024/1024:.2f}MB")
-                quality -= 5
+    try:
+        with Image.open(path) as img:
+            width, height = img.size
+            pixels = width * height
+            logging.info(f"图片尺寸: {width}x{height}, 总像素: {pixels}")
+            if pixels > max_pixels:
+                ratio = (max_pixels / pixels) ** 0.5
+                new_size = (int(width * ratio), int(height * ratio))
+                logging.info(f"图片超过像素限制，调整至: {new_size[0]}x{new_size[1]}")
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+                img.save(path)
+            
+            file_size = os.path.getsize(path)
+            if file_size > size_limit:
+                logging.info(f"图片大小({file_size/1024/1024:.2f}MB)超过限制({size_limit/1024/1024:.2f}MB)，开始压缩")
+                quality = 90
+                while os.path.getsize(path) > size_limit and quality > 10:
+                    img.save(path, quality=quality, optimize=True)
+                    logging.info(f"压缩质量: {quality}, 当前大小: {os.path.getsize(path)/1024/1024:.2f}MB")
+                    quality -= 5
+    except UnidentifiedImageError:
+        logging.warning(f"跳过无法识别的图片文件: {path}")
+    except Exception as e:
+        logging.error(f"处理图片 {path} 时发生意外错误: {e}", exc_info=True)
 
 
 def image_safe(path, model, api_key):
@@ -251,18 +259,35 @@ def main():
     config = read_config('oqqwall.config')
     dashscope.api_key = config.get('apikey')
     data = json.load(sys.stdin)
-    # 处理输入数据并移除不需要的字段
+    # 处理输入数据并移除不需要的字段（支持按 type 定制要删除的字段）
     cleaned_messages = []
-    fields_to_remove = ['file', 'file_id', 'file_size']
 
-    for item in data.get('messages', []):
-        for field in fields_to_remove:
-            item.pop(field, None)
-        if 'message' in item and isinstance(item['message'], list):
-            for message in item['message']:
-                if 'data' in message and isinstance(message['data'], dict):
-                    for field in fields_to_remove:
-                        message['data'].pop(field, None)
+    # 针对不同 type 的差异化删除字段；键为消息的 type，值为需要从 data 中移除的字段列表
+    per_type_fields = {
+        "image": ["file", "file_id", "file_size","summary"],
+        "video": ["file", "file_id", "file_size"],
+        "audio": ["file", "file_id", "file_size"],
+        "json": [],
+        "text": [],
+        "file": ["file_id"],
+    }
+    # 默认要移除的字段（未匹配到 type 时使用）
+    default_fields = ["file", "file_id", "file_size"]
+
+    for item in data.get("messages", []):
+        # 如果顶层 item 也带了这些字段，可按默认策略移除
+        for f in default_fields:
+            item.pop(f, None)
+
+        # 处理子消息
+        if "message" in item and isinstance(item["message"], list):
+            for msg in item["message"]:
+                mtype = msg.get("type")
+                fields = per_type_fields.get(mtype, default_fields)
+                # 只在 data 内移除
+                if "data" in msg and isinstance(msg["data"], dict):
+                    for f in fields:
+                        msg["data"].pop(f, None)
         cleaned_messages.append(item)
 
     output_data = {

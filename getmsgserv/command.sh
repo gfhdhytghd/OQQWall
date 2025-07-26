@@ -100,7 +100,7 @@ case $object in
                 json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$command';")
                 need_priv=$(echo $json_data|jq -r '.needpriv')
                 groupname=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$command';")
-                orin_json=sqlite3 "cache/OQQWall.db" "SELECT rawmsg FROM sender WHERE senderid='$senderid';"
+                orin_json=$(sqlite3 "cache/OQQWall.db" "SELECT rawmsg FROM sender WHERE senderid='$senderid';")
                 if [[ $? -ne 0 || -z "$orin_json" ]]; then
                     orin_json="不存在"
                 fi

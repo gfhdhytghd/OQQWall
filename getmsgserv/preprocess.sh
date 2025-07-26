@@ -71,7 +71,7 @@ else
   max_lm_attempts=3
   success=false
   while [[ $attempt -lt $max_lm_attempts ]]; do
-    if getmsgserv/LM_work/progress-lite-json.sh "$tag" | python3 getmsgserv/LM_work/sendtoLM.py "$tag"; then
+    if getmsgserv/LM_work/progress-lite-json.sh "$tag" "$port"| python3 getmsgserv/LM_work/sendtoLM.py "$tag"; then
       success=true
       break
     else
