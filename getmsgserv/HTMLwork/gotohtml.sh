@@ -401,7 +401,7 @@ html_content=$(cat <<EOF
         .card-media img {
             width: 48px !important;
             height: 48px !important;
-            border-radius: 8px !important;
+            border-radius: 4px !important;
             margin: 0 !important;
             object-fit: cover;
             display: block;
