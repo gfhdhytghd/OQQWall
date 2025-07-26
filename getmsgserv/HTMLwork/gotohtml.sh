@@ -504,7 +504,7 @@ html_content=$(cat <<EOF
           background: #fafafa;
           border-radius: 6px;
           padding: 6px 8px;
-          margin: 0;
+          margin-bottom: 4px;
         }
         .reply .reply-meta {
           font-size: 0.85em;
