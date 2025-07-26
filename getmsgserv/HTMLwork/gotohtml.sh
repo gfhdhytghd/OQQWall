@@ -499,6 +499,24 @@ html_content=$(cat <<EOF
             margin: 0px !important;
         }
 
+        .reply {
+          border-left: 3px solid #e0e0e0;
+          background: #fafafa;
+          border-radius: 6px;
+          padding: 6px 8px;
+          margin: 0;
+        }
+        .reply .reply-meta {
+          font-size: 0.85em;
+          color: #666;
+          margin-bottom: 2px;
+        }
+        .reply .reply-body {
+          white-space: pre-wrap; /* 保留换行 */
+          color: #333;
+        }
+
+
     </style>
 </head>
 <body>
