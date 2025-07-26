@@ -83,7 +83,7 @@ message_html=$(echo "$json_data" | jq -r --arg base "$icon_dir" --arg poke "$pok
   $msg.message_id as $mid |
   ($msg.message | map(
     if .type == "text" then
-      "<div class=\"bubble\">" + .data.text + "</div>"
+      "<div class=\"bubble\">" + (.data.text | gsub("\n"; "<br>")) + "</div>"
     elif .type == "image" then
       "<img src=\"" + .data.url + "\" alt=\"Image\">"
     elif .type == "video" then
