@@ -13,16 +13,30 @@ if [[ -z "$json_data" ]]; then
     exit 1
 fi
 
-# === Generate QRs for every card jumpUrl ===
+# === Generate QRs for every card jumpUrl (with contact → QZone) ===
 echo "$json_data" | jq -r '
   .messages[]
   | .message_id as $mid
-  | .message[]?                # 每条子消息
+  | .message[]?
   | select(.type=="json")
   | .data.data
   | try fromjson catch null
   | (
-      if .view=="contact" then       .meta.contact.jumpUrl
+      if .view=="contact" then
+        (
+          # 优先从 jumpUrl 里取 uin=xxxx；不行就从 "账号：xxxx" 中提取数字
+          ( .meta.contact.jumpUrl
+            | (try capture("uin=(?<uin>[0-9]+)").uin catch null)
+          )
+          // ( .meta.contact.contact
+               | (try capture("(?<uin>[0-9]{5,})").uin catch null)
+             )
+        ) as $uin
+        | if $uin then
+            "https://mp.qzone.qq.com/u/\($uin)"
+          else
+            empty
+          end
       elif .view=="miniapp" then     (.meta.miniapp.jumpUrl // .meta.miniapp.doc_url)
       elif .view=="news"    then     .meta.news.jumpUrl
       else                            (.meta|to_entries[0].value.jumpUrl? // empty)
@@ -33,6 +47,8 @@ echo "$json_data" | jq -r '
         [[ -z "$url" ]] && continue
         qrencode "$url" -t PNG -o "$qr_dir/qr_${mid}.png" -m 0
 done
+
+
 
 userid=$(sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = '$tag';")
 nickname=$(sqlite3 'cache/OQQWall.db' "SELECT nickname FROM preprocess WHERE tag = '$tag';")
