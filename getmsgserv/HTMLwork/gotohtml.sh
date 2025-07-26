@@ -172,15 +172,13 @@ message_html=$(echo "$json_data" | jq -r --arg base "$icon_dir" --arg poke "$pok
         ($J.meta.news) as $n |
         "<a class=\"card card-news\" href=\"" + ($n.jumpUrl // "#") + "\" target=\"_blank\" rel=\"noopener noreferrer\">" +
         "<div class=\"card-header\">" +
-          "<div class=\"card-header-left\">" +
+            (if $n.preview then "<img class=\"thumb\" src=\"" + $n.preview + "\" alt=\"thumb\">" else "" end) +
+          "<div class=\"card-header-right\">" +
             "<div class=\"card-title\">" + (($n.title // "分享") | @html) + "</div>" +
           "</div>" +
-          "<div class=\"card-header-right\">" +
-            (if $n.preview then "<img class=\"thumb\" src=\"" + $n.preview + "\" alt=\"thumb\">" else "" end) +
-          "</div>" +
         "</div>" +
-        "<div class=\"card-header\">" +
-          "<div class=\"card-header-left\">" +
+        "<div class=\"card-bottom\">" +
+          "<div class=\"card-bottom-left\">" +
             (if $n.desc then "<div class=\"card-desc\">" + ($n.desc | @html) + "</div>" else "" end) +
             (if ($n.tag or $n.tagIcon) then
               "<div class=\"card-tag-row\">" +
@@ -418,7 +416,7 @@ html_content=$(cat <<EOF
         }
 
         .card-body {
-            margin-top: 6px;
+            margin-top: 0px;
         }
 
         .card-title {
@@ -431,7 +429,7 @@ html_content=$(cat <<EOF
         .card-desc {
             font-size: 12px;
             color: #666;
-            margin-top: 4px;
+            margin-top: 7px;
             line-height: 1.4;
         }
 
@@ -462,7 +460,7 @@ html_content=$(cat <<EOF
         /* === New: QQ official-like header layout === */
         .card-header {
             display: flex;
-            align-items: flex-start;
+            align-items: center;
             justify-content: space-between;
             gap: 8px;
             margin-bottom: 6px;
@@ -473,6 +471,19 @@ html_content=$(cat <<EOF
             display: flex;
             flex-direction: column;
             gap: 6px;
+        }
+        .card-bottom {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .card-bottom-left {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
         }
 
         .brand-inline {
@@ -500,9 +511,9 @@ html_content=$(cat <<EOF
             gap: 8px;
         }
 
-        .card-header-right .thumb {
-            width: 64px !important;
-            height: 64px !important;
+        .card-header .thumb {
+            width: 48px !important;
+            height: 48px !important;
             border-radius: 4px !important;
             margin: 0 !important;
             object-fit: cover;
