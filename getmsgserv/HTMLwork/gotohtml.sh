@@ -227,10 +227,7 @@ message_html=$(echo "$json_data" | jq -r \
                   "<div class=\"card-title\">" + (($c.nickname // "联系人") | @html) + "</div>" +
                   (if $c.contact then "<div class=\"card-desc\">" + ($c.contact | @html) + "</div>" else "" end) +
                   (if $c.tag or $c.tagIcon then
-                    "<div class=\"card-tag-row\">" +
-                      (if $c.tagIcon then "<img class=\"card-tag-icon\" src=\"" + $c.tagIcon + "\" alt=\"\">" else "" end) +
-                      (if $c.tag then "<span class=\"card-tag\">" + ($c.tag | @html) + "</span>" else "" end) +
-                    "</div>"
+                      (if $c.tag then "<span class=\"card-tag\">" + ($c.tag | @html) + "</span>" else "" end) 
                   else "" end) +
                 "</div>" +
                 (if $u then "<img class=\"qr-code\" src=\"file://" + $qr + "/qr_" + ($mid|tostring) + ".png\" alt=\"QR\">" else "" end) +
@@ -391,7 +388,7 @@ html_content=$(cat <<EOF
             display: block;
             background-color: #ffffff;
             border-radius: 10px;
-            padding: 7px;
+            padding: 7px 7px 4.25px 7px;
             margin-bottom: 10px;
             word-break: break-word;
             max-width: fit-content;
@@ -538,20 +535,20 @@ html_content=$(cat <<EOF
 
         .card-body {
             margin-top: 0px;
+            display: flex;
+            flex-direction: column;
         }
 
         .card-title {
             font-size: 14px;
             font-weight: 600;
             line-height: 1.3;
-            margin-bottom: 4px;
         }
 
         .card-desc {
             font-size: 12px;
             color: #666;
-            margin-top: 7px;
-            line-height: 1.4;
+            line-height: 1.2;
         }
 
         .card-tag-row {
@@ -573,9 +570,9 @@ html_content=$(cat <<EOF
 
         /* Tag 文本样式 */
         .card-tag {
+            display:block;
             font-size: 11px;
             color: #888;
-            line-height: 1;
         }
 
         /* === New: QQ official-like header layout === */
@@ -598,6 +595,7 @@ html_content=$(cat <<EOF
             align-items: flex-start;
             justify-content: space-between;
             gap: 8px;
+            padding-top: 7px;
         }
 
         .card-bottom-left {
