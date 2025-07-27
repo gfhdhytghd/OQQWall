@@ -22,9 +22,14 @@ fi
 
 # === Generate QRs for every card jumpUrl (support nested forward) ===
 echo "$json_data" | jq -r --arg DBG "$DEBUG" '
-  # 向 stderr 打印调试信息（jq 1.6 的 debug 会走 stderr）
-  def d($x): if $DBG=="1" then $x|debug else empty end;
+  # 调试
+  def d($x):
+  if $DBG=="1"
+  then (. as $in | $x | debug | $in)  # 打印 $x，但继续返回 $in（也就是原来的 .）
+  else .
+  end;
 
+  # 统一求卡片跳转 URL
   def card_url:
     . as $J |
     if ($J.view=="contact") and ($J.meta.contact?) then
@@ -33,45 +38,60 @@ echo "$json_data" | jq -r --arg DBG "$DEBUG" '
         ( $c.jumpUrl | (try capture("uin=(?<uin>[0-9]+)").uin catch null) )
         // ( $c.contact | (try capture("(?<uin>[0-9]{5,})").uin catch null) )
       ) as $uin
-      | if $uin then
-          "https://mp.qzone.qq.com/u/\($uin)"
-        else empty end
+      | if $uin then "https://mp.qzone.qq.com/u/\($uin)" else empty end
     elif ($J.view=="miniapp") and ($J.meta.miniapp?) then
       ($J.meta.miniapp.jumpUrl // $J.meta.miniapp.doc_url)
     elif ($J.view=="news") and ($J.meta.news?) then
       $J.meta.news.jumpUrl
     else
-      # 关键修复：对 meta 做兜底，且 to_entries 也 try 一下
       (($J.meta // {}) | (try to_entries catch []) | .[0]? | .value? | .jumpUrl? // empty)
     end;
 
-  def qr_from_item($mid):
-    if .type=="json" then
-      (.data.data | try fromjson catch null) as $J
+  # 输出一行： key(文件名) \t url
+  def out($k; $u): if $u then "\($k)\t\($u)" else empty end;
+
+  # 递归抽取：$key 是“当前这条消息（或其子项）用于命名文件的 id”
+  def qr_from_item($key):
+    if .type? == "json" then
+      (.data.data
+        | gsub("&#44;"; ",")
+        | gsub("\\\\/"; "/")
+        | try fromjson catch null
+      ) as $J
       | if $J then
-          (card_url) as $u
-          | d("QR mid=\($mid) url=\($u // "")")
-          | $u // empty
+          ($J | card_url) as $u
+          | d("QR key=\($key) url=\($u // "")")
+          | out($key; $u)
         else
-          d("skip mid=\($mid) invalid JSON card")
+          d("skip key=\($key) invalid JSON card")
           | empty
         end
-    elif .type=="forward" then
-      # 支持嵌套转发
-      (.data.messages // .data.content // [])[]? | .message[]? | qr_from_item($mid)
+
+    elif .type? == "forward" then
+      # 对每个被转发项，优先使用子项的 message_id 作为 key
+      (.data.messages // .data.content // [])[]? as $f
+      | ($f.message_id // $key) as $k
+      | $f.message[]? | qr_from_item($k)
+
+    elif (.message? | type) == "array" then
+      # 兼容：整条 OneBot 消息对象（没有 type，但里面有 message[]）
+      .message[]? | qr_from_item(.message_id // $key)
+
     else
       empty
     end;
 
+
+  # 顶层遍历
   .messages[]? as $msg
   | $msg.message_id as $mid
   | $msg.message[]?
   | qr_from_item($mid)
-  | "\($mid)\t\(.)"
-' | while IFS=$'\t' read -r mid url; do
-        [[ -z "$url" ]] && continue
-        log "qrencode mid=${mid} url=${url}"
-        qrencode "$url" -t PNG -o "$qr_dir/qr_${mid}.png" -m 0 || { log "qrencode failed mid=${mid}"; exit 1; }
+' | while IFS=$'\t' read -r key url; do
+  [[ -z "$url" ]] && continue
+  log "qrencode key=${key} url=${url}"
+  qrencode "$url" -t PNG -o "$qr_dir/qr_${key}.png" -m 0 \
+    || { log "qrencode failed key=${key}"; exit 1; }
 done
 
 
@@ -97,32 +117,39 @@ icon_dir="file://$(pwd)/getmsgserv/HTMLwork/source"
 poke_icon="file://$(pwd)/getmsgserv/LM_work/source/poke.png"
 
 # === Build HTML for messages (with recursive forward rendering) ===
-message_html=$(echo "$json_data" | jq -r --arg base "$icon_dir" --arg poke "$poke_icon" --arg qr "$qr_dir" --arg DBG "$DEBUG" '
+message_html=$(echo "$json_data" | jq -r \
+  --arg base "$icon_dir" --arg poke "$poke_icon" --arg qr "$qr_dir" --arg DBG "$DEBUG" '
+  # === helpers ===
   def ext: (.data.file // "" | split(".") | last | ascii_downcase);
-  def d($x): if $DBG=="1" then $x|debug else empty end;
+  def d($x):
+    if $DBG=="1"
+    then (. as $in | $x | debug | $in)  # 打印 $x，但继续返回 $in（也就是原来的 .）
+    else .
+    end;
+
   def icon_from:
     (ext) as $e |
-    if $e|test("^(doc|docx|odt)$") then "doc"
-    elif $e|test("^(apk|ipa)$") then "apk"
-    elif $e|test("^(dmg|iso)$") then "dmg"
-    elif $e|test("^(ppt|pptx|key)$") then "ppt"
-    elif $e|test("^(xls|xlsx|numbers)$") then "xls"
-    elif $e|test("^(pages)$") then "pages"
-    elif $e|test("^(ai|ps|sketch)$") then "ps"
-    elif $e|test("^(ttf|otf|woff|woff2|font)$") then "font"
-    elif $e|test("^(png|jpg|jpeg|gif|bmp|webp|image)$") then "image"
-    elif $e|test("^(mp3|wav|flac|aac|ogg|audio)$") then "audio"
-    elif $e|test("^(mp4|mkv|mov|avi|webm|video)$") then "video"
-    elif $e|test("^(zip|7z)$") then "zip"
-    elif $e|test("^(rar)$") then "rar"
-    elif $e|test("^(pkg)$") then "pkg"
-    elif $e|test("^(pdf)$") then "pdf"
-    elif $e|test("^(exe|msi)$") then "exe"
-    elif $e|test("^(sh|py|c|cpp|js|ts|go|rs|java|rb|php|lua|code)$") then "code"
-    elif $e|test("^(txt|md|note)$") then "txt"
+    if     $e|test("^(doc|docx|odt)$")               then "doc"
+    elif   $e|test("^(apk|ipa)$")                    then "apk"
+    elif   $e|test("^(dmg|iso)$")                    then "dmg"
+    elif   $e|test("^(ppt|pptx|key)$")               then "ppt"
+    elif   $e|test("^(xls|xlsx|numbers)$")           then "xls"
+    elif   $e|test("^(pages)$")                      then "pages"
+    elif   $e|test("^(ai|ps|sketch)$")               then "ps"
+    elif   $e|test("^(ttf|otf|woff2?|font)$")        then "font"
+    elif   $e|test("^(png|jpg|jpeg|gif|bmp|webp)$")  then "image"
+    elif   $e|test("^(mp3|wav|flac|aac|ogg)$")       then "audio"
+    elif   $e|test("^(mp4|mkv|mov|avi|webm)$")       then "video"
+    elif   $e|test("^(zip|7z)$")                     then "zip"
+    elif   $e|test("^(rar)$")                        then "rar"
+    elif   $e|test("^(pkg)$")                        then "pkg"
+    elif   $e|test("^(pdf)$")                        then "pdf"
+    elif   $e|test("^(exe|msi)$")                    then "exe"
+    elif   $e|test("^(sh|py|c|cpp|js|ts|go|rs|java|rb|php|lua|code)$") then "code"
+    elif   $e|test("^(txt|md|note)$")                then "txt"
     else "unknown" end;
 
-  # === JSON card url (for QR) ===
+  # 依据 JSON 卡片结构解析跳转 URL（供 QR）
   def card_url:
     . as $J |
     if ($J.view=="contact") and ($J.meta.contact?) then
@@ -131,9 +158,7 @@ message_html=$(echo "$json_data" | jq -r --arg base "$icon_dir" --arg poke "$pok
         ( $c.jumpUrl | (try capture("uin=(?<uin>[0-9]+)").uin catch null) )
         // ( $c.contact | (try capture("(?<uin>[0-9]{5,})").uin catch null) )
       ) as $uin
-      | if $uin then
-          "https://mp.qzone.qq.com/u/\($uin)"
-        else empty end
+      | if $uin then "https://mp.qzone.qq.com/u/\($uin)" else empty end
     elif ($J.view=="miniapp") and ($J.meta.miniapp?) then
       ($J.meta.miniapp.jumpUrl // $J.meta.miniapp.doc_url)
     elif ($J.view=="news") and ($J.meta.news?) then
@@ -142,13 +167,10 @@ message_html=$(echo "$json_data" | jq -r --arg base "$icon_dir" --arg poke "$pok
       (($J.meta // {}) | (try to_entries catch []) | .[0]? | .value? | .jumpUrl? // empty)
     end;
 
-  # === Render a list of msg elements ===
-  # (map(render($mid)) | join(" ") removed; use inline map(render($mid))|join(" ") )
-
-  # === Recursive renderer for a single msg element ===
+  # === renderer ===
   def render($mid):
     if .type == "text" then
-      "<div class=\"bubble\">" + (.data.text | gsub("\n"; "<br>")) + "<\/div>"
+      "<div class=\"bubble\">" + (.data.text | gsub("\n"; "<br>")) + "</div>"
 
     elif .type == "image" then
       "<img src=\"" + .data.url + "\" alt=\"Image\">"
@@ -163,109 +185,145 @@ message_html=$(echo "$json_data" | jq -r --arg base "$icon_dir" --arg poke "$pok
 
     elif .type == "file" then
       "<div class=\"file-block\">" +
-      "<img class=\"file-icon\" src=\"" + $base + "/" + (icon_from) + ".png\" alt=\"File Icon\">" +
-      "<div class=\"file-info\">" +
-      "<a class=\"file-name\" href=\"file://" + (.data.file | @uri) + "\" download>" +
-      (.data.file // "未命名文件") +
-      "</a>" +
-      (if .data.file_size then
-        "<div class=\"file-meta\">" +
-        (if (.data.file_size | tonumber) > 1048576 then
-          ((.data.file_size | tonumber / 1048576) | tostring) + " MB"
-        elif (.data.file_size | tonumber) > 1024 then
-          ((.data.file_size | tonumber / 1024) | tostring) + " KB"
-        else
-          (.data.file_size | tostring) + " B"
-        end) + "</div>"
-      else "" end) +
-      "</div></div>"
+        "<img class=\"file-icon\" src=\"" + $base + "/" + (icon_from) + ".png\" alt=\"File Icon\">" +
+        "<div class=\"file-info\">" +
+          "<a class=\"file-name\" href=\"file://" + (.data.file | @uri) + "\" download>" +
+            (.data.file // "未命名文件") +
+          "</a>" +
+          (if .data.file_size then
+            "<div class=\"file-meta\">" +
+              (if (.data.file_size | tonumber) > 1048576 then
+                 ((.data.file_size | tonumber / 1048576) | tostring) + " MB"
+               elif (.data.file_size | tonumber) > 1024 then
+                 ((.data.file_size | tonumber / 1024) | tostring) + " KB"
+               else
+                 (.data.file_size | tostring) + " B"
+               end) +
+            "</div>"
+          else "" end) +
+        "</div>" +
+      "</div>"
 
     elif .type == "json" then
-      (.data.data | try fromjson catch null) as $J
+      # 先规范化并解析卡片 JSON
+      (.data.data
+        | gsub("&#44;"; ",")
+        | gsub("\\\\/"; "/")
+        | try fromjson catch null
+      ) as $J
       | if $J == null then
-          ( d("render json card: invalid JSON at mid=\($mid)") | "" )
-        elif ($J.view == "contact") and ($J.meta.contact?) then
-        ($J.meta.contact) as $c |
-        "<a class=\"card card-contact\" href=\"" + ($c.jumpUrl // "#") + "\" target=\"_blank\" rel=\"noopener noreferrer\">" +
-         "<div class=\"card-media\">" +
-           "<img src=\"" + ($c.avatar // "") + "\" alt=\"avatar\">" +
-         "</div>" +
-         "<div class=\"card-body\">" +
-           "<div class=\"card-title\">" + (($c.nickname // "联系人") | @html) + "</div>" +
-           (if $c.contact then "<div class=\"card-desc\">" + ($c.contact | @html) + "</div>" else "" end) +
-         "</div>" +
-           "<img class=\"qr-code\" src=\"file://" + $qr + "/qr_" + ($mid|tostring) + ".png\" alt=\"QR\">" +
-       "</a>"
-      elif ($J.view == "miniapp") and ($J.meta.miniapp?) then
-        ($J.meta.miniapp) as $m |
-        "<a class=\"card card-vertical card-miniapp\" href=\"" + (($m.jumpUrl // $m.doc_url // "#")) + "\" target=\"_blank\" rel=\"noopener noreferrer\">" +
-        "<div class=\"card-header\">" +
-          "<div class=\"card-header-left\">" +
-            (if $m.source or $m.sourcelogo then
-              "<div class=\"brand-inline\">" +
-                (if $m.sourcelogo then "<img class=\"brand-icon\" src=\"" + $m.sourcelogo + "\" alt=\"\">" else "" end) +
-                (if $m.source then "<span class=\"brand-text\">" + ($m.source | @html) + "</span>" else "" end) +
-              "</div>"
-            else "" end) +
-            "<div class=\"card-title\">" + (($m.title // "小程序卡片") | @html) + "</div>" +
-          "</div>" +
-          "<img class=\"qr-code\" src=\"file://" + $qr + "/qr_" + ($mid|tostring) + ".png\" alt=\"QR\">" +
-        "</div>" +
-        (if $m.preview then "<div class=\"card-preview\"><img src=\"" + $m.preview + "\" alt=\"preview\"></div>" else "" end) +
-        (if ($m.tag or $m.tagIcon) then
-          "<div class=\"card-tag-row\">" +
-          (if $m.tagIcon then "<img class=\"card-tag-icon\" src=\"" + $m.tagIcon + "\" alt=\"\">" else "" end) +
-          (if $m.tag then "<span class=\"card-tag\">" + ($m.tag | @html) + "</span>" else "" end) +
-          "</div>" else "" end) +
-        "</a>"
-      elif ($J.view == "news") and ($J.meta.news?) then
-        ($J.meta.news) as $n |
-        "<a class=\"card card-news\" href=\"" + ($n.jumpUrl // "#") + "\" target=\"_blank\" rel=\"noopener noreferrer\">" +
-        "<div class=\"card-header\">" +
-            (if $n.preview then "<img class=\"thumb\" src=\"" + $n.preview + "\" alt=\"thumb\">" else "" end) +
-          "<div class=\"card-header-right\">" +
-            "<div class=\"card-title\">" + (($n.title // "分享") | @html) + "</div>" +
-          "</div>" +
-        "</div>" +
-        "<div class=\"card-bottom\">" +
-          "<div class=\"card-bottom-left\">" +
-            (if $n.desc then "<div class=\"card-desc\">" + ($n.desc | @html) + "</div>" else "" end) +
-            (if ($n.tag or $n.tagIcon) then
-              "<div class=\"card-tag-row\">" +
-                (if $n.tagIcon then "<img class=\"card-tag-icon\" src=\"" + $n.tagIcon + "\" alt=\"\">" else "" end) +
-                (if $n.tag then "<span class=\"card-tag\">" + ($n.tag | @html) + "</span>" else "" end) +
-              "</div>"
-            else "" end) +
-          "</div>" +
-          "<img class=\"qr-code\" src=\"file://" + $qr + "/qr_" + ($mid|tostring) + ".png\" alt=\"QR\">" +
-        "</div>" +
-        "</a>"
-      else
-        ($J.meta // {}) as $meta
-        | ($meta | to_entries | .[0]? | .value? // {}) as $g
-        | "<div class=\"card card-vertical\">" +
-          (if $g.preview then "<div class=\"card-preview\"><img src=\"" + $g.preview + "\" alt=\"preview\"></div>" else "" end) +
-          "<div class=\"card-body\">" +
-          "<div class=\"card-title\">" + (($g.title // $J.prompt // ($J.view // "卡片")) | @html) + "</div>" +
-          (if $g.desc then "<div class=\"card-desc\">" + ($g.desc | @html) + "</div>" else "" end) +
-          "<div class=\"qr-wrap\"><img class=\"qr-code\" src=\"file://" + $qr + "/qr_" + ($mid|tostring) + ".png\" alt=\"QR\"></div>" +
-          "</div></div>"
-      end
+          ""
+        else
+          ($J|card_url) as $u
+          | d({render:"key", val:$mid})
+          | d({render:"url", val:($u // "")})
+          | if ($J.view == "contact") and ($J.meta.contact?) then
+              ($J.meta.contact) as $c |
+              "<a class=\"card card-contact\" href=\"" + ($c.jumpUrl // "#") + "\" target=\"_blank\" rel=\"noopener noreferrer\">" +
+                "<div class=\"card-media\">" +
+                  "<img src=\"" + ($c.avatar // "") + "\" alt=\"avatar\">" +
+                "</div>" +
+                "<div class=\"card-body\">" +
+                  "<div class=\"card-title\">" + (($c.nickname // "联系人") | @html) + "</div>" +
+                  (if $c.contact then "<div class=\"card-desc\">" + ($c.contact | @html) + "</div>" else "" end) +
+                  (if $c.tag or $c.tagIcon then
+                    "<div class=\"card-tag-row\">" +
+                      (if $c.tagIcon then "<img class=\"card-tag-icon\" src=\"" + $c.tagIcon + "\" alt=\"\">" else "" end) +
+                      (if $c.tag then "<span class=\"card-tag\">" + ($c.tag | @html) + "</span>" else "" end) +
+                    "</div>"
+                  else "" end) +
+                "</div>" +
+                (if $u then "<img class=\"qr-code\" src=\"file://" + $qr + "/qr_" + ($mid|tostring) + ".png\" alt=\"QR\">" else "" end) +
+              "</a>"
+
+            elif ($J.view == "miniapp") and ($J.meta.miniapp?) then
+              ($J.meta.miniapp) as $m |
+              "<a class=\"card card-vertical card-miniapp\" href=\"" + (($m.jumpUrl // $m.doc_url // "#")) + "\" target=\"_blank\" rel=\"noopener noreferrer\">" +
+                "<div class=\"card-header\">" +
+                  "<div class=\"card-header-left\">" +
+                    (if $m.source or $m.sourcelogo then
+                      "<div class=\"brand-inline\">" +
+                        (if $m.sourcelogo then "<img class=\"brand-icon\" src=\"" + $m.sourcelogo + "\" alt=\"\">" else "" end) +
+                        (if $m.source then "<span class=\"brand-text\">" + ($m.source | @html) + "</span>" else "" end) +
+                      "</div>"
+                    else "" end) +
+                    "<div class=\"card-title\">" + (($m.title // "小程序卡片") | @html) + "</div>" +
+                  "</div>" +
+                  (if $u then "<img class=\"qr-code\" src=\"file://" + $qr + "/qr_" + ($mid|tostring) + ".png\" alt=\"QR\">" else "" end) +
+                "</div>" +
+                (if $m.preview then "<div class=\"card-preview\"><img src=\"" + $m.preview + "\" alt=\"preview\"></div>" else "" end) +
+                (if ($m.tag or $m.tagIcon) then
+                  "<div class=\"card-tag-row\">" +
+                    (if $m.tagIcon then "<img class=\"card-tag-icon\" src=\"" + $m.tagIcon + "\" alt=\"\">" else "" end) +
+                    (if $m.tag then "<span class=\"card-tag\">" + ($m.tag | @html) + "</span>" else "" end) +
+                  "</div>"
+                else "" end) +
+              "</a>"
+
+            elif ($J.view == "news") and ($J.meta.news?) then
+              ($J.meta.news) as $n |
+              "<a class=\"card card-news\" href=\"" + ($n.jumpUrl // "#") + "\" target=\"_blank\" rel=\"noopener noreferrer\">" +
+                "<div class=\"card-header\">" +
+                  (if $n.preview then "<img class=\"thumb\" src=\"" + $n.preview + "\" alt=\"thumb\">" else "" end) +
+                  "<div class=\"card-header-right\">" +
+                    "<div class=\"card-title\">" + (($n.title // "分享") | @html) + "</div>" +
+                  "</div>" +
+                  (if $u then "<img class=\"qr-code\" src=\"file://" + $qr + "/qr_" + ($mid|tostring) + ".png\" alt=\"QR\">" else "" end) +
+                "</div>" +
+                "<div class=\"card-bottom\">" +
+                  "<div class=\"card-bottom-left\">" +
+                    (if $n.desc then "<div class=\"card-desc\">" + ($n.desc | @html) + "</div>" else "" end) +
+                    (if ($n.tag or $n.tagIcon) then
+                      "<div class=\"card-tag-row\">" +
+                        (if $n.tagIcon then "<img class=\"card-tag-icon\" src=\"" + $n.tagIcon + "\" alt=\"\">" else "" end) +
+                        (if $n.tag then "<span class=\"card-tag\">" + ($n.tag | @html) + "</span>" else "" end) +
+                      "</div>"
+                    else "" end) +
+                  "</div>" +
+                "</div>" +
+              "</a>"
+
+            else
+              ($J.meta // {}) as $meta
+              | ($meta | to_entries | .[0]? | .value? // {}) as $g
+              | "<div class=\"card card-vertical\">" +
+                  (if $g.preview then "<div class=\"card-preview\"><img src=\"" + $g.preview + "\" alt=\"preview\"></div>" else "" end) +
+                  "<div class=\"card-body\">" +
+                    "<div class=\"card-title\">" + (($g.title // $J.prompt // ($J.view // "卡片")) | @html) + "</div>" +
+                    (if $g.desc then "<div class=\"card-desc\">" + ($g.desc | @html) + "</div>" else "" end) +
+                    (if $u then "<div class=\"qr-wrap\"><img class=\"qr-code\" src=\"file://" + $qr + "/qr_" + ($mid|tostring) + ".png\" alt=\"QR\"></div>" else "" end) +
+                  "</div>" +
+                "</div>"
+            end
+        end
 
     elif .type == "forward" then
-      # 支持两种结构：.data.messages（群转发）与 .data.content（私聊转发）
+      # 支持 .data.messages（群转发）与 .data.content（私聊转发）
       (.data.messages // .data.content // []) as $list |
       "<div class=\"forward-title\">合并转发聊天记录</div>" +
       "<div class=\"forward\">" +
-        ( $list | map( "<div class=\"forward-item\">" + ( .message | map(render($mid)) | join(" ") ) + "</div>" ) | join("") ) +
+        ( $list
+          | map(
+              . as $one
+              | ($one.message_id // $mid) as $kid
+              | "<div class=\"forward-item\">" +
+                ( $one.message | map( render($kid) ) | join(" ") ) +
+                "</div>"
+            )
+          | join("")
+        ) +
       "</div>"
 
-    else "" end;
+    else "" end
+  ;
 
-  .messages[] as $msg |
-  $msg.message_id as $mid |
-  ($msg.message | map(render($mid)) | join(" "))
+
+  # 顶层展开
+  .messages[] as $msg
+  | $msg.message_id as $mid
+  | ($msg.message | map(render($mid)) | join(" "))
 ')
+
 
 
 # === Build final HTML ===
@@ -437,7 +495,7 @@ html_content=$(cat <<EOF
             color: #000000;
             box-sizing: border-box;
             width: fit-content;
-            max-width: 70%;
+            max-width: 276px;
         }
 
         .card:hover {
