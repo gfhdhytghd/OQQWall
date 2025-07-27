@@ -298,7 +298,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             # 1) 普通 @消息 处理
             if (
                 group_id in mangroupid_list
-                and sender.get('role') == 'admin'
+                and sender.get('role') in ('admin', 'owner')
                 and raw_message.startswith(f"[CQ:at,qq={self_id}")
             ):
                 print("serv:有指令消息")
@@ -313,7 +313,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             # 2) 带有 [CQ:reply,id=XXX] 并 @机器人 的回复消息
             if (
                 group_id in mangroupid_list
-                and sender.get('role') == 'admin'
+                and sender.get('role') in ('admin', 'owner')
                 and raw_message.startswith("[CQ:reply,id=")
                 and f"[CQ:at,qq={self_id}]" in raw_message
             ):
