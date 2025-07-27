@@ -1,9 +1,14 @@
 #!/bin/bash
 set -euo pipefail
+# 放在 set -euo pipefail 之后
+DEBUG=${DEBUG:-0}
+log(){ if [[ "$DEBUG" == "1" ]]; then echo "[DEBUG] $*" >&2; fi }
+[[ "$DEBUG" == "1" ]] && set -x
 
 tag="$1"
 qr_dir="$(pwd)/cache/qrcode/${tag}"
 mkdir -p "$qr_dir"
+
 
 
 # === DB Query ===
@@ -12,40 +17,61 @@ if [[ -z "$json_data" ]]; then
     echo "No data found for tag $tag"
     exit 1
 fi
+[[ "$DEBUG" == "1" ]] && printf '%s\n' "$json_data" > "./cache/debug_${tag}_AfterLM.json" && log "Saved ./cache/debug_${tag}_AfterLM.json"
 
-# === Generate QRs for every card jumpUrl (with contact → QZone) ===
-echo "$json_data" | jq -r '
-  .messages[]
-  | .message_id as $mid
-  | .message[]?
-  | select(.type=="json")
-  | .data.data
-  | try fromjson catch null
-  | (
-      if .view=="contact" then
-        (
-          # 优先从 jumpUrl 里取 uin=xxxx；不行就从 "账号：xxxx" 中提取数字
-          ( .meta.contact.jumpUrl
-            | (try capture("uin=(?<uin>[0-9]+)").uin catch null)
-          )
-          // ( .meta.contact.contact
-               | (try capture("(?<uin>[0-9]{5,})").uin catch null)
-             )
-        ) as $uin
-        | if $uin then
-            "https://mp.qzone.qq.com/u/\($uin)"
-          else
-            empty
-          end
-      elif .view=="miniapp" then     (.meta.miniapp.jumpUrl // .meta.miniapp.doc_url)
-      elif .view=="news"    then     .meta.news.jumpUrl
-      else                            (.meta|to_entries[0].value.jumpUrl? // empty)
-      end
-    ) // empty
+
+# === Generate QRs for every card jumpUrl (support nested forward) ===
+echo "$json_data" | jq -r --arg DBG "$DEBUG" '
+  # 向 stderr 打印调试信息（jq 1.6 的 debug 会走 stderr）
+  def d($x): if $DBG=="1" then $x|debug else empty end;
+
+  def card_url:
+    . as $J |
+    if ($J.view=="contact") and ($J.meta.contact?) then
+      ($J.meta.contact) as $c |
+      (
+        ( $c.jumpUrl | (try capture("uin=(?<uin>[0-9]+)").uin catch null) )
+        // ( $c.contact | (try capture("(?<uin>[0-9]{5,})").uin catch null) )
+      ) as $uin
+      | if $uin then
+          "https://mp.qzone.qq.com/u/\($uin)"
+        else empty end
+    elif ($J.view=="miniapp") and ($J.meta.miniapp?) then
+      ($J.meta.miniapp.jumpUrl // $J.meta.miniapp.doc_url)
+    elif ($J.view=="news") and ($J.meta.news?) then
+      $J.meta.news.jumpUrl
+    else
+      # 关键修复：对 meta 做兜底，且 to_entries 也 try 一下
+      (($J.meta // {}) | (try to_entries catch []) | .[0]? | .value? | .jumpUrl? // empty)
+    end;
+
+  def qr_from_item($mid):
+    if .type=="json" then
+      (.data.data | try fromjson catch null) as $J
+      | if $J then
+          (card_url) as $u
+          | d("QR mid=\($mid) url=\($u // "")")
+          | $u // empty
+        else
+          d("skip mid=\($mid) invalid JSON card")
+          | empty
+        end
+    elif .type=="forward" then
+      # 支持嵌套转发
+      (.data.messages // .data.content // [])[]? | .message[]? | qr_from_item($mid)
+    else
+      empty
+    end;
+
+  .messages[]? as $msg
+  | $msg.message_id as $mid
+  | $msg.message[]?
+  | qr_from_item($mid)
   | "\($mid)\t\(.)"
 ' | while IFS=$'\t' read -r mid url; do
         [[ -z "$url" ]] && continue
-        qrencode "$url" -t PNG -o "$qr_dir/qr_${mid}.png" -m 0
+        log "qrencode mid=${mid} url=${url}"
+        qrencode "$url" -t PNG -o "$qr_dir/qr_${mid}.png" -m 0 || { log "qrencode failed mid=${mid}"; exit 1; }
 done
 
 
@@ -70,9 +96,10 @@ fi
 icon_dir="file://$(pwd)/getmsgserv/HTMLwork/source"
 poke_icon="file://$(pwd)/getmsgserv/LM_work/source/poke.png"
 
-# === Build HTML for messages ===
-message_html=$(echo "$json_data" | jq -r --arg base "$icon_dir" --arg poke "$poke_icon" --arg qr "$qr_dir" '
+# === Build HTML for messages (with recursive forward rendering) ===
+message_html=$(echo "$json_data" | jq -r --arg base "$icon_dir" --arg poke "$poke_icon" --arg qr "$qr_dir" --arg DBG "$DEBUG" '
   def ext: (.data.file // "" | split(".") | last | ascii_downcase);
+  def d($x): if $DBG=="1" then $x|debug else empty end;
   def icon_from:
     (ext) as $e |
     if $e|test("^(doc|docx|odt)$") then "doc"
@@ -95,19 +122,45 @@ message_html=$(echo "$json_data" | jq -r --arg base "$icon_dir" --arg poke "$pok
     elif $e|test("^(txt|md|note)$") then "txt"
     else "unknown" end;
 
-  .messages[] as $msg |
-  $msg.message_id as $mid |
-  ($msg.message | map(
+  # === JSON card url (for QR) ===
+  def card_url:
+    . as $J |
+    if ($J.view=="contact") and ($J.meta.contact?) then
+      ($J.meta.contact) as $c |
+      (
+        ( $c.jumpUrl | (try capture("uin=(?<uin>[0-9]+)").uin catch null) )
+        // ( $c.contact | (try capture("(?<uin>[0-9]{5,})").uin catch null) )
+      ) as $uin
+      | if $uin then
+          "https://mp.qzone.qq.com/u/\($uin)"
+        else empty end
+    elif ($J.view=="miniapp") and ($J.meta.miniapp?) then
+      ($J.meta.miniapp.jumpUrl // $J.meta.miniapp.doc_url)
+    elif ($J.view=="news") and ($J.meta.news?) then
+      $J.meta.news.jumpUrl
+    else
+      (($J.meta // {}) | (try to_entries catch []) | .[0]? | .value? | .jumpUrl? // empty)
+    end;
+
+  # === Render a list of msg elements ===
+  # (map(render($mid)) | join(" ") removed; use inline map(render($mid))|join(" ") )
+
+  # === Recursive renderer for a single msg element ===
+  def render($mid):
     if .type == "text" then
-      "<div class=\"bubble\">" + (.data.text | gsub("\n"; "<br>")) + "</div>"
+      "<div class=\"bubble\">" + (.data.text | gsub("\n"; "<br>")) + "<\/div>"
+
     elif .type == "image" then
       "<img src=\"" + .data.url + "\" alt=\"Image\">"
+
     elif .type == "video" then
       "<div class=\"bubble\"><video controls autoplay muted><source src=\"" +
       (if .data.file then "file://" + .data.file else .data.url end) +
       "\" type=\"video/mp4\">Your browser does not support the video tag.</video></div>"
+
     elif .type == "poke" then
       "<img class=\"poke-icon\" src=\"" + $poke + "\" alt=\"Poke\">"
+
     elif .type == "file" then
       "<div class=\"file-block\">" +
       "<img class=\"file-icon\" src=\"" + $base + "/" + (icon_from) + ".png\" alt=\"File Icon\">" +
@@ -126,23 +179,20 @@ message_html=$(echo "$json_data" | jq -r --arg base "$icon_dir" --arg poke "$pok
         end) + "</div>"
       else "" end) +
       "</div></div>"
+
     elif .type == "json" then
-      (.data.data | try fromjson catch null) as $J |
-      if $J == null then ""
-      elif ($J.view == "contact") and ($J.meta.contact?) then
+      (.data.data | try fromjson catch null) as $J
+      | if $J == null then
+          ( d("render json card: invalid JSON at mid=\($mid)") | "" )
+        elif ($J.view == "contact") and ($J.meta.contact?) then
         ($J.meta.contact) as $c |
         "<a class=\"card card-contact\" href=\"" + ($c.jumpUrl // "#") + "\" target=\"_blank\" rel=\"noopener noreferrer\">" +
          "<div class=\"card-media\">" +
            "<img src=\"" + ($c.avatar // "") + "\" alt=\"avatar\">" +
          "</div>" +
          "<div class=\"card-body\">" +
-           "<div class=\"card-title\">" +
-             (($c.nickname // "联系人") | @html) +
-           "</div>" +
-           (if $c.contact
-            then "<div class=\"card-desc\">" + ($c.contact | @html) + "</div>"
-             else ""
-           end) +
+           "<div class=\"card-title\">" + (($c.nickname // "联系人") | @html) + "</div>" +
+           (if $c.contact then "<div class=\"card-desc\">" + ($c.contact | @html) + "</div>" else "" end) +
          "</div>" +
            "<img class=\"qr-code\" src=\"file://" + $qr + "/qr_" + ($mid|tostring) + ".png\" alt=\"QR\">" +
        "</a>"
@@ -191,18 +241,31 @@ message_html=$(echo "$json_data" | jq -r --arg base "$icon_dir" --arg poke "$pok
         "</div>" +
         "</a>"
       else
-        ($J.meta // {}) as $meta |
-        ($meta | to_entries[0].value // {}) as $g |
-        "<div class=\"card card-vertical\">" +
-        (if $g.preview then "<div class=\"card-preview\"><img src=\"" + $g.preview + "\" alt=\"preview\"></div>" else "" end) +
-        "<div class=\"card-body\">" +
-        "<div class=\"card-title\">" + (($g.title // $J.prompt // ($J.view // "卡片")) | @html) + "</div>" +
-        (if $g.desc then "<div class=\"card-desc\">" + ($g.desc | @html) + "</div>" else "" end) +
-        "<div class=\"qr-wrap\"><img class=\"qr-code\" src=\"file://" + $qr + "/qr_" + ($mid|tostring) + ".png\" alt=\"QR\"></div>" +
-        "</div></div>"
+        ($J.meta // {}) as $meta
+        | ($meta | to_entries | .[0]? | .value? // {}) as $g
+        | "<div class=\"card card-vertical\">" +
+          (if $g.preview then "<div class=\"card-preview\"><img src=\"" + $g.preview + "\" alt=\"preview\"></div>" else "" end) +
+          "<div class=\"card-body\">" +
+          "<div class=\"card-title\">" + (($g.title // $J.prompt // ($J.view // "卡片")) | @html) + "</div>" +
+          (if $g.desc then "<div class=\"card-desc\">" + ($g.desc | @html) + "</div>" else "" end) +
+          "<div class=\"qr-wrap\"><img class=\"qr-code\" src=\"file://" + $qr + "/qr_" + ($mid|tostring) + ".png\" alt=\"QR\"></div>" +
+          "</div></div>"
       end
-    else "" end
-  ) | join(" "))')
+
+    elif .type == "forward" then
+      # 支持两种结构：.data.messages（群转发）与 .data.content（私聊转发）
+      (.data.messages // .data.content // []) as $list |
+      "<div class=\"forward-title\">合并转发聊天记录</div>" +
+      "<div class=\"forward\">" +
+        ( $list | map( "<div class=\"forward-item\">" + ( .message | map(render($mid)) | join(" ") ) + "</div>" ) | join("") ) +
+      "</div>"
+
+    else "" end;
+
+  .messages[] as $msg |
+  $msg.message_id as $mid |
+  ($msg.message | map(render($mid)) | join(" "))
+')
 
 
 # === Build final HTML ===
@@ -543,6 +606,25 @@ html_content=$(cat <<EOF
           color: #333;
         }
 
+        /* === Forward (合并转发) Apple Mail 引用风格 === */
+        .forward {
+          display: inline-block;
+          border-left: 3px solid #71a1cc;
+          padding-left: 10px;
+          padding-bottom: 0px;
+          margin: 0 0 10px 0;
+          border-radius: 0px;
+        }
+        .forward-title {
+          font-size: 12px;
+          color: #666;
+          margin: 0px 0 4px 0;
+        }
+        .forward-item {
+          margin: 6px 0 6px 4px;
+        }
+        /* 嵌套转发时逐级缩进更明显 */
+        .forward .forward { margin-left: 6px; }
 
     </style>
 </head>
@@ -587,4 +669,3 @@ EOF
 
 # === Output ===
 echo "$html_content"
-

@@ -121,7 +121,7 @@ process_json() {
                 .
               end
             )
-            | .message |= map(select(.type == "text" or .type == "image" or .type == "video" or .type == "file" or .type == "poke" or .type == "json"))
+            | .message |= map(select(.type == "text" or .type == "image" or .type == "video" or .type == "file" or .type == "poke" or .type == "json" or .type == "forward"))
             | .message |= if (length > 0 and all(.type=="text")) then
                             [{data: {text: (map(.data.text) | join(""))}, type: "text"}]
                           else . end
@@ -148,110 +148,206 @@ check_irregular_types() {
                     and . != "file"
                     and . != "poke"
                     and . != "json"
+                    and . != "forward"
                     and . != "reply")
         | if . then "true" else "false" end )' \
   <<<"$rawmsg" 2>/dev/null || echo "false"
 }
 
+# 展开合并转发：用 /get_forward_msg 的结果把 forward 段替换为若干普通段
+# 展开合并转发：拉取 /get_forward_msg，把 forward 段的 .data 替换为接口返回的 .data
+# 递归/迭代充实 forward：保持 type=forward，只替换 .data（并保留原 id）
+resolve_forward_messages() {
+  local json="$1"
+  local updated="$json"
+  local MAX_DEPTH=4
+
+  # 已处理过的 id 集合，避免重复请求
+  declare -A seen=()
+
+  for ((depth=1; depth<=MAX_DEPTH; depth++)); do
+    # 抓取当前 JSON 中所有深度的 forward id（字符串化去重）
+    mapfile -t ids < <(jq -r '
+      (if type=="array" then . else [.] end)
+      | .. | objects
+      | select(.type? == "forward" and (.data.id?))
+      | (.data.id | tostring)
+    ' <<<"$updated" | sort -u)
+
+    # 统计这一轮是否有新增替换
+    local replaced_any=false
+
+    for fid in "${ids[@]}"; do
+      # 跳过已处理 id
+      [[ -n "${seen[$fid]+x}" ]] && continue
+
+      # 拉取 forward 详情
+      local resp payload
+      resp="$(curl -s "http://$napcat_api/get_forward_msg?message_id=${fid}")" || true
+      [[ -z "$resp" ]] && continue
+      [[ "$(jq -r '.status // empty' <<<"$resp")" != "ok" ]] && continue
+
+      payload="$(jq '.data' <<<"$resp")"
+      [[ -z "$payload" ]] && continue
+
+      # 深度替换：在整棵树中把匹配该 fid 的 .data 替换为 payload，并保留原始 id
+      updated="$(jq --arg fid "$fid" --argjson payload "$payload" '
+        def fill:
+          if type=="object" then
+            ( if (.type?=="forward" and (.data.id|tostring)==$fid)
+              then (.data.id) as $old | .data = ($payload + {id:$old})
+              else .
+              end )
+            | with_entries(.value |= fill)
+          elif type=="array" then
+            map(fill)
+          else
+            .
+          end;
+        (if type=="array" then . else [.] end) | fill
+      ' <<<"$updated")"
+
+      seen["$fid"]=1
+      replaced_any=true
+    done
+
+    # 这一层没有新替换就提前结束
+    [[ "$replaced_any" == "true" ]] || break
+  done
+
+  echo "$updated"
+}
 
 # 将所有 file（图片扩展名）调用 NapCat /get_file 转换为 image
+# 将所有 file（图片扩展名）调用 NapCat /get_file 转换为 image —— 递归处理（含 forward 内）
 resolve_file_urls() {
-    local json="$1"
-    local updated_json="$json"
+  local json="$1"
+  local updated_json="$json"
 
-    while read -r file_item; do
-        file_id=$(jq -r '.data.file_id // empty' <<<"$file_item")
-        file_name=$(jq -r '.data.file    // empty' <<<"$file_item")
+  # 去重处理过的 file_id，避免重复请求
+  declare -A seen_ids=()
 
-        [[ -z "$file_id" ]] && continue
-        if [[ "$file_name" =~ \.(png|jpe?g|gif|bmp|webp)$ ]]; then
-            real_path=$(curl -s "http://$napcat_api/get_file?file_id=$file_id" | jq -r '.data.url // empty')
-            [[ -z "$real_path" ]] && continue
+  # 递归找出所有含 file_id 的 file 段
+  while read -r file_item; do
+    file_id=$(jq -r '.data.file_id // empty' <<<"$file_item")
+    [[ -z "$file_id" ]] && continue
+    [[ -n "${seen_ids[$file_id]+x}" ]] && continue
 
-            # 构造 file:// URL
-            if [[ "$real_path" = /* ]]; then
-                new_url="file://$real_path"
-            else
-                new_url="file://$pwd_path/$real_path"
-            fi
+    # 请求 napcat 获取真实路径与文件名
+    resp="$(curl -s "http://$napcat_api/get_file?file_id=$file_id")" || true
+    [[ -z "$resp" ]] && continue
+    [[ "$(jq -r '.status // empty' <<<"$resp")" != "ok" ]] && continue
 
-            # 替换 JSON：file -> image，加 url/sub_type
-            updated_json=$(jq --arg id "$file_id" --arg url "$new_url" '
-              map(
-                if .message then
-                  .message |= map(
-                    if .type=="file" and (.data.file_id // "")==$id then
-                      .type = "image" |
-                      .data.url = $url |
-                      .data.sub_type = 0
-                    else
-                      .
-                    end
-                  )
-                else
-                  .
-                end
-              )' <<<"$updated_json")
-        fi
-    done < <(jq -c '.[] | select(.message!=null) | .message[] | select(.type=="file")' <<<"$json")
+    real_path="$(jq -r '.data.url // empty' <<<"$resp")"
+    file_name_api="$(jq -r '.data.file_name // empty' <<<"$resp")"
+    [[ -z "$real_path" ]] && continue
 
-    echo "$updated_json"
+    # 判断是否图片扩展名（优先用 API 的 file_name）
+    name_to_check="${file_name_api}"
+    [[ -z "$name_to_check" ]] && name_to_check="$(jq -r '.data.file // empty' <<<"$file_item")"
+
+    if [[ ! "$name_to_check" =~ \.(png|jpe?g|gif|bmp|webp)$ ]]; then
+      # 非图片则跳过转换
+      seen_ids["$file_id"]=1
+      continue
+    fi
+
+    # 构造 file:// URL
+    if [[ "$real_path" = /* ]]; then
+      new_url="file://$real_path"
+    else
+      new_url="file://$pwd_path/$real_path"
+    fi
+
+    # 递归替换：任何深度的 file 节点，只要 file_id 匹配就改成 image
+    updated_json=$(
+      jq --arg id "$file_id" --arg url "$new_url" '
+        def upd:
+          if type=="object" then
+            ( if (.type?=="file" and (.data.file_id // "")==$id)
+              then .type="image" | .data.url=$url | .data.sub_type=(.data.sub_type // 0)
+              else .
+              end )
+            | with_entries(.value |= upd)
+          elif type=="array" then
+            map(upd)
+          else . end;
+        (if type=="array" then . else [.] end) | upd
+      ' <<<"$updated_json"
+    )
+
+    seen_ids["$file_id"]=1
+  done < <(jq -c '
+      (if type=="array" then . else [.] end)
+      | .. | objects
+      | select(.type?=="file" and (.data.file_id?))
+    ' <<<"$updated_json")
+
+  echo "$updated_json"
 }
 
 # 下载/复制 image：对 file:// 路径，如果是容器内部 (/app 开头)，使用 docker cp；否则常规 cp 或 curl
+# 下载/复制 image：递归处理任意深度（含 forward 内）
 download_and_replace_images() {
   local processed_json="$1"
   local next_file_index=1
   local updated_json="$processed_json"
 
+  # 去重已下载过的 URL，避免重复下载
+  declare -A seen_urls=()
+
+  # 递归枚举所有 image 段
   while read -r image_item; do
     url=$(jq -r '.data.url // empty' <<<"$image_item")
     [[ -z "$url" ]] && continue
+    [[ -n "${seen_urls[$url]+x}" ]] && continue
 
     local_file="$folder/$tag-$next_file_index.png"
 
     if [[ "$url" =~ ^file:// ]]; then
       src_path="${url#file://}"
       if [[ "$src_path" == /app* ]]; then
-        # 容器内部路径，用 docker cp
         docker cp "$container_name:$src_path" "$local_file" || true
       else
-        # 宿主机本地文件
         [[ -f "$src_path" ]] && cp -f "$src_path" "$local_file"
       fi
     else
-      # 远程 http/https
       curl -s -o "$local_file" "$url" || true
     fi
 
-    # 尝试设置权限，失败跳过
     [[ -f "$local_file" ]] && chmod 666 "$local_file" || true
 
-    # 替换 JSON URL 为本地 cache 路径（存在则替换）
     if [[ -f "$local_file" ]]; then
-      updated_json=$(jq \
-        --arg old_url "$url" \
-        --arg new_url "file://$pwd_path/cache/picture/${tag}/$(basename "$local_file")" \
-        'map(
-          if .message then
-          .message |= map(
-            if .type == "image" and .data.url == $old_url then
-            .data.url = $new_url
-            else
-            .
-            end
-          )
-          else
-          .
-          end
-        )' <<<"$updated_json")
+      updated_json=$(
+        jq \
+          --arg old_url "$url" \
+          --arg new_url "file://$pwd_path/cache/picture/${tag}/$(basename "$local_file")" '
+          def upd:
+            if type=="object" then
+              ( if .type?=="image" and (.data.url // "")==$old_url
+                then .data.url=$new_url
+                else .
+                end )
+              | with_entries(.value |= upd)
+            elif type=="array" then
+              map(upd)
+            else . end;
+          (if type=="array" then . else [.] end) | upd
+        ' <<<"$updated_json"
+      )
     fi
 
+    seen_urls["$url"]=1
     next_file_index=$((next_file_index + 1))
-  done < <(jq -c '.[] | select(.message!=null) | .message[] | select(.type=="image")' <<<"$processed_json")
+  done < <(jq -c '
+      (if type=="array" then . else [.] end)
+      | .. | objects
+      | select(.type?=="image" and (.data.url?))
+    ' <<<"$processed_json")
 
   echo "$updated_json"
 }
+
 
 # 输出最终 JSON
 output_final_json() {
@@ -282,6 +378,8 @@ if [[ -z "$rawmsg" ]]; then
     echo "No rawmsg found for senderid=$senderid and receiver=$receiver. Operation aborted." >&2
     exit 1
 fi
+
+rawmsg=$(resolve_forward_messages "$rawmsg")
 
 # === 仅当存在 reply 时才构建历史索引（限制在文件末尾 N 行）===
 has_reply_flag=$(has_reply "$rawmsg")

@@ -14,6 +14,8 @@ from PIL import UnidentifiedImageError
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import re
 import sqlite3
+import copy
+from typing import Dict, Any, List
 
 # 错误JSON输出的文件路径
 output_file_path_error = "./cache/LM_error.json"
@@ -245,6 +247,173 @@ def save_to_sqlite(output_data, tag):
         cursor.close()
         conn.close()
 
+############################################
+#      Flexible per-type redact & restore  #
+############################################
+
+# 支持更复杂的“按消息类型字段处理”配置：
+# - remove_in_data:     从 msg.data 中删除
+# - remove_msg:         从 msg 顶层(非data)删除
+# - remove_event:       从事件(item)顶层删除（与类型无关的通用字段放在 global_event_rules）
+# - hide_from_LM_only:  仅用于发给LM时隐藏，最终输出时会恢复（或保留）
+#
+# 说明：hide_from_LM_only 使用“点路径”语法，例如：
+#   - 'data.file'      指向 msg.data.file
+#   - 'summary'        指向 msg.summary（如果存在）
+#   - 事件(item)级请使用 global_event_rules.hide_from_LM_only
+
+per_type_rules = {
+    "image": {
+        "remove_in_data": ["file_id", "file_size"],
+        "remove_msg": ["summary"],
+        "remove_event": [],
+        "hide_from_LM_only": ["data"]
+    },
+    "video": {
+        "remove_in_data": ["file_id", "file_size"],
+        "remove_msg": [],
+        "remove_event": [],
+        "hide_from_LM_only": ["data.file", "data.file_id", "data.file_size"]
+    },
+    "audio": {
+        "remove_in_data": ["file_id", "file_size"],
+        "remove_msg": [],
+        "remove_event": [],
+        "hide_from_LM_only": ["data.file", "data.file_id", "data.file_size"]
+    },
+    "json": {
+        "remove_in_data": [],
+        "remove_msg": [],
+        "remove_event": [],
+        "hide_from_LM_only": []
+    },
+    "text": {
+        "remove_in_data": [],
+        "remove_msg": [],
+        "remove_event": [],
+        "hide_from_LM_only": []
+    },
+    "file": {
+        "remove_in_data": ["file_id"],
+        "remove_msg": [],
+        "remove_event": [],
+        "hide_from_LM_only": ["data.file_size"]
+    },
+    "poke": {
+        "remove_in_data": [],
+        "remove_msg": [],
+        "remove_event": [],
+        "hide_from_LM_only": ["data"]
+    },
+    "forward": {
+        "remove_in_data": [],
+        "remove_msg": [],
+        "remove_event": [],
+        "hide_from_LM_only": ["data"]
+    },
+}
+
+# 默认规则：用于未匹配到的 type
+default_rules = {
+    "remove_in_data": ["file", "file_id", "file_size"],
+    "remove_msg": [],
+    "remove_event": [],
+    "hide_from_LM_only": []
+}
+
+# 全局事件级规则（与类型无关，直接作用于每个顶层 item）
+# 兼容历史行为：删除 item 级别中可能出现的 file/file_id/file_size
+global_event_rules = {
+    "remove_event": ["file", "file_id", "file_size"],
+    "hide_from_LM_only": []  # 如果希望某些事件级字段仅对LM隐藏、最终输出显示，可把字段名加入这里
+}
+
+
+def _pop_path(obj, dotted):
+    """根据点路径删除字段。例如 'data.file' 或 'summary'。不存在则忽略。"""
+    if not dotted:
+        return
+    parts = dotted.split('.')
+    cur = obj
+    for i, k in enumerate(parts):
+        if not isinstance(cur, dict) or k not in cur:
+            return
+        if i == len(parts) - 1:
+            cur.pop(k, None)
+        else:
+            cur = cur.get(k)
+
+
+def _remove_many(obj, paths):
+    for p in paths:
+        _pop_path(obj, p)
+
+
+def make_lm_sanitized_and_original(data_root):
+    """
+    返回两个列表：
+      - lm_messages:   发给LM的消息（按 per_type_rules/默认规则 删除 + 隐藏hide_from_LM_only）
+      - origin_messages: 原始消息的深拷贝（不改变）
+    同时会对事件级字段应用 global_event_rules。
+    """
+    origin_messages = copy.deepcopy(data_root.get("messages", []))
+    lm_messages = copy.deepcopy(origin_messages)
+
+    # 事件级字段（对LM删除 remove_event + hide_from_LM_only）
+    for item in lm_messages:
+        _remove_many(item, global_event_rules.get('remove_event', []))
+        _remove_many(item, global_event_rules.get('hide_from_LM_only', []))
+
+        # 处理子消息
+        if "message" in item and isinstance(item["message"], list):
+            for msg in item["message"]:
+                mtype = msg.get("type")
+                rules = per_type_rules.get(mtype, default_rules)
+
+                # msg 顶层删除
+                _remove_many(msg, rules.get('remove_msg', []))
+                _remove_many(msg, rules.get('hide_from_LM_only', []))  # 对LM隐藏
+
+                # data 内删除
+                if isinstance(msg.get("data"), dict):
+                    _remove_many(msg, [f"data.{k}" for k in rules.get('remove_in_data', [])])
+
+    return lm_messages, origin_messages
+
+
+def finalize_item_for_output(item_origin):
+    """基于原始事件构造最终输出事件：
+       - 事件级：删除 global_event_rules.remove_event 中列出但不在 hide_from_LM_only 的字段
+       - 子消息级：对每个消息按类型删除 remove_msg / remove_in_data，但跳过 hide_from_LM_only 指定的路径
+    """
+    out_item = copy.deepcopy(item_origin)
+
+    # 事件级最终删除（仅保留 hide_from_LM_only）
+    for key in global_event_rules.get('remove_event', []):
+        if key not in global_event_rules.get('hide_from_LM_only', []):
+            _pop_path(out_item, key)
+
+    # 子消息级
+    if "message" in out_item and isinstance(out_item["message"], list):
+        for msg in out_item["message"]:
+            mtype = msg.get("type")
+            rules = per_type_rules.get(mtype, default_rules)
+            hide_set = set(rules.get('hide_from_LM_only', []))
+
+            # msg 顶层删除
+            for p in rules.get('remove_msg', []):
+                if p not in hide_set:
+                    _pop_path(msg, p)
+
+            # data 内删除
+            if isinstance(msg.get('data'), dict):
+                for k in rules.get('remove_in_data', []):
+                    dotted = f"data.{k}"
+                    if dotted not in hide_set:
+                        _pop_path(msg, dotted)
+
+    return out_item
+
 def main():
     # 配置日志输出
     logging.basicConfig(
@@ -259,45 +428,18 @@ def main():
     config = read_config('oqqwall.config')
     dashscope.api_key = config.get('apikey')
     data = json.load(sys.stdin)
-    # 处理输入数据并移除不需要的字段（支持按 type 定制要删除的字段）
-    cleaned_messages = []
+    # === 基于 per_type_rules 的精细化删改 ===
+    lm_messages, origin_messages = make_lm_sanitized_and_original(data)
 
-    # 针对不同 type 的差异化删除字段；键为消息的 type，值为需要从 data 中移除的字段列表
-    per_type_fields = {
-        "image": ["file", "file_id", "file_size","summary"],
-        "video": ["file", "file_id", "file_size"],
-        "audio": ["file", "file_id", "file_size"],
-        "json": [],
-        "text": [],
-        "file": ["file_id"],
-    }
-    # 默认要移除的字段（未匹配到 type 时使用）
-    default_fields = ["file", "file_id", "file_size"]
-
-    for item in data.get("messages", []):
-        # 如果顶层 item 也带了这些字段，可按默认策略移除
-        for f in default_fields:
-            item.pop(f, None)
-
-        # 处理子消息
-        if "message" in item and isinstance(item["message"], list):
-            for msg in item["message"]:
-                mtype = msg.get("type")
-                fields = per_type_fields.get(mtype, default_fields)
-                # 只在 data 内移除
-                if "data" in msg and isinstance(msg["data"], dict):
-                    for f in fields:
-                        msg["data"].pop(f, None)
-        cleaned_messages.append(item)
-
-    output_data = {
+    lm_input = {
         "notregular": data.get("notregular"),
-        "messages": cleaned_messages
+        "messages": lm_messages
     }
 
-    input_content = json.dumps(output_data, ensure_ascii=False, indent=4)
+    input_content = json.dumps(lm_input, ensure_ascii=False, indent=4)
     timenow = time.time()
 
+    print(f"input content:\n{input_content}\n")
     # 构造prompt，详细说明分组和输出要求
     prompt = f"""当前时间 {timenow}
     以下内容是一组按时间顺序排列的校园墙投稿聊天记录：
@@ -309,7 +451,8 @@ def main():
     ### 分组标准
     - 通常以关键词“在吗”、“投稿”、“墙”等开始，但这些关键词可能出现在中途或根本不出现。
     - 属于同一组投稿的消息，时间间隔一般较近（通常小于 600 秒），但也存在例外。
-    - 投稿内容可能包含文本、图片（image）、视频（video）等多种类型。
+    - 投稿内容可能包含文本、图片（image）、视频（video）、文件（file）、戳一戳（poke）、合并转发的聊天记录（forward）等多种类型。
+    - 你无法查看合并转发的聊天记录的内容
     - 大多数情况下该记录只包含一组投稿，但偶尔可能有多组。
 
     ### 你需要给出的判断
@@ -360,20 +503,15 @@ def main():
         tag = sys.argv[1]
         # 去除markdown格式并加载JSON内容
         final_response_json = json.loads(final_response.strip('```json\n').strip('\n```'))
+        # 以原始消息为基准恢复 + 按规则裁剪（保留 hide_from_LM_only）
+        origin_lookup = {msg["message_id"]: msg for msg in origin_messages}
+        final_list = []
+        for mid in final_response_json.get("messages", []):
+            if mid in origin_lookup:
+                final_list.append(finalize_item_for_output(origin_lookup[mid]))
+        final_response_json["messages"] = final_list
 
-        # 将input_content从字符串转换回字典
-        input_data_dict = json.loads(input_content)
-
-        # 创建一个从message_id到完整消息的查找字典
-        message_lookup = {msg["message_id"]: msg for msg in input_data_dict["messages"]}
-
-        # 用完整的消息数据替换final_response_json中的message_id
-        final_response_json["messages"] = [message_lookup[msg_id] for msg_id in final_response_json["messages"] if msg_id in message_lookup]
-
-        # 转换为字符串以便存储
         output_data = json.dumps(final_response_json, ensure_ascii=False, indent=4)
-        
-        # 保存到SQLite数据库
         save_to_sqlite(output_data, tag)
 
         # 压缩并检测图片安全性，更新safemsg
