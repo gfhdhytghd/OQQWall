@@ -61,34 +61,176 @@ def clean_json_output(output_content):
 
 
 from PIL import UnidentifiedImageError
+from PIL import ImageOps  # 放到你的 import 区域
+
+def _is_high_bitdepth(img: Image.Image) -> bool:
+    """粗略判断是否为高位深图（>8bit）。"""
+    # 常见高位深模式或 mode 名称里带 16
+    if img.mode in ("I;16", "I;16B", "I;16L", "I", "F", "RGB;16", "RGBA;16"):
+        return True
+    if "16" in (img.mode or ""):
+        return True
+    # 一些 PNG 会在 info 里带 bitdepth/bits
+    bits = img.info.get("bitdepth") or img.info.get("bits")
+    try:
+        if bits and int(bits) > 8:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _save_with_format(img: Image.Image, path: str, fmt_hint: str = None, quality: int = None):
+    """
+    统一保存：
+    - PNG：使用 optimize + 最大压缩等级（仍为无损）
+    - JPEG：使用质量/渐进式/子采样
+    - WEBP：使用有损质量参数
+    其他：按 PNG 处理
+    """
+    ext = os.path.splitext(path)[1].lower()
+    fmt = (fmt_hint or "").upper()
+    if not fmt:
+        if ext in (".jpg", ".jpeg"):
+            fmt = "JPEG"
+        elif ext == ".webp":
+            fmt = "WEBP"
+        elif ext == ".png":
+            fmt = "PNG"
+        else:
+            fmt = "PNG"  # 默认用 PNG
+
+    if fmt in ("JPEG", "JPG"):
+        # JPEG 不支持 alpha；若有 alpha 则铺白底
+        if "A" in img.getbands():
+            bg = Image.new("RGB", img.size, (255, 255, 255))
+            bg.paste(img, mask=img.split()[-1])
+            img = bg
+        elif img.mode != "RGB":
+            img = img.convert("RGB")
+        params = dict(
+            quality=quality if quality is not None else 85,
+            optimize=True,
+            progressive=True,
+            subsampling="4:2:0",
+        )
+        img.save(path, format="JPEG", **params)
+
+    elif fmt == "WEBP":
+        # 有损 webp，若你不想有损可把 quality 去掉并设 lossless=True
+        params = dict(quality=quality if quality is not None else 80, method=6)
+        img.save(path, format="WEBP", **params)
+
+    else:
+        # PNG（无损）。注意：quality 对 PNG 无效
+        # compress_level: 0(快,大)~9(慢,小)
+        img.save(path, format="PNG", optimize=True, compress_level=9)
+
 
 def compress_image(path, max_pixels, size_limit):
-    """调整图片尺寸和压缩图片大小，确保不超过像素和文件大小限制。"""
+    """先尝试把 >8bit 图降到 8bit，再看体积是否达标；不达标再降分辨率到满足 size_limit（也会遵守 max_pixels）。"""
     logging.info(f"开始处理图片: {path}")
     try:
         with Image.open(path) as img:
+            fmt_hint = (img.format or "").upper()
             width, height = img.size
             pixels = width * height
-            logging.info(f"图片尺寸: {width}x{height}, 总像素: {pixels}")
-            if pixels > max_pixels:
-                ratio = (max_pixels / pixels) ** 0.5
-                new_size = (int(width * ratio), int(height * ratio))
-                logging.info(f"图片超过像素限制，调整至: {new_size[0]}x{new_size[1]}")
-                img = img.resize(new_size, Image.Resampling.LANCZOS)
-                img.save(path)
-            
+            logging.info(f"图片尺寸: {width}x{height}, 总像素: {pixels}, 模式: {img.mode}, 格式: {fmt_hint or 'N/A'}")
+
+            # === Step 1: 降位深到 8bit（若需要） ===
+            if _is_high_bitdepth(img):
+                logging.info("检测到高位深图像，转换到 8bit…")
+                # 将所有情况统一转换到 8bit 通道：
+                #   有 alpha => RGBA；否则 RGB 或 L
+                if "A" in img.getbands():
+                    img = img.convert("RGBA")   # RGBA 为 8bit/通道
+                else:
+                    # 多通道转 RGB，单通道转 L
+                    img = img.convert("RGB" if len(img.getbands()) >= 3 else "L")
+                _save_with_format(img, path, fmt_hint)
+                new_size = os.path.getsize(path)
+                logging.info(f"位深降到 8bit 后大小: {new_size/1024/1024:.2f}MB")
+
+            # 读取最新文件/尺寸状态
+            with Image.open(path) as img2:
+                fmt_hint = (img2.format or fmt_hint or "").upper()
+                width, height = img2.size
+                pixels = width * height
             file_size = os.path.getsize(path)
+
+            # 若位深处理后已满足大小要求，并且像素也不超上限，直接返回
+            if file_size <= size_limit and pixels <= max_pixels:
+                logging.info("已满足大小与像素限制，结束。")
+                return
+
+            # === Step 2a: 若像素数超上限，按上限等比缩放 ===
+            if pixels > max_pixels:
+                ratio = (max_pixels / float(pixels)) ** 0.5
+                new_w, new_h = max(1, int(width * ratio)), max(1, int(height * ratio))
+                logging.info(f"像素超过上限，调整至: {new_w}x{new_h}")
+                with Image.open(path) as img2:
+                    img2 = img2.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                    _save_with_format(img2, path, fmt_hint, quality=85)
+                file_size = os.path.getsize(path)
+                width, height = new_w, new_h
+                pixels = width * height
+                logging.info(f"像素降至上限后大小: {file_size/1024/1024:.2f}MB")
+
+            # === Step 2b: 若仍超 size_limit，再按需降低分辨率（并结合格式化参数） ===
             if file_size > size_limit:
-                logging.info(f"图片大小({file_size/1024/1024:.2f}MB)超过限制({size_limit/1024/1024:.2f}MB)，开始压缩")
-                quality = 90
-                while os.path.getsize(path) > size_limit and quality > 10:
-                    img.save(path, quality=quality, optimize=True)
-                    logging.info(f"压缩质量: {quality}, 当前大小: {os.path.getsize(path)/1024/1024:.2f}MB")
-                    quality -= 5
+                logging.info(f"图片大小({file_size/1024/1024:.2f}MB)超过限制({size_limit/1024/1024:.2f}MB)，开始降分辨率/有损压缩…")
+
+                # 为了减少循环次数，按理论比例一次性给出初始缩放因子（再细调）
+                # （体积大约与像素数近似线性，先按 sqrt 比例缩）
+                scale = max(0.3, min(0.95, (size_limit / float(file_size)) ** 0.5))
+                target_w, target_h = max(1, int(width * scale)), max(1, int(height * scale))
+
+                with Image.open(path) as img2:
+                    img2 = img2.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                    if fmt_hint in ("JPEG", "JPG", "WEBP"):
+                        # 先用一个保守质量保存，再逐步降低
+                        _save_with_format(img2, path, fmt_hint, quality=85)
+                        file_size = os.path.getsize(path)
+                        if file_size > size_limit:
+                            for q in (80, 75, 70, 65, 60, 55, 50, 45, 40, 35, 30):
+                                _save_with_format(img2, path, fmt_hint, quality=q)
+                                file_size = os.path.getsize(path)
+                                logging.info(f"压缩质量: {q}, 当前大小: {file_size/1024/1024:.2f}MB")
+                                if file_size <= size_limit:
+                                    break
+                    else:
+                        # PNG 路线（无损）：先按最大压缩保存
+                        _save_with_format(img2, path, "PNG")
+                        file_size = os.path.getsize(path)
+                        logging.info(f"PNG 最大压缩后大小: {file_size/1024/1024:.2f}MB")
+
+                        # 若仍然很大（截图/大色彩图常见），尝试调色板 256 色（仍是 PNG，但更小）
+                        if file_size > size_limit:
+                            logging.info("尝试 PNG 调色板(256色)以进一步压缩…")
+                            pal = img2.convert("P", palette=Image.ADAPTIVE, colors=256)
+                            _save_with_format(pal, path, "PNG")
+                            file_size = os.path.getsize(path)
+                            logging.info(f"PNG 调色板后大小: {file_size/1024/1024:.2f}MB")
+
+                        # 若还是超限，继续等比缩小，直到达标或边长到阈值
+                        while file_size > size_limit and min(img2.size) > 512:
+                            nw = max(1, int(img2.size[0] * 0.85))
+                            nh = max(1, int(img2.size[1] * 0.85))
+                            img2 = img2.resize((nw, nh), Image.Resampling.LANCZOS)
+                            # 先试普通 RGB/RGBA PNG，再试 256 色
+                            _save_with_format(img2, path, "PNG")
+                            if os.path.getsize(path) > size_limit:
+                                pal = img2.convert("P", palette=Image.ADAPTIVE, colors=256)
+                                _save_with_format(pal, path, "PNG")
+                            file_size = os.path.getsize(path)
+                            logging.info(f"继续降分辨率到 {nw}x{nh}，当前大小: {file_size/1024/1024:.2f}MB")
+
+        logging.info("图片压缩流程完成。")
     except UnidentifiedImageError:
         logging.warning(f"跳过无法识别的图片文件: {path}")
     except Exception as e:
         logging.error(f"处理图片 {path} 时发生意外错误: {e}", exc_info=True)
+
 
 
 def image_safe(path, model, api_key):
