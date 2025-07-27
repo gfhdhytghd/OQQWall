@@ -64,16 +64,17 @@
      <td align="center">
       <img src="readme_Resources/Screenshot_20250529_192949_TIM.jpg" width="220"><br/>
       <sub>图片渲染与单独发送</sub>
+      <img src="readme_Resources/Screenshot_20250608_082047_TIM.jpg" width="220"><br/>
+      <sub>支持多投稿合并发送</sub>
     </td>
     <td align="center">
       <img src="readme_Resources/c215a239525b663314d1a49a2c7d1c70.jpg" width="220"><br/>
       <sub>很牛逼的渲染器</sub>
     </td>
     <td align="center">
-      <img src="readme_Resources/Screenshot_20250608_082047_TIM.jpg" width="220"><br/>
-      <sub>支持多投稿合并发送</sub>
+      <img src="readme_Resources/e94f10d2f69646b484d38b09c3893277_720.jpg" width="220"><br/>
+      <sub>支持合并转发聊天记录</sub>
     </td>
-    <td></td>
   </tr>
 </table>
 </div>
