@@ -67,7 +67,7 @@ getnumnext(){
 
 getnumnext-startup(){
     echo 使用selenium校准编号...
-    getnumcmd='python3 ./SendQzone/qzonegettag-headless.py'
+    getnumcmd='python3 SendQzone/qzonegettag-headless.py'
     output=$(eval $getnumcmd)
     if echo "$output" | grep -q "Log Error!"; then
         numnow=$( cat ./numfinal.txt )
@@ -91,11 +91,11 @@ if [[ $1 == -r ]]; then
   else
       echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理 Napcat QQ 客户端。"
   fi
-  if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null; then
-    pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
+  if pgrep -f "python3 getmsgserv/serv.py" > /dev/null; then
+    pgrep -f "python3 getmsgserv/serv.py" | xargs kill -15
   fi
-  if pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" > /dev/null; then
-    pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" | xargs kill -15
+  if pgrep -f "python3 SendQzone/qzone-serv-pipe.py" > /dev/null; then
+    pgrep -f "python3 SendQzone/qzone-serv-pipe.py" | xargs kill -15
   fi
   if pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" > /dev/null; then
     pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" | xargs kill -15
@@ -107,8 +107,8 @@ elif [[ $1 == -rf ]]; then
   else
       echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理Napcat QQ 客户端。"
   fi
-  pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
-  pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" | xargs kill -15
+  pgrep -f "python3 getmsgserv/serv.py" | xargs kill -15
+  pgrep -f "python3 SendQzone/qzone-serv-pipe.py" | xargs kill -15
   pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" | xargs kill -15
 elif [[ $1 == -h ]]; then
 echo "Without any flag-->start OQQWall
@@ -532,19 +532,19 @@ getinfo(){
     done
     fi
 }
-if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null
+if pgrep -f "python3 getmsgserv/serv.py" > /dev/null
 then
     echo "serv.py is already running"
 else
-    python3 ./getmsgserv/serv.py &
+    python3 getmsgserv/serv.py &
     echo "serv.py started"
 fi
 
-if pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" > /dev/null
+if pgrep -f "python3 SendQzone/qzone-serv-pipe.py" > /dev/null
 then
     echo "qzone-serv-pipe.py is already running"
 else
-    python3 ./SendQzone/qzone-serv-pipe.py &
+    python3 SendQzone/qzone-serv-pipe.py &
     echo "qzone-serv-pipe.py started"
 fi
 
@@ -593,7 +593,7 @@ while true; do
             for qqid in "${runidlist[@]}"; do
                 echo "Like everyone with ID: $qqid"
                 getinfo $qqid
-                python3 ./qqBot/likeeveryday.py $port
+                python3 qqBot/likeeveryday.py $port
             done
         fi
         #pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
