@@ -1,3 +1,4 @@
+
 import logging
 import sys
 from datetime import datetime
@@ -53,6 +54,67 @@ os.makedirs(ALLPOST_DIR, exist_ok=True)
 
 # 添加文件锁
 file_lock = Lock()
+
+# ---- Windows for suppression (seconds) ----
+FRIEND_REQ_WINDOW_SEC = 120          # 同一用户 2 分钟内重复好友申请只处理一次
+PRIVATE_SUPPRESSION_WINDOW_SEC = 120 # 好友通过后，2 分钟内相同内容的私聊忽略
+
+# ---- Friend-request de-dup cache ----
+friend_req_lock = Lock()
+friend_req_cache = {}  # { user_id: expire_ts }
+
+def should_process_friend_request(user_id: str, window: int = FRIEND_REQ_WINDOW_SEC) -> bool:
+    """Return True if we should handle this friend request now; False if it is a duplicate within window."""
+    if not user_id:
+        return True
+    now = int(time.time())
+    with friend_req_lock:
+        exp = friend_req_cache.get(user_id, 0)
+        if exp > now:
+            return False
+        friend_req_cache[user_id] = now + window
+        return True
+
+# === Friend-request suppression (2-minute window) ===
+suppression_lock = Lock()
+suppression_cache = {}  # { user_id: [{"comment_norm": str, "expire_ts": int}] }
+
+def normalize_text(s):
+    """Normalize text to compare user messages with friend-request comments."""
+    if s is None:
+        return ""
+    s = str(s)
+    remove_chars = "　“”‘’《》〈〉【】。，：；？！（）、「」『』—［］＂＇\"'`~!@#$%^&*()_+-={}[]|:;<>?,./"
+    for ch in remove_chars:
+        s = s.replace(ch, "")
+    # remove all whitespace (including tabs/newlines)
+    s = "".join(s.split())
+    return s
+
+def add_suppression(user_id, comment, duration_sec=300):
+    expire_ts = int(time.time()) + duration_sec
+    entry = {"comment_norm": normalize_text(comment), "expire_ts": expire_ts}
+    with suppression_lock:
+        lst = suppression_cache.get(user_id, [])
+        lst.append(entry)
+        now = int(time.time())
+        lst = [e for e in lst if e.get("expire_ts", 0) > now]
+        suppression_cache[user_id] = lst
+
+def should_suppress(user_id, text):
+    norm = normalize_text(text)
+    now = int(time.time())
+    with suppression_lock:
+        lst = suppression_cache.get(user_id, [])
+        kept = []
+        suppressed = False
+        for e in lst:
+            if e.get("expire_ts", 0) > now:
+                kept.append(e)
+                if norm and norm == e.get("comment_norm"):
+                    suppressed = True
+        suppression_cache[user_id] = kept
+        return suppressed
 
 # 数据库连接管理
 @contextmanager
@@ -173,6 +235,19 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.send_json_response(200, {"status": "ok", "message": "Friend-add request ignored"})
                     return
 
+            # === 好友请求：自动同意 + 2 分钟内屏蔽相同内容私聊 ===
+            if data.get('post_type') == 'request' and data.get('request_type') == 'friend':
+                self.handle_friend_request(data)
+                self.send_json_response(200, {"status": "ok", "message": "Friend request handled"})
+                return
+
+            # === 私聊消息：如命中 2 分钟屏蔽规则则直接忽略 ===
+            if data.get('message_type') == 'private':
+                if self.is_suppressed_private_message(data):
+                    logger.info("Private message suppressed due to recent friend-request duplicate.")
+                    self.send_json_response(200, {"status": "ok", "message": "Suppressed duplicate private message"})
+                    return
+
             # 处理不同类型的通知
             if data.get('notice_type') == 'friend_recall':
                 self.handle_friend_recall(data)
@@ -263,6 +338,48 @@ class RequestHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 logger.error(f'Error deleting message from database: {e}')
 
+    def handle_friend_request(self, data):
+        """自动同意好友请求，并将该请求的 comment 记录为 2 分钟的抑制关键词。"""
+        user_id = str(data.get('user_id') or '')
+        flag = str(data.get('flag') or '')
+        self_id = str(data.get('self_id') or '')
+        comment = data.get('comment') or ''
+
+        # 2 分钟内重复的同一 user_id 好友申请只处理一次
+        if not should_process_friend_request(user_id, FRIEND_REQ_WINDOW_SEC):
+            logger.info(f"Duplicate friend request from {user_id} within 2 minutes; ignored.")
+            return
+
+        if user_id and comment:
+            add_suppression(user_id, comment, duration_sec=PRIVATE_SUPPRESSION_WINDOW_SEC)
+            logger.info(f"Added suppression for user {user_id} with comment='{comment}' for 2 minutes.")
+        else:
+            logger.warning("Friend request missing user_id or comment; suppression not added.")
+
+        if flag:
+            try:
+                print(f"Approving friend request: user={user_id}, flag={flag}, self_id={self_id}")
+                subprocess.run(['bash', './qqBot/approve_friend_add.sh', flag, user_id, self_id], check=True)
+                logger.info(f"Approved friend request: user={user_id}, flag={flag}")
+            except subprocess.CalledProcessError as e:
+                logger.error(f"approve_friend_add.sh failed: {e}")
+        else:
+            logger.warning("Friend request missing flag; cannot auto-approve.")
+
+    def is_suppressed_private_message(self, data) -> bool:
+        user_id = str(data.get('user_id') or '')
+        # 优先使用 raw_message；若是 array 格式，可拼接 text 字段兜底
+        raw = data.get('raw_message')
+        if not raw and isinstance(data.get('message'), list):
+            try:
+                parts = []
+                for seg in data['message']:
+                    if isinstance(seg, dict) and seg.get('type') == 'text':
+                        parts.append(str(seg.get('data', {}).get('text', '')))
+                raw = ''.join(parts) if parts else ''
+            except Exception:
+                raw = ''
+        return should_suppress(user_id, raw or '')
     def handle_default(self, data):
         # Append to all_posts.json incrementally
         all_file_path = os.path.join(ALLPOST_DIR, 'all_posts.json')

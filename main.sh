@@ -119,6 +119,27 @@ for more information, read./OQQWall.wiki"
 exit 0
 fi
 
+# 确保配置文件存在
+if [[ ! -f "oqqwall.config" ]]; then
+    touch "oqqwall.config"
+    echo 'http-serv-port=
+apikey=""
+process_waittime=120
+manage_napcat_internal=true
+max_attempts_qzone_autologin=3
+max_post_stack=1
+max_imaga_number_one_post=30
+text_model=qwen-plus-latest
+vision_model=qwen-vl-max-latest
+vision_pixel_limit=12000000
+vision_size_limit_mb=9.5
+at_unprived_sender=true
+friend_request_window_sec="300"'>> "oqqwall.config"
+    echo "已创建文件: oqqwall.config"
+    echo "请参考wiki填写配置文件后再启动"
+    exit 0
+fi
+
 # 初始化目录和文件
 # 初始化目录
 check_and_create "/dev/shm/OQQWall/" "directory"
@@ -164,6 +185,7 @@ check_variable "text_model" "qwen-plus-latest"
 check_variable "vision_model" "qwen-vl-max-latest"
 check_variable "vision_pixel_limit" "12000000"
 check_variable "vision_size_limit_mb" "9.5"
+check_variable "friend_request_window_sec" "300"
 
 
 # 尝试激活现有的虚拟环境
@@ -205,6 +227,7 @@ else
     echo "所有包已成功安装."
 fi
 
+# 确保配置文件存在
 if [[ ! -f "oqqwall.config" ]]; then
     touch "oqqwall.config"
     echo 'http-serv-port=
