@@ -91,9 +91,8 @@ process_json() {
                   (.data.id|tostring) as $rid
                   | ($hist_idx[0][$rid] // $curr_idx[$rid]) as $ref
                   | if $ref then
-                      ( ($ref.time? // null) as $ts
-                        | (if $ts then ($ts|tonumber|localtime|strftime("%H:%M")) else "--:--" end)
-                      ) as $tm
+                      ( (($ref.time? // null) as $ts
+                          | (if $ts then ($ts|tonumber|localtime|strftime("%H:%M")) else "--:--" end)) ) as $tm
                       | {
                           type: "text",
                           data: {
@@ -130,6 +129,54 @@ process_json() {
             .
           end
         )' <<<"$rawmsg"
+}
+
+# 递归合并任意层级（含 forward）中「仅包含 text 的 message」为单段
+merge_texts_recursively() {
+  local json="$1"
+  jq '
+    def mrg:
+      if (.message? and (.message | type) == "array" and (.message | length > 0) and (.message | all(.type=="text")))
+      then .message = [{type:"text", data:{text: (.message | map(.data.text) | join(""))}}]
+      else .
+      end;
+
+    def walk(f):
+      . as $in
+      | if type=="object" then (f | with_entries(.value |= walk(f)))
+        elif type=="array" then map(walk(f))
+        else .
+        end;
+    walk(mrg)
+  ' <<<"$json"
+}
+
+# 递归折叠相邻的 text 段（即便同一 message 中含有图片/文件等混合类型，也会把连续的 text 合并）
+merge_adjacent_texts_recursively() {
+  local json="$1"
+  jq '
+    def fold_text_runs:
+      reduce .[] as $x (
+        [];
+        if ($x.type=="text") and ((.[length-1]? // null) | .type == "text") then
+          .[length-1].data.text = ((.[length-1].data.text // "") + ($x.data.text // ""))
+        else
+          . + [ $x ]
+        end
+      );
+
+    def walk(f):
+      . as $in
+      | if type=="object" then (f | with_entries(.value |= walk(f)))
+        elif type=="array" then map(walk(f))
+        else .
+        end;
+
+    walk(
+      if (.message? and (.message|type)=="array" and (.message|length)>0) then
+        .message = (.message | fold_text_runs)
+      else . end)
+  ' <<<"$json"
 }
 
 
@@ -461,6 +508,11 @@ fi
 
 
 processed_json=$(process_json "$rawmsg")
+# 在所有层级（含 forward.data 内部）合并仅包含 text 的 message
+processed_json=$(merge_texts_recursively "$processed_json")
+# 合并相邻的 text 片段（对所有层级生效）
+processed_json=$(merge_adjacent_texts_recursively "$processed_json")
+
 has_irregular_types=$(check_irregular_types "$rawmsg")
 processed_json=$(resolve_file_urls "$processed_json")
 processed_json=$(download_and_replace_images "$processed_json")
