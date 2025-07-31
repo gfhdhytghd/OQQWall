@@ -388,7 +388,7 @@ html_content=$(cat <<EOF
             display: block;
             background-color: #ffffff;
             border-radius: 10px;
-            padding: 7px 7px 4.25px 7px;
+            padding: 7px 7px 4.1px 7px;
             margin-bottom: 10px;
             word-break: break-word;
             max-width: fit-content;
@@ -681,6 +681,90 @@ html_content=$(cat <<EOF
         }
         /* 嵌套转发时逐级缩进更明显 */
         .forward .forward { margin-left: 6px; }
+
+        /* =========================================================
+        Overrides: 标题左贴缩略图、二维码最右、标题允许两行并纵向居中
+        仅影响结构为：<div class="card-header"><img.thumb> <div.card-header-right><div.card-title>…</div></div> <img.qr-code></div>
+        ========================================================= */
+        .card-header {
+          justify-content: flex-start;   /* 让子项按顺序排布，由二维码自身推到右侧 */
+          align-items: center;           /* 纵向居中 thumb / 标题列 / QR */
+          gap: 8px;
+        }
+
+        /* 中间列吃掉剩余空间，确保 QR 被推到最右 */
+        .card-header .thumb + .card-header-right {
+          flex: 1 1 auto;
+          min-width: 0;
+          display: flex;
+          align-items: center;           /* 标题块在列内纵向居中 */
+          gap: 0;
+          margin-left: 0;
+        }
+
+        /* QR 固定在最右侧且尺寸稳定 */
+        .card-header .qr-code {
+          margin-left: auto;             /* 将其推到最右侧 */
+          flex: 0 0 48px;
+        }
+
+        /* 标题：左贴缩略图；允许两行并截断 */
+        .card-header .thumb + .card-header-right > .card-title {
+          margin: 0;
+          text-align: left;
+          white-space: normal;           /* 允许换行 */
+          overflow: hidden;
+
+          /* 两行截断（兼容旧 WebKit） */
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+          -webkit-line-clamp: 2;
+          line-clamp: 2;
+
+          word-break: break-word;        /* 处理超长英文/URL */
+          /* 如需更激进换行可改用：overflow-wrap: anywhere; */
+          }
+              /* 让纵向卡片本体可以占满到 max-width，避免 fit-content 影响 header 拉伸 */
+          .card.card-vertical {
+          width: 100%;          /* 占满可用宽度 */
+          max-width: 276px;     /* 沿用你原本的上限 */
+          }
+
+          /* Header 铺满整张卡片，并保持纵向居中 */
+          .card.card-vertical .card-header {
+          width: 100%;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          }
+
+          /* 左侧信息列吃掉中间空间，QR 才能被推到最右 */
+          .card.card-vertical .card-header-left {
+          flex: 1 1 auto;
+          min-width: 0;         /* 允许内部换行/截断 */
+          }
+
+          /* 二维码固定在最右侧，尺寸稳定 */
+          .card.card-vertical .qr-code {
+          margin-left: auto;    /* 关键：推到最右 */
+          flex: 0 0 48px;
+          }
+
+          /* 标题允许两行并截断（在 header-left 里） */
+          .card.card-vertical .card-header-left .card-title {
+          margin: 0;
+          white-space: normal;
+          overflow: hidden;
+
+          display: -webkit-box;
+          -webkit-box-orient: vertical;
+          -webkit-line-clamp: 2;
+          line-clamp: 2;
+
+          word-break: break-word;      /* 处理超长英文/URL */
+          /* 如果希望更激进换行可改为：overflow-wrap: anywhere; */
+          }
+
 
     </style>
 </head>
