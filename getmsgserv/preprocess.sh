@@ -85,13 +85,47 @@ else
 fi
 # Step 2: Lock the cache files and process HTML to PDF
 {
-  flock -x 200  # Acquire exclusive lock
+  flock -x 200  # Acquire exclusive oock
   getmsgserv/HTMLwork/gotohtml.sh $tag > /dev/shm/OQQWall/oqqwallhtmlcache.html
-  chromium --headless --disable-gpu --print-to-pdf=/dev/shm/OQQWall/oqqwallpdfcache.pdf \
-  --run-all-compositor-stages-before-draw --no-pdf-header-footer --virtual-time-budget=2000 \
-  --pdf-page-orientation=portrait --no-margins --enable-background-graphics --print-background=true \
-  file:///dev/shm/OQQWall/oqqwallhtmlcache.html
 # Step 3: Process the output into JPG
+
+
+# ---- 1. 选择可执行文件 ---------------------------------------------------
+# 依次查找可用的浏览器可执行文件
+for candidate in chromium-browser chromium chrome google-chrome; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+        CHROME_BIN=$(command -v "$candidate")
+        break
+    fi
+done
+
+# 如果都没找到就退出
+if [[ -z "${CHROME_BIN:-}"  ]]; then
+    echo "Error: no suitable Chromium/Chrome binary found in PATH." >&2
+    exit 1
+fi
+
+# ---- 2. 参数 --------------------------------------------------------
+PDF_OUT=/dev/shm/OQQWall/oqqwallpdfcache.pdf
+HTML_IN=file:///dev/shm/OQQWall/oqqwallhtmlcache.html
+
+COMMON_ARGS=(
+    --headless
+    --run-all-compositor-stages-before-draw
+    --no-pdf-header-footer
+    --virtual-time-budget=2000
+    --pdf-page-orientation=portrait
+    --no-margins
+    --enable-background-graphics
+    --print-background=true
+    --allow-file-access-from-files \
+        --print-to-pdf="$PDF_OUT"
+    )
+
+# ---- 3. 执行 --------------------------------------------------------------
+"$CHROME_BIN" "${COMMON_ARGS[@]}" "$HTML_IN"
+
+
 folder=./cache/prepost/${tag}
 json_data=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$tag';")
 if [[ -z "$json_data" ]]; then
@@ -112,10 +146,10 @@ next_file_index=$existing_files
 echo "$json_data" | jq -r '.messages[].message[] | select(.type == "image" and .data.sub_type == 0) | .data.url' | while read -r url; do
     # 格式化文件索引
     formatted_index=$(printf "%02d" $next_file_index)
-    
+
     # 下载文件并保存
     curl -o "$folder/$tag-${formatted_index}.jpg" "$url"
-    
+
     # 增加文件索引
     next_file_index=$((next_file_index + 1))
 done
