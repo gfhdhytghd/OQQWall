@@ -87,9 +87,16 @@ fi
 {
   flock -x 200  # Acquire exclusive oock
   getmsgserv/HTMLwork/gotohtml.sh $tag > /dev/shm/OQQWall/oqqwallhtmlcache.html
+
+#确保html写完了
+wait_stable() { local f="$1" last=0; while :; do
+  sz=$(stat -c%s "$f" 2>/dev/null || echo 0)
+  [[ $sz -gt 0 && $sz -eq $last ]] && break
+  last=$sz; sleep 0.1
+done; }
+wait_stable /dev/shm/OQQWall/oqqwallhtmlcache.html
+
 # Step 3: Process the output into JPG
-
-
 # ---- 1. 选择可执行文件 ---------------------------------------------------
 # 依次查找可用的浏览器可执行文件
 for candidate in chromium-browser chromium chrome google-chrome; do
