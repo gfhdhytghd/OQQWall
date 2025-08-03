@@ -87,7 +87,7 @@ fi
 {
   flock -x 200  # Acquire exclusive lock
   getmsgserv/HTMLwork/gotohtml.sh $tag > /dev/shm/OQQWall/oqqwallhtmlcache.html
-  google-chrome-stable --headless --disable-gpu --print-to-pdf=/dev/shm/OQQWall/oqqwallpdfcache.pdf \
+  chromium --headless --disable-gpu --print-to-pdf=/dev/shm/OQQWall/oqqwallpdfcache.pdf \
   --run-all-compositor-stages-before-draw --no-pdf-header-footer --virtual-time-budget=2000 \
   --pdf-page-orientation=portrait --no-margins --enable-background-graphics --print-background=true \
   file:///dev/shm/OQQWall/oqqwallhtmlcache.html
