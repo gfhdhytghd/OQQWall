@@ -26,8 +26,9 @@ else
     ((i++))
   done
 fi
-echo "尝试通过来自$senderid 的好友请求，port：$port,flag: $1"
+echo "将在四分钟内通过来自$senderid 的好友请求，port：$port,flag: $1"
+sleep $((RANDOM % 241))
 curl "http://127.0.0.1:$port/set_friend_add_request?flag=$1&approve=true"
 source ./Global_toolkit.sh
 sleep 30
-sendmsgpriv "$senderid" "您的好友申请已通过，请阅读校园墙空间置顶后再投稿"
+sendmsgpriv "$senderid" "您的好友申请已通过，请阅读校园墙空间置顶后再投稿（系统自动发送请勿回复）"
