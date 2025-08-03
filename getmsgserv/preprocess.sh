@@ -93,37 +93,37 @@ fi
 # ---- 1. 选择可执行文件 ---------------------------------------------------
 # 依次查找可用的浏览器可执行文件
 for candidate in chromium-browser chromium chrome google-chrome; do
-        if command -v "$candidate" >/dev/null 2>&1; then
-                    CHROME_BIN=$(command -v "$candidate")
-                            break
-                                fi
-                            done
+    if command -v "$candidate" >/dev/null 2>&1; then
+        CHROME_BIN=$(command -v "$candidate")
+        break
+    fi
+done
 
-                            # 如果都没找到就退出
-                            if [[ -z "${CHROME_BIN:-}"  ]]; then
-                                    echo "Error: no suitable Chromium/Chrome binary found in PATH." >&2
-                                        exit 1
-                            fi
+# 如果都没找到就退出
+if [[ -z "${CHROME_BIN:-}"  ]]; then
+    echo "Error: no suitable Chromium/Chrome binary found in PATH." >&2
+    exit 1
+fi
 
-                            # ---- 2. 共同的参数 --------------------------------------------------------
-                            PDF_OUT=/dev/shm/OQQWall/oqqwallpdfcache.pdf
-                            HTML_IN=file:///dev/shm/OQQWall/oqqwallhtmlcache.html
+# ---- 2. 参数 --------------------------------------------------------
+PDF_OUT=/dev/shm/OQQWall/oqqwallpdfcache.pdf
+HTML_IN=file:///dev/shm/OQQWall/oqqwallhtmlcache.html
 
-                            COMMON_ARGS=(
-                                  --headless
-                                      --run-all-compositor-stages-before-draw
-                                        --no-pdf-header-footer
-                                          --virtual-time-budget=2000
-                                            --pdf-page-orientation=portrait
-                                              --no-margins
-                                                --enable-background-graphics
-                                                  --print-background=true
-                                                    --allow-file-access-from-files \
-                                                    --print-to-pdf="$PDF_OUT"
-                                )
+COMMON_ARGS=(
+    --headless
+    --run-all-compositor-stages-before-draw
+    --no-pdf-header-footer
+    --virtual-time-budget=2000
+    --pdf-page-orientation=portrait
+    --no-margins
+    --enable-background-graphics
+    --print-background=true
+    --allow-file-access-from-files \
+        --print-to-pdf="$PDF_OUT"
+    )
 
-                                # ---- 3. 执行 --------------------------------------------------------------
-                                "$CHROME_BIN" "${COMMON_ARGS[@]}" "$HTML_IN"
+# ---- 3. 执行 --------------------------------------------------------------
+"$CHROME_BIN" "${COMMON_ARGS[@]}" "$HTML_IN"
 
 
 folder=./cache/prepost/${tag}
