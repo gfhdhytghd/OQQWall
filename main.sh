@@ -127,8 +127,6 @@ apikey=""
 process_waittime=120
 manage_napcat_internal=true
 max_attempts_qzone_autologin=3
-max_post_stack=1
-max_imaga_number_one_post=30
 text_model=qwen-plus-latest
 vision_model=qwen-vl-max-latest
 vision_pixel_limit=12000000
@@ -166,7 +164,11 @@ if [[ ! -f "AcountGroupcfg.json" ]]; then
       ],
       "minorqq_http_port": [
         ""
-      ]
+      ],
+      "max_post_stack":"1",
+      "max_image_number_one_post":"20",
+      "friend_add_message":"",
+      "send_schedule": []
     }
 }' > AcountGroupcfg.json
     echo "已创建文件: AcountGroupcfg.json"
@@ -178,9 +180,7 @@ check_variable "apikey"  "sk-"
 check_variable "process_waittime" "120"
 check_variable "manage_napcat_internal" "true"
 check_variable "max_attempts_qzone_autologin"  "3"
-check_variable "max_post_stack" "1"
 check_variable "at_unprived_sender" "true"
-check_variable "max_imaga_number_one_post" "9"
 check_variable "text_model" "qwen-plus-latest"
 check_variable "vision_model" "qwen-vl-max-latest"
 check_variable "vision_pixel_limit" "12000000"
@@ -235,8 +235,6 @@ apikey=""
 process_waittime=120
 manage_napcat_internal=true
 max_attempts_qzone_autologin=3
-max_post_stack=1
-max_imaga_number_one_post=30
 text_model=qwen-plus-latest
 vision_model=qwen-vl-max-latest
 vision_pixel_limit=12000000
@@ -341,8 +339,6 @@ apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 http_serv_port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"[:space:]')
 process_waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 manage_napcat_internal=$(grep 'manage_napcat_internal' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-max_post_stack=$(grep 'max_post_stack' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-max_imaga_number_one_post=$(grep 'max_imaga_number_one_post' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 max_attempts_qzone_autologin=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 at_unprived_sender=$(grep 'at_unprived_sender' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 text_model=$(grep 'text_model' oqqwall.config | cut -d'=' -f2 | tr -d '"')
@@ -451,7 +447,40 @@ jq -r '. | keys[]' "$json_file" | while read -r group; do
     errors+=("错误：在 $group 中，minorqqid 的数量 ($minorqq_count) 与 minorqq_http_port 的数量 ($minorqq_port_count) 不匹配。")
   fi
   tbl_name="sendstorge_$group"
+ 
+  # —— 杂项配置校验（允许为空）——
+  max_post_stack=$(jq -r --arg group "$group" '.[$group].max_post_stack // empty' "$json_file")
+  max_image_number_one_post=$(jq -r --arg group "$group" '.[$group].max_image_number_one_post // empty' "$json_file")
+  friend_add_message=$(jq -r --arg group "$group" '.[$group].friend_add_message // empty' "$json_file")
+  friend_add_message_type=$(jq -r --arg group "$group" '.[$group].friend_add_message | type' "$json_file")
+  send_schedule_type=$(jq -r --arg group "$group" '.[$group].send_schedule | type' "$json_file")
 
+  # —— 校验 max_*：存在则必须为纯数字 ——
+  if [[ -n "$max_post_stack" && ! "$max_post_stack" =~ ^[0-9]+$ ]]; then
+    errors+=("错误：在 $group 中，max_post_stack 存在但不是纯数字：$max_post_stack")
+  fi
+  if [[ -n "$max_image_number_one_post" && ! "$max_image_number_one_post" =~ ^[0-9]+$ ]]; then
+    errors+=("错误：在 $group 中，max_image_number_one_post 存在但不是纯数字：$max_image_number_one_post")
+  fi
+
+  # —— 校验 friend_add_message：可空；若存在必须为字符串 ——
+  if [[ "$friend_add_message_type" != "null" && "$friend_add_message_type" != "string" ]]; then
+    errors+=("错误：在 $group 中，friend_add_message 必须是字符串或为空（当前为 $friend_add_message_type）。")
+  fi
+
+  # —— 校验 send_schedule：可空；若存在必须为字符串数组，元素为 HH:MM ——
+  if [[ "$send_schedule_type" != "null" ]]; then
+    if [[ "$send_schedule_type" != "array" ]]; then
+      errors+=("错误：在 $group 中，send_schedule 必须是数组（当前为 $send_schedule_type）。")
+    else
+      while IFS= read -r t; do
+        # 允许 9:00 或 09:00；小时 0–23，分钟 00–59
+        if [[ -n "$t" && ! "$t" =~ ^([01]?[0-9]|2[0-3]):[0-5][0-9]$ ]]; then
+          errors+=("错误：在 $group 中，send_schedule 含非法时间：$t（应为 HH:MM，例如 09:00）")
+        fi
+      done < <(jq -r --arg group "$group" '.[$group].send_schedule[] // empty' "$json_file")
+    fi
+  fi
   # 定义期望结构 SQL
   expected_schema="CREATE TABLE $tbl_name(tag INT, num INT, port INT, senderid TEXT);"
 

@@ -18,9 +18,19 @@ postqzone(){
     # Check the status
     post_statue=$(cat ./presend_out_fifo)
     echo 已收到回报
-    #post_statue返回
-    sendmsgpriv $senderid "#$numfinal 投稿已存入暂存区,你现在可以继续投稿(系统自动发送，请勿回复)"
-    sendmsggroup "#$numfinal 投稿已存入暂存区"
+
+    if echo "$post_statue"  | grep -q "success"; then
+        goingtosendid=("${goingtosendid[@]/$1}")
+        sendmsgpriv $senderid "#$numfinal 投稿已存入暂存区,你现在可以继续投稿(系统自动发送，请勿回复)"
+        sendmsggroup "#$numfinal 投稿已存入暂存区"
+
+    elif echo "$post_statue"  | grep -q "failed"; then
+        log_and_continue "空间发送调度服务发生错误"
+        exit 0
+    else
+        log_and_continue "空间发送调度服务发生错误"
+        exit 0
+    fi
     numfinal=$((numfinal + 1))
     echo $numfinal > ./cache/numb/"$groupname"_numfinal.txt
     current_mod_time_id=$(timeout 10s sqlite3 'cache/OQQWall.db' "select modtime from sender where senderid=$senderid;")

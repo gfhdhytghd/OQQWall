@@ -6,6 +6,7 @@ log_and_continue() {
     mkdir -p ./cache
     echo "command $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/Command_CrashReport.txt
     echo "command 错误已记录: $errmsg"
+    sendmsggroup "$errmsg"
 }
 
 file_to_watch="./getmsgserv/all/priv_post.json"
@@ -76,45 +77,60 @@ case $object in
             sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
         fi
         ;;
-    "调出")
-        max_tag=$(sqlite3 "cache/OQQWall.db" "SELECT MAX(tag) FROM preprocess;")
-        if [[ $command =~ ^[0-9]+$ ]]; then
-            echo max:$max_tag
-            if [[ $command -le $max_tag ]];then
-                ./getmsgserv/preprocess.sh "$command" randeronly
+     "调出")
+        #判断权限
+        groupnameoftag=$(sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$command';")
+        echo groupnamefromtag=$groupnameoftag,groupname=$groupname
+        if [[ "$groupnameoftag" == "$groupname" ]];then
+            max_tag=$(sqlite3 "cache/OQQWall.db" "SELECT MAX(tag) FROM preprocess;")
+            if [[ $command =~ ^[0-9]+$ ]]; then
+                echo max:$max_tag
+                if [[ $command -le $max_tag ]];then
+                    ./getmsgserv/preprocess.sh "$command" randeronly
+                else
+                    sendmsggroup "当前编号不在数据库中"
+                fi
             else
-                 sendmsggroup "当前编号不在数据库中"
+                echo "Error: arg is not a pure number."
+                sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
             fi
         else
-            echo "Error: arg is not a pure number."
-            sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
+            sendmsggroup '权限错误，无法对非本账号组的帖子进行操作，发送 @本账号 帮助 以查看帮助'
+            exit 1
         fi
         ;;
     "信息")
-        max_tag=$(sqlite3 "cache/OQQWall.db" "SELECT MAX(tag) FROM preprocess;")
-        if [[ $command =~ ^[0-9]+$ ]]; then
-            echo max:$max_tag
-            if [[ $command -le $max_tag ]];then
-                receiver=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$command';")
-                senderid=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = $command;")
-                json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$command';")
-                need_priv=$(echo $json_data|jq -r '.needpriv')
-                groupname=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$command';")
-                orin_json=$(sqlite3 "cache/OQQWall.db" "SELECT rawmsg FROM sender WHERE senderid='$senderid';")
-                if [[ $? -ne 0 || -z "$orin_json" ]]; then
-                    orin_json="不存在"
-                fi
-                sendmsggroup "接收者：$receiver
+        groupnameoftag=$(sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$command';")
+        echo groupnamefromtag=$groupnameoftag,groupname=$groupname
+        if [[ "$groupnameoftag" == "$groupname" ]];then
+            max_tag=$(sqlite3 "cache/OQQWall.db" "SELECT MAX(tag) FROM preprocess;")
+            if [[ $command =~ ^[0-9]+$ ]]; then
+                echo max:$max_tag
+                if [[ $command -le $max_tag ]];then
+                    receiver=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$command';")
+                    senderid=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = $command;")
+                    json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$command';")
+                    need_priv=$(echo $json_data|jq -r '.needpriv')
+                    groupname=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$command';")
+                    orin_json=$(sqlite3 "cache/OQQWall.db" "SELECT rawmsg FROM sender WHERE senderid='$senderid';")
+                    if [[ $? -ne 0 || -z "$orin_json" ]]; then
+                        orin_json="不存在"
+                    fi
+                    sendmsggroup "接收者：$receiver
 发送者：$senderid
 所属组：$groupname
 处理后 json 消息：$json_data
 此人当前 json 消消息：$orin_json"
+                else
+                    sendmsggroup "当前编号不在数据库中"
+                fi
             else
-                 sendmsggroup "当前编号不在数据库中"
+                echo "Error: arg is not a pure number."
+                sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
             fi
         else
-            echo "Error: arg is not a pure number."
-            sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
+            sendmsggroup '权限错误，无法对非本账号组的帖子进行操作，发送 @本账号 帮助 以查看帮助'
+            exit 1
         fi
         ;;
     "待处理")
@@ -202,6 +218,23 @@ $numbpending"
             #回滚numfinal为min_tag
             echo $min_num > ./cache/numb/"$groupname"_numfinal.txt
             sendmsggroup "已清空暂存区数据，当前外部编号为#$min_num"
+        fi
+        ;;
+    "发送暂存区")
+        jq -nc --arg group "$groupname" '{"action":"flush", "group":$group}' > ./presend_in_fifo
+        post_statue=$(cat ./presend_out_fifo)
+        echo 已收到回报
+
+        if echo "$post_statue"  | grep -q "success"; then
+            goingtosendid=("${goingtosendid[@]/$1}")
+            sendmsggroup "投稿已发送"
+
+        elif echo "$post_statue"  | grep -q "failed"; then
+            log_and_continue "空间发送调度服务发生错误"
+            exit 0
+        else
+            log_and_continue "空间发送调度服务发生错误"
+            exit 0
         fi
         ;;
     "自检")

@@ -1,6 +1,7 @@
 sendmsggroup() {
     msg=$1
     encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$msg")
+    echo "发送消息: $msg到QQ群$groupid,端口$mainqq_http_port"
     # 构建 curl 命令，并发送编码后的消息
     curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
 }

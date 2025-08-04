@@ -4,25 +4,10 @@
 source ./Global_toolkit.sh
 
 run_rules(){
-    max_post_stack=$(grep 'max_post_stack' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-    max_imaga_number_one_post=$(grep 'max_imaga_number_one_post' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-
-    # 检查 max_post_stack 是否为数字且非空
-    if ! [[ "$max_post_stack" =~ ^[0-9]+$ ]] || [ -z "$max_post_stack" ]; then
-        max_post_stack=1
-        sendmsggroup "警告: max_post_stack 配置无效，已使用默认值 1"
-    fi
-
-    # 检查 max_imaga_number_one_post 是否为数字且非空
-    if ! [[ "$max_imaga_number_one_post" =~ ^[0-9]+$ ]] || [ -z "$max_imaga_number_one_post" ]; then
-        max_imaga_number_one_post=30
-        sendmsggroup "警告: max_imaga_number_one_post 配置无效，已使用默认值 30"
-    fi
-
-    echo "max_post_stack: $max_post_stack"
-    echo "max_imaga_number_one_post: $max_imaga_number_one_post"
     tag=$(echo "$in_json_data" | jq -r '.tag')
     local cur_tag="$tag"
+    echo "max_post_stack: $max_post_stack"
+    echo "max_image_number_one_post: $max_image_number_one_post"
     # 取出所有 tag，直接放进 tags 数组，同时计算总行数
     if [[ -n $comment && "$comment" != "null" ]]; then
         echo "评论: $comment"
@@ -54,7 +39,7 @@ run_rules(){
         if [[ $current_post_num -ge $max_post_stack ]]; then
             postmanager all
         fi
-        if [[ $current_image_num -gt $max_imaga_number_one_post ]]; then
+        if [[ $current_image_num -gt $max_image_number_one_post ]]; then
             postmanager all
         fi
     fi
@@ -70,14 +55,14 @@ get_send_info(){
     receiver=$(jq -r '.[0].receiver' <<<"$json")
     comment=$(jq -r '.[0].comment'  <<<"$json")
     AfterLM=$(jq -r '.[0].AfterLM'  <<<"$json")
-    groupname=$(jq -r '.[0].ACgroup' <<<"$json")
-     if [[ "$comment" == "null" ]]; then
+    groupname=$(jq -r '.[0].ACgroup' <<<"$json")  
+    if [[ "$comment" == "null" ]]; then
         comment=""
     fi
     #检查 ACgroup 是否获取成功
         
     if [ -z "$groupname" ]; then
-        log_and_continue "获取 ACgroup 为空，请检查 preprocess 表中 tag: $1 对应的 ACgroup 字段"
+        log_and_continue   "获取 ACgroup 为空，请检查 preprocess 表中 tag: $1 对应的 ACgroup 字段"
         return 1
     fi
     # 当 json_data 为空时备用一个空 JSON 对象，避免 jq 解析出错
@@ -98,6 +83,20 @@ get_send_info(){
     mainqq_http_port=$(echo "$group_info" | jq -r '.mainqq_http_port')
     minorqq_http_ports=$(echo "$group_info" | jq -r '.minorqq_http_port[]')
     minorqqid=$(echo "$group_info" | jq -r '.minorqqid[]')
+    max_post_stack=$(echo "$group_info" | jq -r '.max_post_stack')
+    max_image_number_one_post=$(echo "$group_info" | jq -r '.max_image_number_one_post')
+
+    # 检查 max_post_stack 是否为数字且非空
+    if ! [[ "$max_post_stack" =~ ^[0-9]+$ ]] || [ -z "$max_post_stack" ]; then
+        max_post_stack=1
+        sendmsggroup "警告: max_post_stack 配置无效，已使用默认值 1"
+    fi
+    # 检查 max_image_number_one_post 是否为数字且非空
+    if ! [[ "$max_image_number_one_post" =~ ^[0-9]+$ ]] || [ -z "$max_image_number_one_post" ]; then
+        max_image_number_one_post=30
+        sendmsggroup "警告: max_image_number_one_post 配置无效，已使用默认值 30"
+    fi
+  
     echo "doing qq to port"
     qqidtoport "$receiver"
     echo "receiver:$receiver"
@@ -105,6 +104,56 @@ get_send_info(){
     echo "$port"
     run_rules || log_and_continue "run_rules 执行失败，tag: $1"
 }
+
+#把某个组的暂存内容全部发出
+flush_staged(){
+     # 直接用 groupname 在 AcountGroupcfg.json 中查配置（优先 key，次选 .acgroup）
+    group_info=$(jq -r --arg g "$target_group" '
+        if has($g) then .[$g]
+        else (to_entries[] | select(.key==$g or (.value.acgroup? == $g)) | .value)
+        end
+    ' AcountGroupcfg.json 2>/dev/null)
+
+    if [[ -z "$group_info" || "$group_info" == "null" ]]; then
+        log_and_continue "flush_staged: 未找到组 $target_group 的账户配置"
+        return 1
+    fi
+
+    # 设置全局变量，供 postmanager/send_list_gen/sendmsggroup 使用
+    groupname="$target_group"
+    mainqqid=$(echo "$group_info" | jq -r '.mainqqid')
+    mainqq_http_port=$(echo "$group_info" | jq -r '.mainqq_http_port')
+    groupid=$(echo "$group_info" | jq -r '.mangroupid')
+    minorqq_http_ports=$(echo "$group_info" | jq -r '.minorqq_http_port[]? | select(. != "")')
+    minorqqid=$(echo "$group_info" | jq -r '.minorqqid[]? | select(. != "")')
+
+    local target_group="${1:-$groupname}"
+    [[ -z "$target_group" ]] && { log_and_continue "flush_staged: groupname 未设置"; return 1; }
+
+    # 拉取该组所有已暂存 tag
+    mapfile -t tags < <(sqlite3 "$db_path" "SELECT tag FROM sendstorge_${target_group};")
+    if (( ${#tags[@]} == 0 )); then
+        sendmsggroup "flush: 组 ${target_group} 暂存为空，无需发送"
+        return 0
+    fi
+
+    # 保障必要参数有效
+    [[ "$max_image_number_one_post" =~ ^[0-9]+$ ]] || max_image_number_one_post=30
+    [[ -n "$max_attempts" ]] || max_attempts=3
+
+    # 校正数值型配置
+    tmp_max_post_stack=$(echo "$group_info" | jq -r '.max_post_stack // empty')
+    [[ "$tmp_max_post_stack" =~ ^[0-9]+$ ]] && max_post_stack="$tmp_max_post_stack" || max_post_stack=1
+
+    tmp_max_img=$(echo "$group_info" | jq -r '.max_image_number_one_post // empty')
+    [[ "$tmp_max_img" =~ ^[0-9]+$ ]] && max_image_number_one_post="$tmp_max_img" || max_image_number_one_post=30
+
+    # 不带评论统一发送
+    postmanager all || { log_and_continue "flush_staged: postmanager 失败（组：$target_group）"; return 1; }
+    sendmsggroup "flush: 组 ${target_group} 暂存内容已全部发送"
+    return 0
+}
+
 
 image_counter(){
     local total_count=0
@@ -117,6 +166,7 @@ image_counter(){
     done
     echo "$total_count"
 }
+
 atgenerate(){
     [[ "$at_unprived_sender" == "false" ]] && return 1
     final_at=''
@@ -170,8 +220,8 @@ postmanager(){
     sendqueue=("${goingtosendid[@]}")
     for qqid in "${sendqueue[@]}"; do
         echo "Sending Qzone use id: $qqid (total images: $total)"
-        for (( start=0; start<total || start==0; start+=max_imaga_number_one_post )); do
-            slice=( "${file_arr[@]:start:max_imaga_number_one_post}" )
+        for (( start=0; start<total || start==0; start+=max_image_number_one_post )); do
+            slice=( "${file_arr[@]:start:max_image_number_one_post}" )
             sub_filelist=$(printf '%s\n' "${slice[@]}" | jq -R . | jq -sc .)
             [[ -z $sub_filelist || $sub_filelist == "null" ]] && sub_filelist='[]'
             postprocess_pipe "$qqid" "$message" "$sub_filelist" || { log_and_continue "postprocess_pipe 失败，qqid: $qqid, tag: $tag"; send_failed=1; }
@@ -281,6 +331,7 @@ postprocess_pipe(){
 }
 
 
+
 # 初始化：读取配置并创建通信管道
 initialize(){
     db_path="./cache/OQQWall.db"
@@ -294,10 +345,68 @@ initialize(){
     if [ ! -p ./presend_out_fifo ]; then
         mkfifo ./presend_out_fifo
     fi
+    #启动定时发送
+    scheduler_loop &
     # 准备发送命令占位（使用持续运行的 qzone-serv-pipe 服务时无需额外命令）
     postcommand=""
     echo "sendcontrol初始化完成"
 }
+
+# ===== 定时调度 =====
+declare -A SCHEDULES   # 组 -> "HH:MM,HH:MM"
+declare -A LASTFIRE    # "组|HH:MM" -> YYYY-MM-DD
+
+load_schedules(){
+    local cfg="AcountGroupcfg.json"
+    SCHEDULES=()
+    # 提取 (acgroup或key, 逗号拼接的时刻) 列表
+    local rows
+    rows=$(jq -r '
+        to_entries[]
+        | select(.value.send_schedule? and (.value.send_schedule|length)>0)
+        | [ (.value.acgroup // .key), (.value.send_schedule | map(gsub("\\s+"; "")) | join(",")) ]
+        | @tsv
+    ' "$cfg" 2>/dev/null) || rows=""
+
+    while IFS=$'\t' read -r g times; do
+        [[ -z "$g" || -z "$times" ]] && continue
+        SCHEDULES["$g"]="$times"
+    done <<< "$rows"
+}
+
+mark_fired(){ local g="$1" hm="$2"; LASTFIRE["$g|$hm"]="$(date +%F)"; }
+should_fire_now(){
+    local g="$1" hm="$2" today; today=$(date +%F)
+    [[ "${LASTFIRE[$g|$hm]}" == "$today" ]] && return 1 || return 0
+}
+
+scheduler_loop(){
+    # 每轮都重载，便于热更新配置
+    while true; do
+        load_schedules
+        local nowHM; nowHM=$(date +%H:%M)
+        local g times hm list
+        for g in "${!SCHEDULES[@]}"; do
+            IFS=',' read -r -a list <<< "${SCHEDULES[$g]}"
+            for hm in "${list[@]}"; do
+                [[ "$hm" == "$nowHM" ]] || continue
+                should_fire_now "$g" "$hm" || continue
+
+                # 互斥锁，避免重入
+                local LOCKDIR="./cache/.sched.lock"
+                if mkdir "$LOCKDIR" 2>/dev/null; then
+                    {
+                        flush_staged "$g" || log_and_continue "定时发送失败：组 $g @ $hm"
+                        mark_fired "$g" "$hm"
+                    }
+                    rmdir "$LOCKDIR" 2>/dev/null || true
+                fi
+            done
+        done
+        sleep 20
+    done
+}
+
 
 # 主循环：持续从管道读取投稿发布请求
 main_loop(){
@@ -308,10 +417,22 @@ main_loop(){
         initsendstatue=""
         {
             in_json_data=$(cat ./presend_in_fifo)
+            #echo "发送调度获取到$in_json_data"
             # 解析输入JSON字段
+            action=$(jq -r '.action // empty' <<<"$in_json_data")
+            if [[ "$action" == "flush" ]]; then
+                target_group=$(jq -r '.group // empty' <<<"$in_json_data")
+                if flush_staged "$target_group"; then
+                    echo success > ./presend_out_fifo
+                else
+                    echo failed  > ./presend_out_fifo
+                fi
+                continue
+            fi
             tag=$(echo "$in_json_data" | jq -r '.tag')
             numfinal=$(echo "$in_json_data" | jq -r '.numb')
-            initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue')
+            initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue')  
+            #echo "发送调度获取到tag=$tag,numfinal=$numfinal"
             # 获取该群组对应的发送参数（群号、端口等）
             get_send_info "$tag" || log_and_continue "get_send_info 执行失败，tag: $tag"
         } || {

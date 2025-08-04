@@ -11,6 +11,7 @@ mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
 minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
 mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
 minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
+friend_add_message=$(echo "$group_info" | jq -r '.value.friend_add_message')
 port=""
 # 检查输入ID是否为mainqqid
 if [ "$receiver" == "$mainqqid" ]; then
@@ -31,4 +32,4 @@ sleep $((RANDOM % 241))
 curl "http://127.0.0.1:$port/set_friend_add_request?flag=$1&approve=true"
 source ./Global_toolkit.sh
 sleep 30
-sendmsgpriv "$senderid" "您的好友申请已通过，请阅读校园墙空间置顶后再投稿（系统自动发送请勿回复）"
+sendmsgpriv "$senderid" "$friend_add_message"

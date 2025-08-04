@@ -36,56 +36,49 @@
     <td align="center">
       <img src="readme_Resources/Screenshot_20250529_192801_TIM.jpg" width="220"><br/>
       <sub>单次多投稿发送效果</sub>
-    </td>
-    <td align="center">
-      <img src="readme_Resources/Screenshot_20250529_182106_TIM.jpg" width="220"><br/>
-      <sub>密集审核，队列发送</sub>
-    </td>
-    <td align="center">
-      <img src="readme_Resources/Screenshot_20250529_182255_TIM.jpg" width="220"><br/>
-      <sub>允许处理时间段内再次投稿</sub>
-    </td>
-  </tr>
-  <tr>
-    <td align="center">
+      <br/>
+      <br/>
       <img src="readme_Resources/Screenshot_20250529_182031_TIM.jpg" width="220"><br/>
       <sub>标准发送</sub>
-    </td>
-    <td align="center">
-      <img src="readme_Resources/Screenshot_20250529_182129_TIM.jpg" width="220"><br/>
-      <sub>管理员评论</sub>
-    </td>
-    <td align="center">
-      <img src="readme_Resources/Screenshot_20250529_193037_TIM.jpg" width="220"><br/>
-      <sub>自动匿名识别</sub>
-    </td>
-  </tr>
-  <tr>
-     <td align="center">
-      <img src="readme_Resources/Screenshot_20250529_192949_TIM.jpg" width="220"><br/>
+      <br/>
+      <br/>
+       <img src="readme_Resources/Screenshot_20250529_192949_TIM.jpg" width="220"><br/>
       <sub>图片渲染与单独发送</sub>
+      <br/>
+      <br/>
       <img src="readme_Resources/Screenshot_20250608_082047_TIM.jpg" width="220"><br/>
       <sub>支持多投稿合并发送</sub>
     </td>
     <td align="center">
+      <img src="readme_Resources/Screenshot_20250529_182106_TIM.jpg" width="220"><br/>
+      <sub>密集审核，队列发送</sub>
+      <br/>
+      <br/>
+      <img src="readme_Resources/Screenshot_20250529_182129_TIM.jpg" width="220"><br/>
+      <sub>管理员评论</sub>
+      <br/>
+      <br/>
       <img src="readme_Resources/c215a239525b663314d1a49a2c7d1c70.jpg" width="220"><br/>
       <sub>很牛逼的渲染器</sub>
     </td>
     <td align="center">
+      <img src="readme_Resources/Screenshot_20250529_182255_TIM.jpg" width="220"><br/>
+      <sub>允许处理时间段内再次投稿</sub>
+      <br/>
+      <br/>
+      <img src="readme_Resources/Screenshot_20250529_193037_TIM.jpg" width="220">
+      <br/>
+      <sub>自动匿名识别</sub>
+      <br/>
+      <br/>
       <img src="readme_Resources/e94f10d2f69646b484d38b09c3893277_720.jpg" width="220"><br/>
       <sub>支持合并转发聊天记录</sub>
     </td>
-  </tr>
 </table>
 </div>
 
-## 自动化测试
-执行 `tests/run_tests.sh` 将自动启动本项目并依照 `tests/test_plan.json` 与之交互，最终给出测试结果。
-
-⚠自动化测试脚本会修改您的配置文件,请先备份,且不要再生产环境中运行此脚本
-
 ## 路线图
-v0.10 增加卡片消息渲染
+v0.10 增加更多类型的消息渲染
 v0.11 为发送调度提供更多配置选项，增加发送调度插件功能，同步开发对于OQQWall的自动化测试脚本
 v1.0 基于自动化脚本，对系统稳定性和可靠性做出改善，增加鲁棒性（耐操程度），使其可以被放心的用于生产环境中
 
