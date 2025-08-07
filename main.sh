@@ -58,30 +58,6 @@ check_variable() {
 }
 
 
-getnumnext(){
-    numnow=$(cat ./numb.txt)
-    numnext=$((numnow + 1))
-    echo "$numnext" > ./numb.txt
-    echo "numnext=$numnext"
-}
-
-getnumnext-startup(){
-    echo 使用selenium校准编号...
-    getnumcmd='python3 SendQzone/qzonegettag-headless.py'
-    output=$(eval $getnumcmd)
-    if echo "$output" | grep -q "Log Error!"; then
-        numnow=$( cat ./numfinal.txt )
-        numfinal=$[ numnow + 1 ]
-        echo numfinal:$numfinal
-        echo $numfinal > ./numfinal.txt
-    else
-        numnow=$( cat ./numb.txt )
-        numfinal=$[ numnow + 1 ]
-        echo $numfinal > ./numfinal.txt
-    fi
-}
-
-
 if [[ $1 == -r ]]; then
   echo "执行子系统重启..."
   if [[ "$manage_napcat_internal" == "true" ]]; then
@@ -146,7 +122,6 @@ check_and_create "getmsgserv/all/" "directory"
 # 初始化文件
 check_and_create "/dev/shm/OQQWall/oqqwallhtmlcache.html" "file"
 check_and_create "./getmsgserv/all/commugroup.txt" "file"
-check_and_create "./numfinal.txt" "file"
 if [[ ! -f "getmsgserv/all/priv_post.json" ]]; then
     touch "getmsgserv/all/priv_post.json"
     echo "[]" >> "getmsgserv/all/priv_post.json"
