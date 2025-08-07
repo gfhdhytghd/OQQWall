@@ -257,11 +257,11 @@ $numbpending"
         printf -v syschecklist '%s硬盘使用情况: %s\n' "$syschecklist" "$disk_info"
 
         # 5. 检测各个服务是否在运行
-        if pgrep -f "python3 ./getmsgserv/serv.py" > /dev/null; then
+        if pgrep -f "python3 getmsgserv/serv.py" > /dev/null; then
             printf -v syschecklist '%sqq消息接收服务已在运行\n' "$syschecklist"
         else
             printf -v syschecklist '%sqq消息接收服务不在运行，正在尝试重启\n' "$syschecklist"
-            pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
+            pgrep -f "python3 getmsgserv/serv.py" | xargs kill -15
             python3 ./getmsgserv/serv.py &
             echo "serv.py started"
         fi
