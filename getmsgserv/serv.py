@@ -347,12 +347,12 @@ class RequestHandler(BaseHTTPRequestHandler):
 
         # 2 分钟内重复的同一 user_id 好友申请只处理一次
         if not should_process_friend_request(user_id, FRIEND_REQ_WINDOW_SEC):
-            logger.info(f"Duplicate friend request from {user_id} within 2 minutes; ignored.")
+            logger.info(f"Duplicate friend request from {user_id} within some minutes; ignored.")
             return
 
         if user_id and comment:
             add_suppression(user_id, comment, duration_sec=PRIVATE_SUPPRESSION_WINDOW_SEC)
-            logger.info(f"Added suppression for user {user_id} with comment='{comment}' for 2 minutes.")
+            logger.info(f"Added suppression for user {user_id} with comment='{comment}' for some minutes.")
         else:
             logger.warning("Friend request missing user_id or comment; suppression not added.")
 
@@ -596,3 +596,9 @@ def run(server_class=ThreadingHTTPServer, handler_class=RequestHandler):
 
 if __name__ == '__main__':
     run()
+
+
+# The following lines are ignored as per the request
+# - They were marked as IGNORE in the original code comments.
+# - They are not part of the recent edits and should not be included in the final code
+# - They are not relevant to the current context of the code.
