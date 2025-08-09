@@ -143,7 +143,8 @@ if [[ ! -f "AcountGroupcfg.json" ]]; then
       "max_post_stack":"1",
       "max_image_number_one_post":"20",
       "friend_add_message":"",
-      "send_schedule": []
+      "send_schedule": [],
+      "watermark_text": ""
     }
 }' > AcountGroupcfg.json
     echo "已创建文件: AcountGroupcfg.json"
@@ -429,7 +430,8 @@ jq -r '. | keys[]' "$json_file" | while read -r group; do
   friend_add_message=$(jq -r --arg group "$group" '.[$group].friend_add_message // empty' "$json_file")
   friend_add_message_type=$(jq -r --arg group "$group" '.[$group].friend_add_message | type' "$json_file")
   send_schedule_type=$(jq -r --arg group "$group" '.[$group].send_schedule | type' "$json_file")
-
+  watermark_text=$(jq -r --arg group "$group" '.[$group].watermark_text // empty' "$json_file")
+  
   # —— 校验 max_*：存在则必须为纯数字 ——
   if [[ -n "$max_post_stack" && ! "$max_post_stack" =~ ^[0-9]+$ ]]; then
     errors+=("错误：在 $group 中，max_post_stack 存在但不是纯数字：$max_post_stack")
@@ -443,6 +445,11 @@ jq -r '. | keys[]' "$json_file" | while read -r group; do
     errors+=("错误：在 $group 中，friend_add_message 必须是字符串或为空（当前为 $friend_add_message_type）。")
   fi
 
+  # —— 校验 friend_add_message：可空；若存在必须为字符串 ——
+  if [[ "$watermark_text" != "null" && "$watermark_text" != "string" ]]; then
+    errors+=("错误：在 $group 中，friend_add_message 必须是字符串或为空（当前为 $watermark_text")
+  fi
+  
   # —— 校验 send_schedule：可空；若存在必须为字符串数组，元素为 HH:MM ——
   if [[ "$send_schedule_type" != "null" ]]; then
     if [[ "$send_schedule_type" != "array" ]]; then
