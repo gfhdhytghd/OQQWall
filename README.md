@@ -22,9 +22,7 @@
 
 本系统支持如下类型的消息：文本，表情，表情包，图片，视频，文件，卡片，聊天记录
 
-已知问题如下：
-<br/>发件流程人在回路，管理不在线会导致帖子积压
-<br/>没有历史消息处理逻辑，onebot下线过程中的积压投稿无法处理
+技术交流请加群1056259167
 
 # <div align=center>文档</div>
 ## <div align=center > [快速开始](https://github.com/gfhdhytghd/OQQWall/wiki/%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B) | [全部文档](https://github.com/gfhdhytghd/OQQWall/wiki)</div>
@@ -81,6 +79,8 @@
 v0.10 增加更多类型的消息渲染
 v0.11 为发送调度提供更多配置选项，增加发送调度插件功能，同步开发对于OQQWall的自动化测试脚本
 v1.0 基于自动化脚本，对系统稳定性和可靠性做出改善，增加鲁棒性（耐操程度），使其可以被放心的用于生产环境中
+
+
 
 <div align="center">
 
