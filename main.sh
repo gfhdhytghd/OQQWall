@@ -144,7 +144,8 @@ if [[ ! -f "AcountGroupcfg.json" ]]; then
       "max_image_number_one_post":"20",
       "friend_add_message":"",
       "send_schedule": [],
-      "watermark_text": ""
+      "watermark_text": "",
+    "quick_replies": {}
     }
 }' > AcountGroupcfg.json
     echo "已创建文件: AcountGroupcfg.json"
@@ -342,7 +343,7 @@ if ! jq empty "$json_file" >/dev/null 2>&1; then
 fi
 
 # 获取所有 group 并逐行读取
-jq -r '. | keys[]' "$json_file" | while read -r group; do
+while read -r group; do
   echo "正在检查 group: $group"
   mangroupid=$(jq -r --arg group "$group" '.[$group].mangroupid' "$json_file")
   mainqqid=$(jq -r --arg group "$group" '.[$group].mainqqid' "$json_file")
@@ -431,6 +432,7 @@ jq -r '. | keys[]' "$json_file" | while read -r group; do
   friend_add_message_type=$(jq -r --arg group "$group" '.[$group].friend_add_message | type' "$json_file")
   send_schedule_type=$(jq -r --arg group "$group" '.[$group].send_schedule | type' "$json_file")
   watermark_text=$(jq -r --arg group "$group" '.[$group].watermark_text // empty' "$json_file")
+  watermark_text_type=$(jq -r --arg group "$group" '.[$group].watermark_text | type' "$json_file")
   
   # —— 校验 max_*：存在则必须为纯数字 ——
   if [[ -n "$max_post_stack" && ! "$max_post_stack" =~ ^[0-9]+$ ]]; then
@@ -445,9 +447,9 @@ jq -r '. | keys[]' "$json_file" | while read -r group; do
     errors+=("错误：在 $group 中，friend_add_message 必须是字符串或为空（当前为 $friend_add_message_type）。")
   fi
 
-  # —— 校验 friend_add_message：可空；若存在必须为字符串 ——
-  if [[ "$watermark_text" != "null" && "$watermark_text" != "string" ]]; then
-    errors+=("错误：在 $group 中，friend_add_message 必须是字符串或为空（当前为 $watermark_text")
+  # —— 校验 watermark_text：可空；若存在必须为字符串 ——
+  if [[ "$watermark_text_type" != "null" && "$watermark_text_type" != "string" ]]; then
+    errors+=("错误：在 $group 中，watermark_text 必须是字符串或为空（当前为 $watermark_text_type）。")
   fi
   
   # —— 校验 send_schedule：可空；若存在必须为字符串数组，元素为 HH:MM ——
@@ -461,6 +463,36 @@ jq -r '. | keys[]' "$json_file" | while read -r group; do
           errors+=("错误：在 $group 中，send_schedule 含非法时间：$t（应为 HH:MM，例如 09:00）")
         fi
       done < <(jq -r --arg group "$group" '.[$group].send_schedule[] // empty' "$json_file")
+    fi
+  fi
+
+  # —— 校验 quick_replies：可空；若存在必须为对象，键值对为字符串 ——
+  quick_replies_type=$(jq -r --arg group "$group" '.[$group].quick_replies | type' "$json_file")
+  if [[ "$quick_replies_type" != "null" ]]; then
+    if [[ "$quick_replies_type" != "object" ]]; then
+      errors+=("错误：在 $group 中，quick_replies 必须是对象（当前为 $quick_replies_type）。")
+    else
+      # 检查每个快捷回复指令是否与审核指令冲突
+      audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "评论" "回复" "展示" "拉黑")
+      while IFS='|' read -r cmd_name cmd_content; do
+        if [[ -n "$cmd_name" && -n "$cmd_content" ]]; then
+          # 检查是否与审核指令冲突
+          for audit_cmd in "${audit_commands[@]}"; do
+            if [[ "$cmd_name" == "$audit_cmd" ]]; then
+              errors+=("错误：在 $group 中，快捷回复指令 '$cmd_name' 与审核指令冲突。")
+              break
+            fi
+          done
+          
+          # 检查指令名和内容是否为空
+          if [[ -z "$cmd_name" ]]; then
+            errors+=("错误：在 $group 中，快捷回复指令名不能为空。")
+          fi
+          if [[ -z "$cmd_content" ]]; then
+            errors+=("错误：在 $group 中，快捷回复内容不能为空。")
+          fi
+        fi
+      done < <(jq -r --arg group "$group" '.[$group].quick_replies | to_entries[] | .key + "|" + .value' "$json_file")
     fi
   fi
   # 定义期望结构 SQL
@@ -495,17 +527,37 @@ SQL
     echo
   fi
 
-done
+done <<< "$(jq -r '. | keys[]' "$json_file")"
 
-# 打印所有错误
+# 打印检查结果：区分“错误”和“警告”，仅在存在“错误”时退出
+has_error=0
 if [ ${#errors[@]} -ne 0 ]; then
+  for msg in "${errors[@]}"; do
+    if [[ "$msg" == 错误：* ]]; then
+      has_error=1
+      break
+    fi
+  done
+fi
+
+if [ $has_error -eq 1 ]; then
   echo "以下错误已被发现："
-  for error in "${errors[@]}"; do
-    echo "$error"
+  for msg in "${errors[@]}"; do
+    echo "$msg"
   done
   exit 1
 else
-  echo "账户组配置文件验证完成，没有发现错误。"
+  if [ ${#errors[@]} -ne 0 ]; then
+    echo "发现以下警告："
+    for msg in "${errors[@]}"; do
+      # 只打印警告行
+      if [[ "$msg" == 警告：* ]]; then
+        echo "$msg"
+      fi
+    done
+  else
+    echo "账户组配置文件验证完成，没有发现错误。"
+  fi
 fi
 mangroupids=($(jq -r '.[] | .mangroupid' ./AcountGroupcfg.json))
 

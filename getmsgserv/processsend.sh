@@ -79,6 +79,30 @@ echo processsend收到审核指令:$1
 object=$(echo $1 | awk '{print $1}')
 command=$(echo $1 | awk '{print $2}')
 flag=$(echo $1 | awk '{print $3}')
+
+# 检查快捷回复指令是否与审核指令冲突
+check_quick_reply_conflict() {
+    local cmd="$1"
+    local group="$2"
+    local json_file="$3"
+    
+    # 定义所有审核指令
+    local audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "评论" "回复" "展示" "拉黑")
+    
+    # 检查是否与审核指令冲突
+    for audit_cmd in "${audit_commands[@]}"; do
+        if [[ "$cmd" == "$audit_cmd" ]]; then
+            # 检查是否在快捷回复中配置了相同的指令
+            quick_reply_exists=$(jq -r --arg group "$group" --arg cmd "$cmd" '.[$group].quick_replies[$cmd] // empty' "$json_file")
+            if [[ -n "$quick_reply_exists" && "$quick_reply_exists" != "null" ]]; then
+                sendmsggroup "警告：快捷回复指令 '$cmd' 与审核指令冲突，请修改配置文件中的快捷回复指令名称或者删除它"
+                return 1
+            fi
+        fi
+    done
+    return 0
+}
+
 senderid=$(timeout 10s sqlite3 'cache/OQQWall.db' "select senderid from preprocess where tag=$object;")
 groupname=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$object';")
 last_mod_time_id=$(timeout 10s sqlite3 'cache/OQQWall.db' "select processtime from sender where senderid=$senderid;")
@@ -112,6 +136,14 @@ else
     fi
     ((i++))
   done
+fi
+
+# 定义json_file变量
+json_file="./AcountGroupcfg.json"
+
+# 执行冲突检测（在groupid和port定义之后）
+if ! check_quick_reply_conflict "$command" "$groupname" "$json_file"; then
+    exit 1
 fi
 echo port=$port
 goingtosendid=("$mainqqid")
@@ -259,7 +291,16 @@ EOF
         sendmsggroup "内部编号$object, 请发送指令"
         ;;
     *)
-        sendmsggroup "没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助"
-        sendmsggroup "内部编号$object, 请发送指令"
+        # 检查是否为快捷回复指令
+        quick_reply_content=$(jq -r --arg group "$groupname" --arg cmd "$command" '.[$group].quick_replies[$cmd] // empty' "$json_file")
+        if [[ -n "$quick_reply_content" && "$quick_reply_content" != "null" ]]; then
+            # 发送快捷回复
+            sendmsgpriv $senderid "$quick_reply_content"
+            sendmsggroup "已发送快捷回复：$quick_reply_content"
+            sendmsggroup "内部编号$object, 请发送指令"
+        else
+            sendmsggroup "没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助"
+            sendmsggroup "内部编号$object, 请发送指令"
+        fi
         ;;
 esac
