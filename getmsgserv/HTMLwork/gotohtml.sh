@@ -816,7 +816,6 @@ html_content=$(cat <<EOF
         </div>
         <div class="content">
             ${message_html}
-            <div style="color: rgba(48, 99, 210, 0.911); font-family: 'Georgia', 'Cambria', 'Palatino Linotype', 'Book Antiqua', serif; font-style: italic;">Powered By OQQWall</div>
         </div>
     </div>
      <script>
