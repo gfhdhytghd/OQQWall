@@ -202,6 +202,7 @@ generate_at_list() {
     
     local final_at=''
     local t
+    local -A seen_senders  # 用于去重
     
     echo "DEBUG: generate_at_list called with tags: $*" >&2
     
@@ -223,8 +224,9 @@ generate_at_list() {
         
         echo "DEBUG: Tag $t -> needpriv=$need_priv, senderid=$atsenderid" >&2
         
-        if [[ "$need_priv" == "false" ]]; then
+        if [[ "$need_priv" == "false" && -n "$atsenderid" && -z "${seen_senders[$atsenderid]}" ]]; then
             final_at+=", @{uin:$atsenderid,nick:,who:1}"
+            seen_senders[$atsenderid]=1  # 标记为已处理
         fi
     done
     
@@ -350,9 +352,27 @@ send_feedback() {
 
 # 发送管理器
 manage_posts() {
-    local tags=("$@")
-    local comment="${2:-}"
+    local tags=()
+    local comment=""
     local send_failed=0
+    
+    # 处理参数：最后一个参数可能是评论
+    if [[ $# -gt 0 ]]; then
+        # 检查最后一个参数是否看起来像评论（不是纯数字）
+        if [[ "${!#}" =~ ^[0-9]+$ ]]; then
+            # 最后一个参数是纯数字，可能是tag，所有参数都是tags
+            tags=("$@")
+        else
+            # 最后一个参数不是纯数字，可能是评论
+            comment="${!#}"
+            # 前面的参数都是tags
+            tags=("${@:1:$(( $# - 1 ))}")
+        fi
+    fi
+    
+    echo "DEBUG: manage_posts called with args: $*" >&2
+    echo "DEBUG: tags array: ${tags[*]}" >&2
+    echo "DEBUG: comment: '$comment'" >&2
     
     sendmsggroup "执行发送..."
     
