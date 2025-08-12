@@ -312,6 +312,109 @@ $numbpending"
             sendmsggroup "$msg"
         fi
         ;;
+    "快捷回复")
+        # 检查是否有子命令
+        if [[ -n "$command" ]]; then
+            case "$command" in
+                "添加")
+                    # 格式：快捷回复 添加 指令名=内容
+                    if [[ -n "$flag" ]]; then
+                        # 解析指令名和内容
+                        if [[ "$flag" == *"="* ]]; then
+                            cmd_name=$(echo "$flag" | cut -d'=' -f1)
+                            cmd_content=$(echo "$flag" | cut -d'=' -f2-)
+                            
+                            # 检查指令名是否为空
+                            if [[ -z "$cmd_name" ]]; then
+                                sendmsggroup "错误：指令名不能为空"
+                                exit 1
+                            fi
+                            
+                            # 检查内容是否为空
+                            if [[ -z "$cmd_content" ]]; then
+                                sendmsggroup "错误：快捷回复内容不能为空"
+                                exit 1
+                            fi
+                            
+                            # 检查是否与审核指令冲突
+                            audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "评论" "回复" "展示" "拉黑")
+                            for audit_cmd in "${audit_commands[@]}"; do
+                                if [[ "$cmd_name" == "$audit_cmd" ]]; then
+                                    sendmsggroup "错误：快捷回复指令 '$cmd_name' 与审核指令冲突，请使用其他指令名"
+                                    exit 1
+                                fi
+                            done
+                            
+                            # 使用jq更新配置文件
+                            temp_file=$(mktemp)
+                            jq --arg group "$groupname" --arg cmd "$cmd_name" --arg content "$cmd_content" \
+                               '.[$group].quick_replies[$cmd] = $content' "$json_file" > "$temp_file"
+                            
+                            if [[ $? -eq 0 ]]; then
+                                mv "$temp_file" "$json_file"
+                                sendmsggroup "已添加快捷回复指令：$cmd_name"
+                            else
+                                rm -f "$temp_file"
+                                sendmsggroup "添加快捷回复失败，请检查配置文件格式"
+                            fi
+                        else
+                            sendmsggroup "错误：格式不正确，请使用 '指令名=内容' 的格式"
+                        fi
+                    else
+                        sendmsggroup "错误：请提供快捷回复指令名和内容，格式：快捷回复 添加 指令名=内容"
+                    fi
+                    ;;
+                "删除")
+                    # 格式：快捷回复 删除 指令名
+                    if [[ -n "$flag" ]]; then
+                        # 检查指令是否存在
+                        existing_content=$(jq -r --arg group "$groupname" --arg cmd "$flag" '.[$group].quick_replies[$cmd] // empty' "$json_file")
+                        if [[ -z "$existing_content" || "$existing_content" == "null" ]]; then
+                            sendmsggroup "错误：快捷回复指令 '$flag' 不存在"
+                            exit 1
+                        fi
+                        
+                        # 使用jq删除配置
+                        temp_file=$(mktemp)
+                        jq --arg group "$groupname" --arg cmd "$flag" \
+                           '.[$group].quick_replies = (.[$group].quick_replies | del(.[$cmd]))' "$json_file" > "$temp_file"
+                        
+                        if [[ $? -eq 0 ]]; then
+                            mv "$temp_file" "$json_file"
+                            sendmsggroup "已删除快捷回复指令：$flag"
+                        else
+                            rm -f "$temp_file"
+                            sendmsggroup "删除快捷回复失败，请检查配置文件格式"
+                        fi
+                    else
+                        sendmsggroup "错误：请提供要删除的快捷回复指令名"
+                    fi
+                    ;;
+                *)
+                    sendmsggroup "错误：未知的子命令 '$command'，支持的子命令：添加、删除"
+                    ;;
+            esac
+        else
+            # 显示快捷回复列表
+            quick_replies=$(jq -r --arg group "$groupname" '.[$group].quick_replies // empty' "$json_file")
+            if [[ -z "$quick_replies" || "$quick_replies" == "null" ]]; then
+                sendmsggroup "当前账户组未配置快捷回复"
+            else
+                msg="当前账户组快捷回复列表：
+"
+                # 使用jq遍历快捷回复配置
+                while IFS='|' read -r key value; do
+                    if [[ -n "$key" && -n "$value" ]]; then
+                        msg+="
+指令: $key
+内容: $value
+"
+                    fi
+                done < <(echo "$quick_replies" | jq -r 'to_entries[] | .key + "|" + .value')
+                sendmsggroup "$msg"
+            fi
+        fi
+        ;;
     "帮助")
         help='全局指令:
 这些是可以在任何时刻@本账号调用的指令
@@ -349,6 +452,13 @@ $numbpending"
 
 设定编号
 用法：设定编号 xxx （xxx是你希望下一条说说带有的外部编号，必须是纯数字）
+
+快捷回复：
+查看当前账户组配置的快捷回复列表
+快捷回复 添加 指令名=内容：
+添加快捷回复指令
+快捷回复 删除 指令名：
+删除指定的快捷回复指令
 
 帮助:
 查看这个帮助列表
@@ -390,7 +500,7 @@ $numbpending"
 重渲染：
 重新进行 聊天记录->图片 的过程，但是不重新进行AI分段步骤（通常仅用于调试渲染管道）
 
-扩列审核：
+扩列审查：
 扩列审核流程，系统会自动获取对方QQ等级，空间开放状态和qq名片，并尝试寻找和扫描二维码，然后将相关信息发送到群中
 
 评论：
@@ -406,7 +516,11 @@ $numbpending"
 
 拉黑：
 不再接收来自此人的投稿
-用法： @本帐号 内部编号 拉黑 理由 （理由是可选的，若不提供则会记录无理由拉黑）'
+用法： @本帐号 内部编号 拉黑 理由 （理由是可选的，若不提供则会记录无理由拉黑）
+
+快捷回复指令：
+使用预设的快捷回复模板向投稿人发送消息
+用法：@本帐号 内部编号 快捷指令名'
         sendmsggroup "$help"
         ;;
     *)

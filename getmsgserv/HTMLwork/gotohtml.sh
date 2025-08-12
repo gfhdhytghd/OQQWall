@@ -19,6 +19,11 @@ if [[ -z "$json_data" ]]; then
 fi
 [[ "$DEBUG" == "1" ]] && printf '%s\n' "$json_data" > "./cache/debug_${tag}_AfterLM.json" && log "Saved ./cache/debug_${tag}_AfterLM.json"
 
+# get watermark_text
+json_file="./AcountGroupcfg.json"
+groupname=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$tag';")
+watermark_text=$(jq -r --arg g "$groupname" '.[$g].watermark_text' "$json_file")
+
 
 # === Generate QRs for every card jumpUrl (support nested forward) ===
 echo "$json_data" | jq -r --arg DBG "$DEBUG" '
@@ -116,6 +121,7 @@ fi
 icon_dir="file://$(pwd)/getmsgserv/HTMLwork/source"
 poke_icon="file://$(pwd)/getmsgserv/LM_work/source/poke.png"
 
+rotate='`rotate(-${angle}deg)` '
 # === Build HTML for messages (with recursive forward rendering) ===
 message_html=$(echo "$json_data" | jq -r \
   --arg base "$icon_dir" --arg poke "$poke_icon" --arg qr "$qr_dir" --arg DBG "$DEBUG" '
@@ -176,9 +182,9 @@ message_html=$(echo "$json_data" | jq -r \
       "<img src=\"" + .data.url + "\" alt=\"Image\">"
 
     elif .type == "video" then
-      "<div class=\"bubble\"><video controls autoplay muted><source src=\"" +
-      (if .data.file then "file://" + .data.file else .data.url end) +
-      "\" type=\"video/mp4\">Your browser does not support the video tag.</video></div>"
+      "<video controls autoplay muted><source src=\"" +
+      (if .data.file then .data.url end) +
+      "\" type=\"video/mp4\">Your browser does not support the video tag.</video>"
 
     elif .type == "poke" then
       "<img class=\"poke-icon\" src=\"" + $poke + "\" alt=\"Poke\">"
@@ -764,8 +770,39 @@ html_content=$(cat <<EOF
           word-break: break-word;      /* 处理超长英文/URL */
           /* 如果希望更激进换行可改为：overflow-wrap: anywhere; */
           }
+          /* 覆盖层不占位，不挡交互 */
+          .container { position: relative; }
 
+          .wm-overlay{
+            position: absolute;
+            inset: 0;                 /* 覆盖整个 .container */
+            pointer-events: none;     /* 不阻挡点击/选择 */
+            z-index: 999;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
 
+          }
+
+          .wm-item{
+            position: absolute;
+            white-space: nowrap;
+            user-select: none;
+            font-family: "PingFang SC","Microsoft YaHei",Arial,sans-serif;
+            font-weight: 500;
+            /* 低透明+微描边：在深/浅底都能看清，但不刺眼 */
+            color: rgba(0,0,0,1);
+            text-shadow:
+              0 0 1px rgba(255,255,255,0.25),
+              0 0 1px rgba(255,255,255,0.25);
+            transform: rotate(-24deg);
+            line-height: 1;
+            mix-blend-mode: multiply;  /* 让颜色更自然地贴合背景 */
+          }
+
+          @media print {
+            /* 打印时部分浏览器对混合模式支持一般，关掉更稳 */
+            .wm-item{ mix-blend-mode: normal; }
+          }
     </style>
 </head>
 <body>
@@ -781,8 +818,8 @@ html_content=$(cat <<EOF
             ${message_html}
         </div>
     </div>
-    <script>
-        window.onload = function() {
+     <script>
+        window.onload = function () {
             const container = document.querySelector('.container');
             const contentHeight = container.scrollHeight;
             const pageHeight4in = 364; // 4 inches = 96px * 4
@@ -800,6 +837,118 @@ html_content=$(cat <<EOF
             const style = document.createElement('style');
             style.innerHTML = '@page { size: ' + pageSize + '; margin: 0 !important; }';
             document.head.appendChild(style);
+            addWatermark({
+                text: '${watermark_text}',
+                // 4in 宽(≈384px)推荐默认——更小更克制
+                opacity: 0.12,
+                angle: 24,
+                fontSize: 40,   // ← 从 56~64 降到 36~44 更合适
+                tile: 480,      // ← 间距也相应减小，避免密度太大
+                jitter: 10
+            });
+
+            function addWatermark(opts) {
+                const container = document.querySelector('.container');
+
+                // 创建覆盖层
+                let overlay = container.querySelector('.wm-overlay');
+                if (!overlay) {
+                    overlay = document.createElement('div');
+                    overlay.className = 'wm-overlay';
+                    container.appendChild(overlay);
+                } else {
+                    overlay.innerHTML = ''; // 重新渲染时清空
+                }
+
+                // 严格使用容器的可视尺寸，避免对文档布局产生任何影响
+                const W = container.clientWidth;
+                const H = container.scrollHeight;     // 高度按内容
+                overlay.style.width = W + 'px';
+                overlay.style.height = H + 'px';
+                const text = opts.text ?? ('Shared • ' + new Date().toISOString().slice(0, 10));
+                const opacity = 0.1;
+                const angle = Math.max(0, opts.angle ?? 24);
+                const fontSize = 28;
+                const tile = 220;
+                const jitter = opts.jitter ?? 10;
+
+                // 先创建一个隐藏样本元素，量出旋转后的包围盒尺寸，便于“限界”布点
+                const probe = document.createElement('span');
+                probe.className = 'wm-item';
+                probe.textContent = text;
+                probe.style.fontSize = fontSize + 'px';
+                probe.style.opacity = opacity.toString();
+                probe.style.transform = ${rotate};
+                probe.style.visibility = 'hidden';
+                probe.style.left = '-9999px';
+                probe.style.top = '-9999px';
+                overlay.appendChild(probe);
+                const rect = probe.getBoundingClientRect();
+                const stampW = rect.width;
+                const stampH = rect.height;
+                overlay.removeChild(probe);
+
+                // 计算网格：仅在容器内布点，保证任何抖动后也不会越界
+                const padX = Math.ceil(stampW * 0.5);
+                const padY = Math.ceil(stampH * 0.5);
+                const startX = padX;
+                const endX = Math.max(padX, W - padX);
+                const startY = padY;
+                const endY = Math.max(padY, H - padY);
+
+                // 列/行数量
+                // …前面保持不变：测出 stampW, stampH，计算 padX/padY …
+
+                // 只在可用宽度内估算列数
+                const cols = Math.max(1, Math.floor((W - 2*padX) / tile) + 1);
+                // 高度同理
+                const rows = Math.max(1, Math.floor((H - 2*padY) / tile) + 1);
+
+                // —— 水平居中 ——
+                // 以“水印中心点”计算：第一列的中心点在容器中心的左侧 gridSpan/2 处
+                const centerX = W / 2;
+                const gridSpanX = (cols - 1) * tile;
+                const firstCX = centerX - gridSpanX / 2;
+
+                // （可选）垂直也居中：否则就从 padY 顶部开始
+                const centerVertical = false; // 想竖向也居中改成 true
+                const baseCY0 = centerVertical ? (H/2 - ((rows - 1) * tile) / 2) : (padY + stampH/2);
+
+                for (let r = 0; r < rows; r++) {
+                  for (let c = 0; c < cols; c++) {
+                    const span = document.createElement('span');
+                    span.className = 'wm-item';
+                    span.textContent = text;
+                    span.style.fontSize = fontSize + 'px';
+                    span.style.opacity  = opacity.toString();
+                    span.style.transform = ${rotate};
+
+                    // 交错排布（可选，让视觉更满）
+                    const stagger = (r % 2) ? tile / 2 : 0;
+
+                    // 以“中心点”定位
+                    const cx = firstCX + c * tile + stagger;
+                    const cy = baseCY0 + r * tile;
+
+                    // 轻微抖动
+                    const jx = jitter ? (Math.random()*2-1)*jitter : 0;
+                    const jy = jitter ? (Math.random()*2-1)*jitter : 0;
+
+                    // 转成左上角坐标
+                    let x = Math.round(cx + jx - stampW / 2);
+                    let y = Math.round(cy + jy - stampH / 2);
+
+                    // ★ 硬性限界：不超过 overlay（也就是 container）边界
+                    x = Math.max(0, Math.min(W - stampW, x));
+                    y = Math.max(0, Math.min(H - stampH, y));
+
+                    span.style.left = x + 'px';
+                    span.style.top  = y + 'px';
+                    overlay.appendChild(span);
+                  }
+                }
+
+            }
         };
     </script>
 </body>
