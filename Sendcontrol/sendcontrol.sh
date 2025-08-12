@@ -1,402 +1,651 @@
 #!/bin/bash
 
+# =============================================================================
+# OQQWall SendControl 模块 - 优化版本
+# 功能：管理QQ空间投稿的发送控制
+# =============================================================================
+
+set -euo pipefail  # 严格模式
+
 # 激活虚拟环境
 source ./Global_toolkit.sh
 
-run_rules(){
-    tag=$(echo "$in_json_data" | jq -r '.tag')
-    local cur_tag="$tag"
-    echo "max_post_stack: $max_post_stack"
-    echo "max_image_number_one_post: $max_image_number_one_post"
-    # 取出所有 tag，直接放进 tags 数组，同时计算总行数
-    if [[ -n $comment && "$comment" != "null" ]]; then
-        echo "评论: $comment"
-        initsendstatue=now
-    fi
-    if [[ $initsendstatue == "now" ]]; then
-        echo "立即发送..."
-        if [[ $(sqlite3 "$db_path" "SELECT COUNT(*) FROM sendstorge_$groupname;") -gt 0 ]]; then
-            tags=( $(sqlite3 "$db_path" "SELECT tag FROM sendstorge_$groupname;") )
-            postmanager all  # 不带评论
-        fi
-        sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"   # 清空表
-        savetostorge "$cur_tag" "$numfinal" "$port" "$senderid"
-        # 重新拉取本组全部 tag
-        readarray -t tags < <(sqlite3 "$db_path" "SELECT tag FROM sendstorge_$groupname;")
-        current_post_num="${#tags[@]}"
-        current_image_num=$(image_counter "${tags[@]}")
-        echo "当前投稿数: $current_post_num"
-        echo "当前总图片数: $current_image_num"
-        # 再统一发送
-        postmanager all "$comment"
-    else
-        savetostorge "$cur_tag" "$numfinal" "$port" "$senderid"
-        readarray -t tags < <(sqlite3 "$db_path" "SELECT tag FROM sendstorge_$groupname;")
-        # 使用数组长度作为 current_post_num
-        current_post_num="${#tags[@]}"
-        # 计算当前所有图片数
-        current_image_num=$(image_counter "${tags[@]}")
-        if [[ $current_post_num -ge $max_post_stack ]]; then
-            postmanager all
-        fi
-        if [[ $current_image_num -gt $max_image_number_one_post ]]; then
-            postmanager all
-        fi
-    fi
+# =============================================================================
+# 配置管理模块
+# =============================================================================
+
+# 配置常量
+readonly CONFIG_FILE="oqqwall.config"
+readonly DB_PATH="./cache/OQQWall.db"
+readonly ACCOUNT_CONFIG_FILE="AcountGroupcfg.json"
+readonly DEFAULT_MAX_ATTEMPTS=3
+readonly DEFAULT_MAX_POST_STACK=1
+readonly DEFAULT_MAX_IMAGE_NUMBER=30
+
+# 全局配置变量
+declare -g max_attempts
+declare -g at_unprived_sender
+
+# 加载基础配置
+load_base_config() {
+    max_attempts=$(grep 'max_attempts_qzone_autologin' "$CONFIG_FILE" | cut -d'=' -f2 | tr -d '"' || echo "$DEFAULT_MAX_ATTEMPTS")
+    at_unprived_sender=$(grep 'at_unprived_sender' "$CONFIG_FILE" | cut -d'=' -f2 | tr -d '"' || echo "false")
+    
+    # 验证配置
+    [[ "$max_attempts" =~ ^[0-9]+$ ]] || max_attempts=$DEFAULT_MAX_ATTEMPTS
 }
 
-# 根据组名获取群组和账号发送参数
-get_send_info(){
-    json=$(sqlite3 -json cache/OQQWall.db "
-    SELECT senderid, receiver, comment, AfterLM, ACgroup
-    FROM preprocess WHERE tag='$1';
+# =============================================================================
+# 数据库操作模块
+# =============================================================================
+
+# 获取投稿信息
+get_post_info() {
+    local tag="$1"
+    local json
+    
+    json=$(sqlite3 -json "$DB_PATH" "
+        SELECT senderid, receiver, comment, AfterLM, ACgroup
+        FROM preprocess WHERE tag='$tag';
     ")
-    senderid=$(jq -r '.[0].senderid' <<<"$json")
-    receiver=$(jq -r '.[0].receiver' <<<"$json")
-    comment=$(jq -r '.[0].comment'  <<<"$json")
-    AfterLM=$(jq -r '.[0].AfterLM'  <<<"$json")
-    groupname=$(jq -r '.[0].ACgroup' <<<"$json")  
-    if [[ "$comment" == "null" ]]; then
-        comment=""
-    fi
-    #检查 ACgroup 是否获取成功
-        
-    if [ -z "$groupname" ]; then
-        log_and_continue   "获取 ACgroup 为空，请检查 preprocess 表中 tag: $1 对应的 ACgroup 字段"
+    
+    if [[ -z "$json" || "$json" == "[]" ]]; then
+        log_error "未找到tag为 $tag 的投稿信息"
         return 1
     fi
-    # 当 json_data 为空时备用一个空 JSON 对象，避免 jq 解析出错
-    [ -z "$json_data" ] && json_data="{}"
-    need_priv=$(echo "$json_data" | jq -r '.needpriv // "false"' 2>/dev/null)
+    
+    echo "$json"
+}
+
+# 保存投稿到暂存表
+save_to_storage() {
+    local tag="$1" num="$2" port="$3" senderid="$4" groupname="$5"
+    
+    sqlite3 "$DB_PATH" "INSERT INTO sendstorge_$groupname (tag,num,port,senderid) VALUES ('$tag', '$num','$port','$senderid');"
+    echo "success" > ./presend_out_fifo
+}
+
+# 获取暂存的投稿列表
+get_stored_posts() {
+    local groupname="$1"
+    local tags=()
+    
+    mapfile -t tags < <(sqlite3 "$DB_PATH" "SELECT tag FROM sendstorge_$groupname;")
+    printf '%s\n' "${tags[@]}"
+}
+
+# 清空暂存表
+clear_storage() {
+    local groupname="$1"
+    sqlite3 "$DB_PATH" "DELETE FROM sendstorge_$groupname;"
+}
+
+# 获取投稿编号范围
+get_post_number_range() {
+    local groupname="$1"
+    sqlite3 -noheader -separator '|' "$DB_PATH" "SELECT MIN(num), MAX(num) FROM sendstorge_$groupname;"
+}
+
+# =============================================================================
+# 账户配置管理模块
+# =============================================================================
+
+# 获取账户组配置
+get_account_group_config() {
+    local receiver="$1"
+    local group_info
+    
     group_info=$(jq -r --arg receiver "$receiver" '
         to_entries[] | select(.value.mainqqid == $receiver or (.value.minorqqid[]? == $receiver)) | .value
-    ' AcountGroupcfg.json 2>/dev/null)
-    if [ -z "$group_info" ] || [ "$group_info" = "null" ]; then
-        log_and_continue "未找到账号为 $receiver 的账户配置！"
+    ' "$ACCOUNT_CONFIG_FILE" 2>/dev/null)
+    
+    if [[ -z "$group_info" || "$group_info" == "null" ]]; then
+        log_error "未找到账号为 $receiver 的账户配置"
         return 1
     fi
-
+    
     echo "$group_info"
-    groupid=$(echo "$group_info" | jq -r '.mangroupid')
-    echo "groupid:$groupid"
-    mainqqid=$(echo "$group_info" | jq -r '.mainqqid')
-    mainqq_http_port=$(echo "$group_info" | jq -r '.mainqq_http_port')
-    minorqq_http_ports=$(echo "$group_info" | jq -r '.minorqq_http_port[]')
-    minorqqid=$(echo "$group_info" | jq -r '.minorqqid[]')
-    max_post_stack=$(echo "$group_info" | jq -r '.max_post_stack')
-    max_image_number_one_post=$(echo "$group_info" | jq -r '.max_image_number_one_post')
-
-    # 检查 max_post_stack 是否为数字且非空
-    if ! [[ "$max_post_stack" =~ ^[0-9]+$ ]] || [ -z "$max_post_stack" ]; then
-        max_post_stack=1
-        sendmsggroup "警告: max_post_stack 配置无效，已使用默认值 1"
-    fi
-    # 检查 max_image_number_one_post 是否为数字且非空
-    if ! [[ "$max_image_number_one_post" =~ ^[0-9]+$ ]] || [ -z "$max_image_number_one_post" ]; then
-        max_image_number_one_post=30
-        sendmsggroup "警告: max_image_number_one_post 配置无效，已使用默认值 30"
-    fi
-  
-    echo "doing qq to port"
-    qqidtoport "$receiver"
-    echo "receiver:$receiver"
-    echo "mainqqid:$mainqqid"
-    echo "$port"
-    run_rules || log_and_continue "run_rules 执行失败，tag: $1"
 }
 
-#把某个组的暂存内容全部发出
-flush_staged(){
-     # 直接用 groupname 在 AcountGroupcfg.json 中查配置（优先 key，次选 .acgroup）
+# 获取组配置（用于flush操作）
+get_group_config() {
+    local target_group="$1"
+    local group_info
+    
     group_info=$(jq -r --arg g "$target_group" '
         if has($g) then .[$g]
         else (to_entries[] | select(.key==$g or (.value.acgroup? == $g)) | .value)
         end
-    ' AcountGroupcfg.json 2>/dev/null)
-
+    ' "$ACCOUNT_CONFIG_FILE" 2>/dev/null)
+    
     if [[ -z "$group_info" || "$group_info" == "null" ]]; then
-        log_and_continue "flush_staged: 未找到组 $target_group 的账户配置"
+        log_error "未找到组 $target_group 的账户配置"
         return 1
     fi
-
-    # 设置全局变量，供 postmanager/send_list_gen/sendmsggroup 使用
-    groupname="$target_group"
-    mainqqid=$(echo "$group_info" | jq -r '.mainqqid')
-    mainqq_http_port=$(echo "$group_info" | jq -r '.mainqq_http_port')
-    groupid=$(echo "$group_info" | jq -r '.mangroupid')
-    minorqq_http_ports=$(echo "$group_info" | jq -r '.minorqq_http_port[]? | select(. != "")')
-    minorqqid=$(echo "$group_info" | jq -r '.minorqqid[]? | select(. != "")')
-
-    local target_group="${1:-$groupname}"
-    [[ -z "$target_group" ]] && { log_and_continue "flush_staged: groupname 未设置"; return 1; }
-
-    # 拉取该组所有已暂存 tag
-    mapfile -t tags < <(sqlite3 "$db_path" "SELECT tag FROM sendstorge_${target_group};")
-    if (( ${#tags[@]} == 0 )); then
-        sendmsggroup "flush: 组 ${target_group} 暂存为空，无需发送"
-        return 0
-    fi
-
-    # 保障必要参数有效
-    [[ "$max_image_number_one_post" =~ ^[0-9]+$ ]] || max_image_number_one_post=30
-    [[ -n "$max_attempts" ]] || max_attempts=3
-
-    # 校正数值型配置
-    tmp_max_post_stack=$(echo "$group_info" | jq -r '.max_post_stack // empty')
-    [[ "$tmp_max_post_stack" =~ ^[0-9]+$ ]] && max_post_stack="$tmp_max_post_stack" || max_post_stack=1
-
-    tmp_max_img=$(echo "$group_info" | jq -r '.max_image_number_one_post // empty')
-    [[ "$tmp_max_img" =~ ^[0-9]+$ ]] && max_image_number_one_post="$tmp_max_img" || max_image_number_one_post=30
-
-    # 不带评论统一发送
-    postmanager all || { log_and_continue "flush_staged: postmanager 失败（组：$target_group）"; return 1; }
-    sendmsggroup "flush: 组 ${target_group} 暂存内容已全部发送"
-    return 0
+    
+    echo "$group_info"
 }
 
+# 解析账户配置
+parse_account_config() {
+    local group_info="$1"
+    local -n config_ref="$2"
+    
+    config_ref[groupid]=$(echo "$group_info" | jq -r '.mangroupid')
+    config_ref[mainqqid]=$(echo "$group_info" | jq -r '.mainqqid')
+    config_ref[mainqq_http_port]=$(echo "$group_info" | jq -r '.mainqq_http_port')
+    config_ref[minorqq_http_ports]=$(echo "$group_info" | jq -r '.minorqq_http_port[]?')
+    config_ref[minorqqid]=$(echo "$group_info" | jq -r '.minorqqid[]?')
+    
+    # 设置默认值
+    local tmp_max_post_stack=$(echo "$group_info" | jq -r '.max_post_stack // empty')
+    config_ref[max_post_stack]=$([[ "$tmp_max_post_stack" =~ ^[0-9]+$ ]] && echo "$tmp_max_post_stack" || echo "$DEFAULT_MAX_POST_STACK")
+    
+    local tmp_max_img=$(echo "$group_info" | jq -r '.max_image_number_one_post // empty')
+    config_ref[max_image_number_one_post]=$([[ "$tmp_max_img" =~ ^[0-9]+$ ]] && echo "$tmp_max_img" || echo "$DEFAULT_MAX_IMAGE_NUMBER")
+}
 
-image_counter(){
+# =============================================================================
+# 图片处理模块
+# =============================================================================
+
+# 计算图片总数
+count_images() {
     local total_count=0
     for tag in "$@"; do
-        dir="./cache/prepost/$tag"
-        if [ -d "$dir" ]; then
-        count=$(find "$dir" -type f | wc -l)
-        total_count=$((total_count + count))
+        local dir="./cache/prepost/$tag"
+        if [[ -d "$dir" ]]; then
+            local count=$(find "$dir" -type f | wc -l)
+            total_count=$((total_count + count))
         fi
     done
     echo "$total_count"
 }
 
-atgenerate(){
+# 生成图片列表
+generate_image_list() {
+    local tags=("$@")
+    local filelist=()
+    
+    for tag in "${tags[@]}"; do
+        local dir="./cache/prepost/$tag"
+        [[ -d "$dir" ]] || continue
+        
+        for f in "$dir"/*; do
+            [[ -f "$f" ]] && filelist+=("file://$f")
+        done
+    done
+    
+    printf '%s\n' "${filelist[@]}"
+}
+
+# 清理缓存目录
+cleanup_cache_dirs() {
+    local tags=("$@")
+    
+    for tag in "${tags[@]}"; do
+        local dir="./cache/prepost/$tag"
+        if [[ -d "$dir" ]]; then
+            rm -rf -- "$dir"
+            echo "已删除缓存目录: $dir"
+        fi
+    done
+}
+
+# =============================================================================
+# @功能模块
+# =============================================================================
+
+# 生成@列表
+generate_at_list() {
     [[ "$at_unprived_sender" == "false" ]] && return 1
-    final_at=''
+    
+    local final_at=''
     local t
+    
+    echo "DEBUG: generate_at_list called with tags: $*" >&2
+    
     for t in "$@"; do
-        raw_output=$(timeout 10s sqlite3 -separator '|' 'cache/OQQWall.db' \
-            "SELECT AfterLM,senderid FROM preprocess WHERE tag = '$t';" | tr -d '\n')
+        local raw_output
+        raw_output=$(timeout 10s sqlite3 -separator '|' "$DB_PATH" \
+            "SELECT AfterLM,senderid FROM preprocess WHERE tag = '$t';")
+        
+        # 检查是否有结果
+        if [[ -z "$raw_output" ]]; then
+            echo "DEBUG: No result for tag $t" >&2
+            continue
+        fi
+        
+        local json_data atsenderid
         IFS='|' read -r json_data atsenderid <<< "$raw_output"
+        local need_priv
         need_priv=$(echo "$json_data" | jq -r '.needpriv' 2>/dev/null)
+        
+        echo "DEBUG: Tag $t -> needpriv=$need_priv, senderid=$atsenderid" >&2
+        
         if [[ "$need_priv" == "false" ]]; then
             final_at+=", @{uin:$atsenderid,nick:,who:1}"
         fi
     done
+    
+    echo "DEBUG: Final at list: ${final_at#, }" >&2
     echo "${final_at#, }"
 }
 
-imglistgen() {
-    local tags=("$@")
-    local filelist=()
-    for tag in "${tags[@]}"; do
-        local dir="./cache/prepost/$tag"
-        [[ -d $dir ]] || continue
-        for f in "$dir"/*; do
-            [[ -f $f ]] && filelist+=("file://$f")
+# =============================================================================
+# 端口映射模块
+# =============================================================================
+
+# QQ号到端口映射
+map_qq_to_port() {
+    local qqid="$1"
+    local mainqqid="$2"
+    local mainqq_http_port="$3"
+    local minorqqid="$4"
+    local minorqq_http_ports="$5"
+    
+    if [[ "$qqid" == "$mainqqid" ]]; then
+        echo "$mainqq_http_port"
+    else
+        local i=0
+        for minorqq in $minorqqid; do
+            if [[ "$qqid" == "$minorqq" ]]; then
+                echo "$minorqq_http_ports" | sed -n "$((i+1))p"
+                break
+            fi
+            ((i++))
         done
-    done
-    printf '%s\n' "${filelist[@]}"
+    fi
 }
 
-postmanager(){
-    # 设置发送失败标志
+# =============================================================================
+# 发送列表生成模块
+# =============================================================================
+
+# 生成发送列表
+generate_send_list() {
+    local group_info="$1"
+    local -n send_list_ref="$2"
+    
+    send_list_ref=()
+    send_list_ref+=("$(echo "$group_info" | jq -r '.mainqqid')")
+    
+    # 添加副账户
+    local minor_ids
+    minor_ids=$(echo "$group_info" | jq -r '.minorqqid[]?')
+    if [[ -n "$minor_ids" && "$minor_ids" != "" ]]; then
+        for mid in $minor_ids; do
+            [[ -n "$mid" ]] && send_list_ref+=("$mid")
+        done
+    fi
+}
+
+# =============================================================================
+# 发送处理模块
+# =============================================================================
+
+# 发送到QQ空间
+send_to_qzone() {
+    local qqid="$1"
+    local message="$2"
+    local image_list="$3"
+    
+    # 检查cookies文件
+    if [[ ! -f "./cookies-$qqid.json" ]]; then
+        echo "Cookies文件不存在，执行重新登录"
+        renewqzoneloginauto "$qqid"
+    fi
+    
+    local attempt=1
+    while [[ "$attempt" -le "$max_attempts" ]]; do
+        local cookies
+        cookies=$(cat "./cookies-$qqid.json")
+        
+        echo "{\"text\":\"$message\",\"image\":$image_list,\"cookies\":$cookies}" > ./qzone_in_fifo
+        local post_status
+        post_status=$(cat ./qzone_out_fifo)
+        
+        if echo "$post_status" | grep -q "success"; then
+            echo "$qqid发送完毕"
+            sendmsggroup "$qqid已发送"
+            return 0
+        elif echo "$post_status" | grep -q "failed"; then
+            if [[ "$attempt" -lt "$max_attempts" ]]; then
+                renewqzoneloginauto "$qqid"
+            else
+                log_error "空间发送错误，可能需要重新登录，出错账号$qqid"
+                return 1
+            fi
+        else
+            if [[ "$attempt" -lt "$max_attempts" ]]; then
+                renewqzoneloginauto "$qqid"
+            else
+                log_error "系统错误：$post_status"
+                return 1
+            fi
+        fi
+        ((attempt++))
+    done
+    
+    return 1
+}
+
+# 发送反馈信息
+send_feedback() {
+    local groupname="$1"
+    
+    sqlite3 -separator '|' "$DB_PATH" \
+        "SELECT senderid, port, num FROM sendstorge_$groupname;" |
+    while IFS='|' read -r senderid port num; do
+        [[ -z "$senderid" || -z "$port" || -z "$num" ]] && continue
+        
+        local msg="#${num} 投稿已发送(系统自动发送，请勿回复)"
+        sendmsgpriv_givenport "$senderid" "$port" "$msg"
+    done
+}
+
+# =============================================================================
+# 发送管理模块
+# =============================================================================
+
+# 发送管理器
+manage_posts() {
+    local tags=("$@")
+    local comment="${2:-}"
     local send_failed=0
+    
     sendmsggroup "执行发送..."
-    send_list_gen
-    # numfinal 合并
-    IFS='|' read -r min_num max_num <<< "$(sqlite3 -noheader -separator '|' "$db_path" "SELECT MIN(num), MAX(num) FROM sendstorge_$groupname;")"
+    
+    # 生成发送列表
+    local goingtosendid=()
+    generate_send_list "$group_info" goingtosendid
+    
+    # 生成消息内容
+    local message
+    local num_range
+    num_range=$(get_post_number_range "$groupname")
+    IFS='|' read -r min_num max_num <<< "$num_range"
+    
     if [[ "$min_num" == "$max_num" ]]; then
         message="#$min_num"
     else
         message="#${min_num}～${max_num}"
     fi
-    echo "$message"
-    message="${message} $(atgenerate "${tags[@]}")"
-    if [[ -n $2 ]]; then
-        message="${message} ${2}"
-    fi
-    # 图像列表创建
-    mapfile -t file_arr < <(imglistgen "${tags[@]}")
-    total=${#file_arr[@]}
+    
+    # 添加@列表
+    local at_list
+    at_list=$(generate_at_list "${tags[@]}")
+    [[ -n "$at_list" ]] && message="${message} $at_list"
+    
+    # 添加评论
+    [[ -n "$comment" ]] && message="${message} $comment"
+    
+    echo "DEBUG: Final message: $message" >&2
+    
+    # 生成图片列表
+    local file_arr=()
+    mapfile -t file_arr < <(generate_image_list "${tags[@]}")
+    local total=${#file_arr[@]}
     (( total == 0 )) && file_arr+=( )
-    sendqueue=("${goingtosendid[@]}")
-    for qqid in "${sendqueue[@]}"; do
+    
+    # 发送到每个QQ号
+    for qqid in "${goingtosendid[@]}"; do
         echo "Sending Qzone use id: $qqid (total images: $total)"
+        
         for (( start=0; start<total || start==0; start+=max_image_number_one_post )); do
-            slice=( "${file_arr[@]:start:max_image_number_one_post}" )
+            local slice=("${file_arr[@]:start:max_image_number_one_post}")
+            local sub_filelist
             sub_filelist=$(printf '%s\n' "${slice[@]}" | jq -R . | jq -sc .)
-            [[ -z $sub_filelist || $sub_filelist == "null" ]] && sub_filelist='[]'
-            postprocess_pipe "$qqid" "$message" "$sub_filelist" || { log_and_continue "postprocess_pipe 失败，qqid: $qqid, tag: $tag"; send_failed=1; }
+            [[ -z "$sub_filelist" || "$sub_filelist" == "null" ]] && sub_filelist='[]'
+            
+            send_to_qzone "$qqid" "$message" "$sub_filelist" || {
+                log_error "发送失败，qqid: $qqid"
+                send_failed=1
+            }
         done
     done
-    # 查表，发送反馈信息
-    sqlite3 -separator '|' "$db_path" \
-"SELECT senderid, port, num FROM sendstorge_$groupname;" |
-    while IFS='|' read -r senderid port num; do
-        # 若行为空则跳过（防止意外空行）
-        [[ -z $senderid || -z $port || -z $num ]] && continue
-
-        msg="#${num} 投稿已发送(系统自动发送，请勿回复)"
-        sendmsgpriv_givenport "$senderid" "$port" "$msg"
-    done
-    # 发送结束后，仅在全部发送成功时删除缓存目录和清空暂存表
+    
+    # 发送反馈
+    send_feedback "$groupname"
+    
+    # 清理工作
     if [[ $send_failed -eq 0 ]]; then
-        sqlite3 "$db_path" "DELETE FROM sendstorge_$groupname;"
-        # 删除对应的缓存目录释放空间
-        if [[ ${#tags[@]} -gt 0 ]]; then
-            for tag in "${tags[@]}"; do
-                dir="./cache/prepost/$tag"
-                if [[ -d $dir ]]; then
-                    rm -rf -- "$dir"
-                    echo "已删除缓存目录: $dir"
-                fi
-            done
-        fi
+        clear_storage "$groupname"
+        cleanup_cache_dirs "${tags[@]}"
     else
         echo "部分发送失败，保留缓存目录"
     fi
+    
+    return $send_failed
 }
 
+# =============================================================================
+# 发送规则模块
+# =============================================================================
 
-qqidtoport(){
-    if [ "$1" == "$mainqqid" ]; then
-    port=$mainqq_http_port
-    else
-    # 遍历 minorqqid 数组并找到对应的端口
-    i=0
-    for minorqq in $minorqqid; do
-        if [ "$1" == "$minorqq" ]; then
-        port=$(echo "$minorqq_http_ports" | sed -n "$((i+1))p")
-        break
+# 执行发送规则
+execute_send_rules() {
+    local tag="$1"
+    local numfinal="$2"
+    local port="$3"
+    local senderid="$4"
+    local comment="$5"
+    local init_send_status="$6"
+    
+    echo "max_post_stack: $max_post_stack"
+    echo "max_image_number_one_post: $max_image_number_one_post"
+    
+    if [[ -n "$comment" && "$comment" != "null" ]]; then
+        echo "评论: $comment"
+        init_send_status="now"
+    fi
+    
+    # 保存当前投稿
+    save_to_storage "$tag" "$numfinal" "$port" "$senderid" "$groupname"
+    
+    if [[ "$init_send_status" == "now" ]]; then
+        echo "立即发送..."
+        
+        # 发送所有暂存内容（包括刚保存的）
+        local stored_tags=()
+        mapfile -t stored_tags < <(get_stored_posts "$groupname")
+        
+        if (( ${#stored_tags[@]} > 0 )); then
+            manage_posts "${stored_tags[@]}" "$comment"
         fi
-        ((i++))
-    done
-    fi
-}
-
-# 将投稿保存到暂存表
-savetostorge(){
-    # 插入投稿记录
-    sqlite3 "$db_path" "INSERT INTO sendstorge_$groupname (tag,num,port,senderid) VALUES ('$1', '$2','$3','$4');"
-    echo success > ./presend_out_fifo
-}
-
-send_list_gen(){
-    goingtosendid=()
-    goingtosendid+=("$(echo "$group_info" | jq -r '.mainqqid')")
-    # 如有副账户配置，加入发送列表
-    minor_ids=$(echo "$group_info" | jq -r '.minorqqid[]')
-    if [ -n "$minor_ids" ] && [ "$minor_ids" != "" ]; then
-        for mid in $minor_ids; do
-            if [ -n "$mid" ]; then
-                goingtosendid+=("$mid")
-            fi
-        done
-    fi
-}
-
-postprocess_pipe(){
-    if [ ! -f "./cookies-$1.json" ]; then
-        echo "Cookies file does not exist. Executing relogin script."
-        renewqzoneloginauto "$1"
     else
-        echo "Cookies file exists. No action needed."
-    fi
-
-    attempt=1
-    while [ "$attempt" -le "$max_attempts" ]; do
-        cookies=$(cat ./cookies-"$1".json)
-        echo "{\"text\":\"$2\",\"image\":$3,\"cookies\":$cookies}" > ./qzone_in_fifo   
-        post_statue=$(cat ./qzone_out_fifo)
-        if echo "$post_statue"  | grep -q "success"; then
-            goingtosendid=("${goingtosendid[@]/$1}")
-            echo "$1发送完毕"
-            sendmsggroup "$1已发送"
-            break
-        elif echo "$post_statue"  | grep -q "failed"; then
-            if [ "$attempt" -lt "$max_attempts" ]; then
-                renewqzoneloginauto "$1"
-            else
-                log_and_continue "空间发送错误，可能需要重新登陆，也可能是文件错误，出错账号$1,内部编号$tag,请发送指令"
-                return 1
-            fi
-        else
-            if [ "$attempt" -lt "$max_attempts" ]; then
-                renewqzoneloginauto "$1"
-            else
-                log_and_continue "系统错误：$post_statue"
-                return 1
-            fi
+        # 获取所有暂存投稿（包括刚保存的）
+        local tags=()
+        mapfile -t tags < <(get_stored_posts "$groupname")
+        local current_post_num=${#tags[@]}
+        local current_image_num
+        current_image_num=$(count_images "${tags[@]}")
+        
+        echo "当前投稿数: $current_post_num"
+        echo "当前总图片数: $current_image_num"
+        echo "投稿列表: ${tags[*]}"
+        
+        # 检查是否需要发送
+        if [[ $current_post_num -ge $max_post_stack ]] || [[ $current_image_num -gt $max_image_number_one_post ]]; then
+            # 达到发送条件
+            manage_posts "${tags[@]}"
         fi
-        attempt=$((attempt+1))
-    done
+    fi
 }
 
+# =============================================================================
+# 发送信息处理模块
+# =============================================================================
 
-
-# 初始化：读取配置并创建通信管道
-initialize(){
-    db_path="./cache/OQQWall.db"
-    max_attempts=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-    at_unprived_sender=$(grep 'at_unprived_sender' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-    [ -z "$max_attempts" ] && max_attempts=3
-    # 创建发送控制输入FIFO管道
-    if [ ! -p ./presend_in_fifo ]; then
-        mkfifo ./presend_in_fifo
+# 获取发送信息
+get_send_info() {
+    local tag="$1"
+    local post_info group_info
+    
+    # 获取投稿信息
+    post_info=$(get_post_info "$tag") || return 1
+    
+    # 解析投稿信息
+    local senderid receiver comment AfterLM groupname
+    senderid=$(jq -r '.[0].senderid' <<<"$post_info")
+    receiver=$(jq -r '.[0].receiver' <<<"$post_info")
+    comment=$(jq -r '.[0].comment' <<<"$post_info")
+    AfterLM=$(jq -r '.[0].AfterLM' <<<"$post_info")
+    groupname=$(jq -r '.[0].ACgroup' <<<"$post_info")
+    
+    # 处理空值
+    [[ "$comment" == "null" ]] && comment=""
+    
+    # 验证组名
+    if [[ -z "$groupname" ]]; then
+        log_error "获取 ACgroup 为空，请检查 preprocess 表中 tag: $tag 对应的 ACgroup 字段"
+        return 1
     fi
-    if [ ! -p ./presend_out_fifo ]; then
-        mkfifo ./presend_out_fifo
-    fi
-    #启动定时发送
-    scheduler_loop &
-    # 准备发送命令占位（使用持续运行的 qzone-serv-pipe 服务时无需额外命令）
-    postcommand=""
-    echo "sendcontrol初始化完成"
+    
+    # 获取账户配置
+    group_info=$(get_account_group_config "$receiver") || return 1
+    
+    # 解析配置
+    local -A config
+    parse_account_config "$group_info" config
+    
+    # 设置全局变量（为了兼容现有代码）
+    declare -g groupname="$groupname"
+    declare -g group_info="$group_info"
+    declare -g groupid="${config[groupid]}"
+    declare -g mainqqid="${config[mainqqid]}"
+    declare -g mainqq_http_port="${config[mainqq_http_port]}"
+    declare -g minorqq_http_ports="${config[minorqq_http_ports]}"
+    declare -g minorqqid="${config[minorqqid]}"
+    declare -g max_post_stack="${config[max_post_stack]}"
+    declare -g max_image_number_one_post="${config[max_image_number_one_post]}"
+    
+    # 获取端口
+    local port
+    port=$(map_qq_to_port "$receiver" "$mainqqid" "$mainqq_http_port" "$minorqqid" "$minorqq_http_ports")
+    
+    echo "doing qq to port"
+    echo "receiver: $receiver"
+    echo "mainqqid: $mainqqid"
+    echo "port: $port"
+    
+    # 执行发送规则
+    execute_send_rules "$tag" "$numfinal" "$port" "$senderid" "$comment" "$initsendstatue" || {
+        log_error "execute_send_rules 执行失败，tag: $tag"
+        return 1
+    }
 }
 
-# ===== 定时调度 =====
+# =============================================================================
+# 批量发送模块
+# =============================================================================
+
+# 批量发送暂存内容
+flush_staged_posts() {
+    local target_group="${1:-}"
+    [[ -z "$target_group" ]] && {
+        log_error "flush_staged_posts: 未指定目标组"
+        return 1
+    }
+    
+    # 获取组配置
+    local group_info
+    group_info=$(get_group_config "$target_group") || return 1
+    
+    # 解析配置
+    local -A config
+    parse_account_config "$group_info" config
+    
+    # 设置全局变量
+    declare -g groupname="$target_group"
+    declare -g group_info="$group_info"
+    declare -g groupid="${config[groupid]}"
+    declare -g mainqqid="${config[mainqqid]}"
+    declare -g mainqq_http_port="${config[mainqq_http_port]}"
+    declare -g groupid="${config[groupid]}"
+    declare -g minorqq_http_ports="${config[minorqq_http_ports]}"
+    declare -g minorqqid="${config[minorqqid]}"
+    declare -g max_post_stack="${config[max_post_stack]}"
+    declare -g max_image_number_one_post="${config[max_image_number_one_post]}"
+    
+    # 获取暂存投稿
+    local tags=()
+    mapfile -t tags < <(get_stored_posts "$target_group")
+    
+    if (( ${#tags[@]} == 0 )); then
+        sendmsggroup "flush: 组 ${target_group} 暂存为空，无需发送"
+        return 0
+    fi
+    
+    # 发送所有暂存内容
+    if manage_posts "${tags[@]}"; then
+        sendmsggroup "flush: 组 ${target_group} 暂存内容已全部发送"
+        return 0
+    else
+        log_error "flush_staged_posts: 发送失败（组：$target_group）"
+        return 1
+    fi
+}
+
+# =============================================================================
+# 定时调度模块
+# =============================================================================
+
+# 调度配置
 declare -A SCHEDULES   # 组 -> "HH:MM,HH:MM"
 declare -A LASTFIRE    # "组|HH:MM" -> YYYY-MM-DD
 
-load_schedules(){
-    local cfg="AcountGroupcfg.json"
+# 加载调度配置
+load_schedules() {
     SCHEDULES=()
-    # 提取 (acgroup或key, 逗号拼接的时刻) 列表
+    
     local rows
     rows=$(jq -r '
         to_entries[]
         | select(.value.send_schedule? and (.value.send_schedule|length)>0)
         | [ (.value.acgroup // .key), (.value.send_schedule | map(gsub("\\s+"; "")) | join(",")) ]
         | @tsv
-    ' "$cfg" 2>/dev/null) || rows=""
-
+    ' "$ACCOUNT_CONFIG_FILE" 2>/dev/null) || rows=""
+    
     while IFS=$'\t' read -r g times; do
         [[ -z "$g" || -z "$times" ]] && continue
         SCHEDULES["$g"]="$times"
     done <<< "$rows"
 }
 
-mark_fired(){ local g="$1" hm="$2"; LASTFIRE["$g|$hm"]="$(date +%F)"; }
-should_fire_now(){
-    local g="$1" hm="$2" today; today=$(date +%F)
+# 标记已执行
+mark_fired() {
+    local g="$1" hm="$2"
+    LASTFIRE["$g|$hm"]="$(date +%F)"
+}
+
+# 检查是否应该执行
+should_fire_now() {
+    local g="$1" hm="$2"
+    local today
+    today=$(date +%F)
     [[ "${LASTFIRE[$g|$hm]}" == "$today" ]] && return 1 || return 0
 }
 
-scheduler_loop(){
-    # 每轮都重载，便于热更新配置
+# 调度循环
+scheduler_loop() {
     while true; do
         load_schedules
-        local nowHM; nowHM=$(date +%H:%M)
+        local nowHM
+        nowHM=$(date +%H:%M)
+        
         local g times hm list
         for g in "${!SCHEDULES[@]}"; do
             IFS=',' read -r -a list <<< "${SCHEDULES[$g]}"
             for hm in "${list[@]}"; do
                 [[ "$hm" == "$nowHM" ]] || continue
                 should_fire_now "$g" "$hm" || continue
-
+                
                 # 互斥锁，避免重入
                 local LOCKDIR="./cache/.sched.lock"
                 if mkdir "$LOCKDIR" 2>/dev/null; then
                     {
-                        flush_staged "$g" || log_and_continue "定时发送失败：组 $g @ $hm"
+                        flush_staged_posts "$g" || log_error "定时发送失败：组 $g @ $hm"
                         mark_fired "$g" "$hm"
                     }
                     rmdir "$LOCKDIR" 2>/dev/null || true
@@ -407,48 +656,87 @@ scheduler_loop(){
     done
 }
 
+# =============================================================================
+# 错误处理模块
+# =============================================================================
 
-# 主循环：持续从管道读取投稿发布请求
-main_loop(){
-    while true; do
-        # 清空循环中使用的变量
-        unset tag numfinal initsendstatue senderid receiver comment json_data need_priv groupname group_info groupid mainqqid mainqq_http_port minorqq_http_ports minorqqid port message file_arr goingtosendid
-        groupname=""
-        initsendstatue=""
-        {
-            in_json_data=$(cat ./presend_in_fifo)
-            #echo "发送调度获取到$in_json_data"
-            # 解析输入JSON字段
-            action=$(jq -r '.action // empty' <<<"$in_json_data")
-            if [[ "$action" == "flush" ]]; then
-                target_group=$(jq -r '.group // empty' <<<"$in_json_data")
-                if flush_staged "$target_group"; then
-                    echo success > ./presend_out_fifo
-                else
-                    echo failed  > ./presend_out_fifo
-                fi
-                continue
-            fi
-            tag=$(echo "$in_json_data" | jq -r '.tag')
-            numfinal=$(echo "$in_json_data" | jq -r '.numb')
-            initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue')  
-            #echo "发送调度获取到tag=$tag,numfinal=$numfinal"
-            # 获取该群组对应的发送参数（群号、端口等）
-            get_send_info "$tag" || log_and_continue "get_send_info 执行失败，tag: $tag"
-        } || {
-            log_and_continue "主循环异常，输入数据: $in_json_data"
-            continue
-        }
-    done
-}
-
-# 错误处理函数
-log_and_continue() {
+# 错误日志记录
+log_error() {
     local errmsg="$1"
     echo "sendcontrol $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/SendControl_CrashReport.txt
     echo "sendcontrol 错误已记录: $errmsg"
 }
 
-# 启动 sendcontrol 模块
+# =============================================================================
+# 初始化模块
+# =============================================================================
+
+# 初始化函数
+initialize() {
+    # 加载基础配置
+    load_base_config
+    
+    # 创建FIFO管道
+    [[ ! -p ./presend_in_fifo ]] && mkfifo ./presend_in_fifo
+    [[ ! -p ./presend_out_fifo ]] && mkfifo ./presend_out_fifo
+    
+    # 启动定时调度
+    scheduler_loop &
+    
+    echo "sendcontrol初始化完成"
+}
+
+# =============================================================================
+# 主循环模块
+# =============================================================================
+
+# 主循环
+main_loop() {
+    while true; do
+        # 清空循环变量
+        unset tag numfinal initsendstatue senderid receiver comment json_data need_priv groupname group_info groupid mainqqid mainqq_http_port minorqq_http_ports minorqqid port message file_arr goingtosendid
+        groupname=""
+        initsendstatue=""
+        
+        {
+            local in_json_data
+            in_json_data=$(cat ./presend_in_fifo)
+            
+            # 解析输入JSON
+            local action
+            action=$(jq -r '.action // empty' <<<"$in_json_data")
+            
+            if [[ "$action" == "flush" ]]; then
+                local target_group
+                target_group=$(jq -r '.group // empty' <<<"$in_json_data")
+                
+                if flush_staged_posts "$target_group"; then
+                    echo "success" > ./presend_out_fifo
+                else
+                    echo "failed" > ./presend_out_fifo
+                fi
+                continue
+            fi
+            
+            # 解析投稿信息
+            tag=$(echo "$in_json_data" | jq -r '.tag')
+            numfinal=$(echo "$in_json_data" | jq -r '.numb')
+            initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue')
+            
+            # 获取发送信息并执行
+            get_send_info "$tag" || log_error "get_send_info 执行失败，tag: $tag"
+            
+        } || {
+            log_error "主循环异常，输入数据: $in_json_data"
+            continue
+        }
+    done
+}
+
+# =============================================================================
+# 启动脚本
+# =============================================================================
+
+# 启动sendcontrol模块
 initialize
 main_loop

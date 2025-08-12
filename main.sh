@@ -90,9 +90,15 @@ elif [[ $1 == -h ]]; then
 echo "Without any flag-->start OQQWall
 -r    Subsystem restart
 -rf   Force subsystem restart
+--test   start OQQWall in test mode
 Show Napcat(QQ) log: open a new terminal, go to OQQWall's home path and run: tail -n 100 -f ./NapCatlog
 for more information, read./OQQWall.wiki"
 exit 0
+elif [[ $1 == --test ]]; then
+  echo "以测试模式启动OQQWall..."
+  if pgrep -f "python3 SendQzone/qzone-serv-pipe.py" > /dev/null; then
+    pgrep -f "python3 SendQzone/qzone-serv-pipe.py" | xargs kill -15
+  fi
 fi
 
 # 确保配置文件存在
@@ -630,8 +636,12 @@ if pgrep -f "python3 SendQzone/qzone-serv-pipe.py" > /dev/null
 then
     echo "qzone-serv-pipe.py is already running"
 else
-    python3 SendQzone/qzone-serv-pipe.py &
-    echo "qzone-serv-pipe.py started"
+    if [[ $1 == --test ]]; then
+      echo "请自行启动测试服务器"
+    else
+      python3 SendQzone/qzone-serv-pipe.py &
+      echo "qzone-serv-pipe.py started"
+    fi
 fi
 
 if pgrep -f "./Sendcontrol/sendcontrol.sh" > /dev/null

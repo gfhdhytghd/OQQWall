@@ -182,9 +182,9 @@ message_html=$(echo "$json_data" | jq -r \
       "<img src=\"" + .data.url + "\" alt=\"Image\">"
 
     elif .type == "video" then
-      "<div class=\"bubble\"><video controls autoplay muted><source src=\"" +
-      (if .data.file then "file://" + .data.file else .data.url end) +
-      "\" type=\"video/mp4\">Your browser does not support the video tag.</video></div>"
+      "<video controls autoplay muted><source src=\"" +
+      (if .data.file then .data.url end) +
+      "\" type=\"video/mp4\">Your browser does not support the video tag.</video>"
 
     elif .type == "poke" then
       "<img class=\"poke-icon\" src=\"" + $poke + "\" alt=\"Poke\">"

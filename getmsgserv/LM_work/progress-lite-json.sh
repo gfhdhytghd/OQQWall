@@ -265,7 +265,6 @@ resolve_forward_messages() {
   echo "$updated"
 }
 
-# 将所有 file（图片扩展名）调用 NapCat /get_file 转换为 image
 # 将所有 file（图片扩展名）调用 NapCat /get_file 转换为 image —— 递归处理（含 forward 内）
 resolve_file_urls() {
   local json="$1"
@@ -351,24 +350,32 @@ download_and_replace_images() {
 
     local_file="$folder/$tag-$next_file_index.png"
 
-    if [[ "$url" =~ ^file:// ]]; then
-      src_path="${url#file://}"
-      if [[ "$src_path" == /app* ]]; then
-        docker cp "$container_name:$src_path" "$local_file" || true
-      else
-        [[ -f "$src_path" ]] && cp -f "$src_path" "$local_file"
-      fi
+    # 检查是否已经存在本地文件
+    if [[ -f "$local_file" ]]; then
+      # 如果已存在，直接使用现有文件
+      final_file="$local_file"
     else
-      curl -s -o "$local_file" "$url" || true
+      # 下载原始文件
+      if [[ "$url" =~ ^file:// ]]; then
+        src_path="${url#file://}"
+        if [[ "$src_path" == /app* ]]; then
+          docker cp "$container_name:$src_path" "$local_file" || true
+        else
+          [[ -f "$src_path" ]] && cp -f "$src_path" "$local_file"
+        fi
+      else
+        curl -s -o "$local_file" "$url" || true
+      fi
+
+      [[ -f "$local_file" ]] && chmod 666 "$local_file" || true
+      final_file="$local_file"
     fi
 
-    [[ -f "$local_file" ]] && chmod 666 "$local_file" || true
-
-    if [[ -f "$local_file" ]]; then
+    if [[ -f "$final_file" ]]; then
       updated_json=$(
         jq \
           --arg old_url "$url" \
-          --arg new_url "file://$pwd_path/cache/picture/${tag}/$(basename "$local_file")" '
+          --arg new_url "file://$pwd_path/cache/picture/${tag}/$(basename "$final_file")" '
           def upd:
             if type=="object" then
               ( if .type?=="image" and (.data.url // "")==$old_url
@@ -395,8 +402,109 @@ download_and_replace_images() {
   echo "$updated_json"
 }
 
+# 下载/复制 video：对 file:// 路径，如果是容器内部 (/app 开头)，使用 docker cp；否则常规 cp 或 curl
+# 下载/复制 video：递归处理任意深度（含 forward 内），并转换为 H.264 格式
+download_and_replace_videos() {
+  local processed_json="$1"
+  local next_file_index=1
+  local updated_json="$processed_json"
 
-# 输出最终 JSON
+  # 去重已下载过的 URL，避免重复下载
+  declare -A seen_urls=()
+
+  # 递归枚举所有 video 段
+  while read -r video_item; do
+    url=$(jq -r '.data.url // empty' <<<"$video_item")
+    [[ -z "$url" ]] && continue
+    [[ -n "${seen_urls[$url]+x}" ]] && continue
+
+    # 获取原始文件名或使用默认扩展名
+    original_file=$(jq -r '.data.file // empty' <<<"$video_item")
+    if [[ -n "$original_file" ]]; then
+      # 提取文件扩展名
+      extension="${original_file##*.}"
+      if [[ "$extension" == "$original_file" ]]; then
+        # 没有扩展名，使用默认的 mp4
+        extension="mp4"
+      fi
+    else
+      extension="mp4"
+    fi
+
+    local_file="$folder/$tag-$next_file_index.$extension"
+    h264_file="$folder/$tag-$next_file_index-h264.mp4"
+
+    # 检查是否已经存在转换后的 H.264 文件
+    if [[ -f "$h264_file" ]]; then
+      # 如果已存在，直接使用现有文件
+      final_file="$h264_file"
+    else
+      # 下载原始文件
+      if [[ "$url" =~ ^file:// ]]; then
+        src_path="${url#file://}"
+        if [[ "$src_path" == /app* ]]; then
+          docker cp "$container_name:$src_path" "$local_file" || true
+        else
+          [[ -f "$src_path" ]] && cp -f "$src_path" "$local_file"
+        fi
+      else
+        curl -s -o "$local_file" "$url" || true
+      fi
+
+      [[ -f "$local_file" ]] && chmod 666 "$local_file" || true
+
+      # 转换为 H.264 格式
+      if [[ -f "$local_file" ]]; then
+        # 使用 ffmpeg 转换为 H.264，保持原始分辨率，使用较高质量的设置
+        ffmpeg -i "$local_file" -c:v libx264 -preset medium -crf 23 -c:a aac -b:a 128k -movflags +faststart "$h264_file" -y 2>/dev/null || true
+        
+        # 如果转换成功，删除原始文件并设置最终文件
+        if [[ -f "$h264_file" ]]; then
+          rm -f "$local_file"
+          final_file="$h264_file"
+          chmod 666 "$final_file"
+        else
+          # 转换失败，使用原始文件
+          final_file="$local_file"
+        fi
+      else
+        final_file="$local_file"
+      fi
+    fi
+
+    if [[ -f "$final_file" ]]; then
+      updated_json=$(
+        jq \
+          --arg old_url "$url" \
+          --arg new_url "file://$pwd_path/cache/picture/${tag}/$(basename "$final_file")" '
+          def upd:
+            if type=="object" then
+              ( if .type?=="video" and (.data.url // "")==$old_url
+                then .data.url=$new_url
+                else .
+                end )
+              | with_entries(.value |= upd)
+            elif type=="array" then
+              map(upd)
+            else . end;
+          (if type=="array" then . else [.] end) | upd
+        ' <<<"$updated_json"
+      )
+    fi
+
+    seen_urls["$url"]=1
+    next_file_index=$((next_file_index + 1))
+  done < <(jq -c '
+      (if type=="array" then . else [.] end)
+      | .. | objects
+      | select(.type?=="video" and (.data.url?))
+    ' <<<"$processed_json")
+
+  echo "$updated_json"
+}
+
+
+# 输出最终 JSON 
 output_final_json() {
     local processed_json="$1"
     local has_irregular_types="$2"
@@ -516,4 +624,5 @@ processed_json=$(merge_adjacent_texts_recursively "$processed_json")
 has_irregular_types=$(check_irregular_types "$rawmsg")
 processed_json=$(resolve_file_urls "$processed_json")
 processed_json=$(download_and_replace_images "$processed_json")
+processed_json=$(download_and_replace_videos "$processed_json")
 output_final_json "$processed_json" "$has_irregular_types"
