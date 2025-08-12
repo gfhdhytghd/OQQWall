@@ -270,16 +270,35 @@ class QzoneEmulator:
             try:
                 logger.info("等待从FIFO读取数据...")
                 
-                # 读取输入数据
-                with open(self.fifo_in_path, 'r', encoding='utf-8') as fifo:
-                    data = ''
-                    while True:
-                        line = fifo.readline()
-                        if not line:
-                            break
-                        data += line
+                # 使用非阻塞方式读取FIFO，支持优雅退出
+                try:
+                    # 设置超时读取，这样可以定期检查running状态
+                    import select
+                    with open(self.fifo_in_path, 'r', encoding='utf-8') as fifo:
+                        # 使用select检查是否有数据可读，超时1秒
+                        ready, _, _ = select.select([fifo], [], [], 1.0)
+                        if not ready:
+                            # 超时，检查是否需要退出
+                            continue
+                        
+                        data = ''
+                        while self.running:
+                            line = fifo.readline()
+                            if not line:
+                                break
+                            data += line
+                            
+                            # 检查是否读取完整
+                            if data.strip() and not data.endswith('\n'):
+                                break
+                except (OSError, IOError) as e:
+                    if not self.running:
+                        break
+                    logger.error(f"FIFO读取错误: {e}")
+                    time.sleep(1)
+                    continue
                 
-                if not data.strip():
+                if not data.strip() or not self.running:
                     continue
                 
                 logger.info(f"接收到数据: {data[:200]}...")
@@ -304,9 +323,13 @@ class QzoneEmulator:
                 logger.info("数据处理完成")
                 
             except Exception as e:
+                if not self.running:
+                    break
                 logger.error(f"FIFO处理错误: {e}")
                 self._write_response('failed')
                 time.sleep(1)
+        
+        logger.info("FIFO处理线程已退出")
     
     def run(self):
         """运行模拟器"""
@@ -319,7 +342,32 @@ class QzoneEmulator:
                 time.sleep(1)
         except KeyboardInterrupt:
             logger.info("收到中断信号，正在退出...")
-            self.running = False
+            self.stop()
+    
+    def stop(self):
+        """停止模拟器"""
+        logger.info("正在停止模拟器...")
+        self.running = False
+        
+        # 关闭Web服务器
+        if hasattr(self, 'httpd') and self.httpd:
+            try:
+                self.httpd.shutdown()
+                self.httpd.server_close()
+                logger.info("Web服务器已关闭")
+            except Exception as e:
+                logger.error(f"关闭Web服务器时出错: {e}")
+        
+        # 等待FIFO线程结束
+        if hasattr(self, 'fifo_thread') and self.fifo_thread.is_alive():
+            logger.info("等待FIFO处理线程结束...")
+            self.fifo_thread.join(timeout=5)
+            if self.fifo_thread.is_alive():
+                logger.warning("FIFO处理线程未能及时结束")
+            else:
+                logger.info("FIFO处理线程已结束")
+        
+        logger.info("模拟器已完全停止")
     
     def _write_response(self, response: str):
         """写入响应到输出FIFO"""
@@ -343,10 +391,13 @@ def main():
         # 运行模拟器
         emulator.run()
     except KeyboardInterrupt:
-        print("\n👋 模拟器已停止")
+        print("\n👋 收到中断信号，正在停止模拟器...")
+        emulator.stop()
+        print("模拟器已完全停止")
     except Exception as e:
         print(f"❌ 运行错误: {e}")
         logger.error(f"主程序错误: {e}")
+        emulator.stop()
 
 if __name__ == "__main__":
     main()

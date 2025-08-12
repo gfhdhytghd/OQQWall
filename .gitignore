@@ -38,3 +38,9 @@ cache
 OQQWall.session.sql
 ._.DS_Store
 .DS_Store
+getmsgserv/LM_work/__pycache__/sendtoLM.cpython-313.pyc
+getmsgserv/LM_work/test_reliability.py
+getmsgserv/LM_work/test_image_description.py
+.gitignore
+getmsgserv/LM_work/README_image_description.md
+getmsgserv/LM_work/README_debug.md

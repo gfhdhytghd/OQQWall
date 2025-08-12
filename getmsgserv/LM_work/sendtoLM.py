@@ -15,19 +15,104 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 import re
 import sqlite3
 import copy
-from typing import Dict, Any, List
+import traceback
+import signal
+from typing import Dict, Any, List, Optional, Tuple
+from contextlib import contextmanager
+from functools import wraps
 
 # 错误JSON输出的文件路径
 output_file_path_error = "./cache/LM_error.json"
 
+# 重试配置
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # 秒
+API_TIMEOUT = 30  # 秒
+
+# 数据库连接配置
+DB_PATH = './cache/OQQWall.db'
+
+# 信号处理
+def signal_handler(signum, frame):
+    """处理中断信号，确保优雅退出"""
+    logging.warning(f"收到信号 {signum}，正在优雅退出...")
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
+def retry_on_exception(max_retries=MAX_RETRIES, delay=RETRY_DELAY, exceptions=(Exception,)):
+    """重试装饰器"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        logging.warning(f"函数 {func.__name__} 第 {attempt + 1} 次尝试失败: {e}")
+                        time.sleep(delay * (2 ** attempt))  # 指数退避
+                    else:
+                        logging.error(f"函数 {func.__name__} 在 {max_retries + 1} 次尝试后仍然失败: {e}")
+                        raise last_exception
+            return None
+        return wrapper
+    return decorator
+
+@contextmanager
+def safe_db_connection():
+    """安全的数据库连接上下文管理器"""
+    conn = None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=20.0)
+        conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        yield conn
+    except sqlite3.Error as e:
+        logging.error(f"数据库连接错误: {e}")
+        raise
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception as e:
+                logging.warning(f"关闭数据库连接时出错: {e}")
+
+@retry_on_exception(max_retries=2, exceptions=(FileNotFoundError, IOError))
 def read_config(file_path):
-    # 读取配置文件，返回字典
+    """读取配置文件，返回字典，增加错误处理"""
     config = {}
-    with open(file_path, 'r') as f:
-        for line in f:
-            key, value = line.strip().split('=')
-            config[key.strip()] = value.strip().strip('"')
-    return config
+    try:
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"配置文件不存在: {file_path}")
+        
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line_num, line in enumerate(f, 1):
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                try:
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        config[key.strip()] = value.strip().strip('"')
+                    else:
+                        logging.warning(f"配置文件第 {line_num} 行格式错误: {line}")
+                except ValueError as e:
+                    logging.warning(f"配置文件第 {line_num} 行解析错误: {line}, 错误: {e}")
+        
+        # 验证必要的配置项
+        required_keys = ['apikey', 'text_model', 'vision_model']
+        missing_keys = [key for key in required_keys if key not in config]
+        if missing_keys:
+            logging.warning(f"配置文件缺少必要项: {missing_keys}")
+        
+        return config
+    except Exception as e:
+        logging.error(f"读取配置文件失败: {e}")
+        raise
 
 
 def insert_missing_commas(json_like_string):
@@ -127,9 +212,20 @@ def _save_with_format(img: Image.Image, path: str, fmt_hint: str = None, quality
         img.save(path, format="PNG", optimize=True, compress_level=9)
 
 
+@retry_on_exception(max_retries=2, exceptions=(OSError, IOError))
 def compress_image(path, max_pixels, size_limit):
     """先尝试把 >8bit 图降到 8bit，再看体积是否达标；不达标再降分辨率到满足 size_limit（也会遵守 max_pixels）。"""
     logging.info(f"开始处理图片: {path}")
+    
+    # 验证输入参数
+    if not os.path.exists(path):
+        logging.error(f"图片文件不存在: {path}")
+        return
+    
+    if max_pixels <= 0 or size_limit <= 0:
+        logging.error(f"无效的参数: max_pixels={max_pixels}, size_limit={size_limit}")
+        return
+    
     try:
         with Image.open(path) as img:
             fmt_hint = (img.format or "").upper()
@@ -228,166 +324,312 @@ def compress_image(path, max_pixels, size_limit):
         logging.info("图片压缩流程完成。")
     except UnidentifiedImageError:
         logging.warning(f"跳过无法识别的图片文件: {path}")
+    except (OSError, IOError) as e:
+        logging.error(f"图片文件操作错误 {path}: {e}")
+        raise
     except Exception as e:
         logging.error(f"处理图片 {path} 时发生意外错误: {e}", exc_info=True)
+        raise
 
 
 
-def image_safe(path, model, api_key):
-    """使用DashScope检测本地图片是否含有不安全内容。"""
-    logging.info(f"检测图片安全性: {path}")
+@retry_on_exception(max_retries=2, exceptions=(Exception,))
+def process_image_safety_and_description(path, model, api_key):
+    """使用DashScope同时进行图片安全检查和描述生成。"""
+    logging.info(f"处理图片安全检查和描述生成: {path}")
+    
+    # 验证输入参数
+    if not os.path.exists(path):
+        logging.error(f"图片文件不存在: {path}")
+        return True, ""  # 默认安全，无描述
+    
+    if not api_key or not model:
+        logging.error("缺少API密钥或模型配置")
+        return True, ""  # 默认安全，无描述
+    
     messages = [{
         'role': 'user',
         'content': [
             {'image': 'file://' + os.path.abspath(path)},
-            {'text': '这张图片是否含有暴力、血腥、色情、政治敏感，人生攻击或其他敏感内容(发到国内平台，被举报后会导致处罚的都算)？如果安全仅回答safe，否则回答unsafe'}
+            {'text': '''请分析这张图片并回答以下两个问题：
+
+1. 安全性检查：这张图片是否含有暴力、血腥、色情、政治敏感，人生攻击或其他敏感内容(发到国内平台，被举报后会导致处罚的都算)？如果安全请回答"safe"，否则回答"unsafe"。
+
+2. 图片描述：请详细描述这张图片的内容，包括图片中的主要元素、场景、颜色、风格等。描述要准确、详细，但不要过于冗长。
+
+请按以下格式回答：
+安全性：[safe/unsafe]
+描述：[详细描述内容]'''}
         ]
     }]
+    
+    # Debug输出：显示发送给模型的输入
+    logging.debug(f"发送给视觉模型的输入:")
+    logging.debug(f"  模型: {model}")
+    logging.debug(f"  图片路径: {os.path.abspath(path)}")
+    logging.debug(f"  消息内容: {json.dumps(messages, ensure_ascii=False, indent=2)}")
+    
     try:
-        response = MultiModalConversation.call(model=model, messages=messages, api_key=api_key)
+        response = MultiModalConversation.call(
+            model=model, 
+            messages=messages, 
+            api_key=api_key,
+            timeout=API_TIMEOUT
+        )
+        
+        # Debug输出：显示API响应状态
+        logging.debug(f"视觉模型API响应状态码: {response.status_code}")
+        
         if response.status_code == HTTPStatus.OK:
             content = response.output.choices[0].message.content
             if isinstance(content, list):
                 content = " ".join(map(str, content))
-            result = 'unsafe' not in content.lower()
-            logging.info(f"图片安全检测结果: {result}, 原始响应: {content}")
-            return result
+            
+            # Debug输出：显示模型返回的完整内容
+            logging.debug(f"视觉模型返回的完整内容:")
+            logging.debug(f"  {content}")
+            
+            # 解析响应内容
+            is_safe = True
+            description = ""
+            
+            # 提取安全性信息
+            if 'unsafe' in content.lower():
+                is_safe = False
+                logging.warning(f"图片被标记为不安全: {path}")
+            
+            # 提取描述信息
+            description_start = content.find('描述：')
+            if description_start != -1:
+                description = content[description_start + 3:].strip()
+            else:
+                # 如果没有找到"描述："标记，尝试提取其他格式的描述
+                lines = content.split('\n')
+                for line in lines:
+                    if line.strip() and not line.lower().startswith('安全性：') and 'safe' not in line.lower() and 'unsafe' not in line.lower():
+                        description = line.strip()
+                        break
+            
+            logging.info(f"图片处理结果 - 安全: {is_safe}, 描述长度: {len(description)} 字符")
+            return is_safe, description.strip()
+            
+        elif response.status_code == 400:
+            # API返回400错误，通常表示图片内容过于敏感，被API拒绝处理
+            logging.warning(f"图片被API拒绝处理(400错误)，可能包含极度敏感内容: {path}")
+            logging.debug(f"API错误详情: {getattr(response, 'message', '未知错误')}")
+            return False, ""  # 标记为不安全，无描述
+        elif response.status_code == 401:
+            logging.error(f"API密钥无效(401错误): {path}")
+            return True, ""  # 默认安全，无描述
+        elif response.status_code == 403:
+            logging.error(f"API权限不足或被封禁(403错误): {path}")
+            return True, ""  # 默认安全，无描述
+        elif response.status_code == 429:
+            logging.warning(f"API请求频率限制(429错误): {path}")
+            return True, ""  # 默认安全，无描述
+        elif response.status_code >= 500:
+            logging.error(f"API服务器错误({response.status_code}): {path}")
+            return True, ""  # 默认安全，无描述
         else:
-            logging.warning(f"图片安全检测返回非200状态码: {response.status_code}")
-            return False
+            logging.warning(f"图片处理返回未知状态码: {response.status_code}, 图片: {path}")
+            return True, ""  # 默认安全，无描述
+            
     except Exception as e:
-        logging.error(f"图片安全检测发生错误: {str(e)}, 错误类型: {type(e)}", exc_info=True)
-        return True
+        error_msg = str(e).lower()
+        if '400' in error_msg or 'bad request' in error_msg:
+            # 捕获到400相关异常
+            logging.warning(f"捕获到400错误异常，图片可能包含极度敏感内容: {path}")
+            logging.debug(f"400错误异常详情: {str(e)}")
+            return False, ""  # 标记为不安全，无描述
+        elif 'timeout' in error_msg or 'timed out' in error_msg:
+            logging.warning(f"图片处理超时: {path}")
+            return True, ""  # 默认安全，无描述
+        elif 'connection' in error_msg or 'network' in error_msg:
+            logging.error(f"网络连接错误: {str(e)}")
+            return True, ""  # 默认安全，无描述
+        else:
+            logging.error(f"图片处理发生未知错误: {str(e)}, 错误类型: {type(e)}", exc_info=True)
+            return True, ""  # 默认安全，无描述
 
 
-def update_safemsg(tag, safe):
-    """根据图片安全性结果，更新数据库中的safemsg字段。"""
-    conn = sqlite3.connect('./cache/OQQWall.db')
-    cur = conn.cursor()
-    row = cur.execute('SELECT AfterLM FROM preprocess WHERE tag=?', (tag,)).fetchone()
-    if not row:
-        conn.close()
+@retry_on_exception(max_retries=3, exceptions=(sqlite3.Error, json.JSONDecodeError))
+def process_images_comprehensive(tag, config):
+    """对指定tag的所有图片进行压缩、安全检查、描述生成，并更新JSON数据。"""
+    if not tag or not config:
+        logging.error("缺少必要参数: tag 或 config")
         return
-    data = json.loads(row[0])
-    if not safe:
-        data['safemsg'] = 'false'
-    updated = json.dumps(data, ensure_ascii=False)
-    cur.execute('UPDATE preprocess SET AfterLM=? WHERE tag=?', (updated, tag))
-    conn.commit()
-    conn.close()
-
-
-def process_image_safety(tag, config):
-    """对指定tag的所有图片进行压缩和安全检测，并更新safemsg。"""
-    folder = os.path.join('cache/picture', str(tag))
-    logging.info(f"处理tag {tag}的图片安全性检查")
     
-    if not os.path.isdir(folder) or not os.listdir(folder):
-        logging.info(f"目录 {folder} 不存在或为空，跳过图片处理")
+    folder = os.path.join('cache/picture', str(tag))
+    logging.info(f"处理tag {tag}的图片综合处理（压缩、安全检查、描述生成）")
+    
+    if not os.path.isdir(folder):
+        logging.info(f"目录 {folder} 不存在，跳过图片处理")
         return
+    
+    files = os.listdir(folder)
+    if not files:
+        logging.info(f"目录 {folder} 为空，跳过图片处理")
+        return
+    
+    # 验证配置参数
     api_key = config.get('apikey')
-    max_pixels = int(config.get('vision_pixel_limit', 12000000))
-    size_limit = float(config.get('vision_size_limit_mb', 9.5)) * 1024 * 1024
+    if not api_key:
+        logging.error("配置中缺少API密钥")
+        return
+    
+    try:
+        max_pixels = int(config.get('vision_pixel_limit', 12000000))
+        size_limit = float(config.get('vision_size_limit_mb', 9.5)) * 1024 * 1024
+    except (ValueError, TypeError) as e:
+        logging.error(f"配置参数解析错误: {e}")
+        return
+    
     model = config.get('vision_model', 'qwen-vl-max-latest')
     dashscope.api_key = api_key
 
-    safe = True
-    for file in os.listdir(folder):
-        path = os.path.join(folder, file)
-        logging.info(f"处理图片: {file}")
-        compress_image(path, max_pixels, size_limit)
-        if not image_safe(path, model, api_key):
-            logging.warning(f"图片 {file} 被标记为不安全")
-            safe = False
-    
-    logging.info(f"图片安全检查完成，结果: {'安全' if safe else '不安全'}")
-    update_safemsg(tag, safe)
-
-
-def fetch_response_in_parts(prompt, config, max_rounds=5):
-    # 分多轮流式获取大模型响应，拼接完整输出
-    messages = [{'role': 'system', 'content': '你是一个校园墙投稿管理员'},
-                {'role': 'user', 'content': prompt}]
-
-    full_response = ""
-    round_count = 0
-    is_complete = False
-    previous_output = ""
-
-    while not is_complete and round_count < max_rounds:
-        seed = 1354
-        print(f"Round {round_count + 1} - Using seed: {seed}")
-
-        # 使用流式输出方式调用生成模型
-        responses = Generation.call(
-            model=config.get('text_model', 'qwen-plus-latest'),
-            messages=messages,
-            seed=seed,
-            result_format='message',
-            stream=True,
-            incremental_output=True,
-            max_tokens=8192,
-            temperature=0.50,
-            repetition_penalty=1.0
-        )
-
-        # 处理流式响应
-        output_content = ""
+    # 读取当前数据库中的JSON数据
+    with safe_db_connection() as conn:
+        cur = conn.cursor()
         try:
-            for response in responses:
-                # 只拼接内容，不访问status_code
-                chunk = response.output.get('choices', [])[0].get('message', {}).get('content', '')
-                output_content += chunk
-                sys.stdout.flush()
-        except Exception as e:
-            print(f"Error in API call: {e}")
-            break
-
-        if previous_output:
-            # 获取上一次输出的最后100个字符
-            overlap_content = previous_output[-100:]
-            # 在当前输出的前500字符中查找重叠部分
-            start_index = output_content[:500].find(overlap_content)
-            if start_index != -1:
-                # 如果找到，去除重叠部分
-                output_content = output_content[start_index + len(overlap_content):]
-
-        # 更新完整响应
-        full_response += output_content
-        previous_output = output_content
-
-        # 检查输出是否以结束标志'```'结尾
-        if output_content.endswith('```'):
-            print("complete!")
-            is_complete = True
-        else:
-            # 截断最后100字符后加入messages，防止重复
-            truncated_output = output_content[:-100] if len(output_content) > 100 else output_content
-            messages.append({
-                'role': Role.ASSISTANT,
-                'content': truncated_output
-            })
-            # 提示模型继续输出，不要重复内容
-            messages.append({'role': Role.USER, 'content': '接着上次停下的地方继续输出，不要重复之前的内容，不要重复sender和needpriv等内容，不要在开头重复一遍```json {"time": },{"message": [{"type": ,"data": {，不要在开头重复任何格式内容，直接接着上次结束的那个字继续,但是如果json已经到达末尾，请用\n```结束输出'})
-        round_count += 1
-
-    return full_response
-
-def save_to_sqlite(output_data, tag):
-    # 将结果保存到SQLite数据库
-    db_path = './cache/OQQWall.db'
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    try:
-        sql_update_query = '''UPDATE preprocess SET AfterLM = ? WHERE tag = ?'''
-        cursor.execute(sql_update_query, (output_data, tag))
-        conn.commit()
-        print(f"Data successfully saved to SQLite for tag: {tag}")
-    except sqlite3.Error as e:
-        print(f"SQLite error occurred: {e}")
-    finally:
-        cursor.close()
-        conn.close()
+            row = cur.execute('SELECT AfterLM FROM preprocess WHERE tag=?', (tag,)).fetchone()
+            if not row:
+                logging.warning(f"未找到标签 {tag} 的记录")
+                return
+            
+            data = json.loads(row[0])
+            messages = data.get('messages', [])
+            
+            # 为了图片处理，我们需要访问完整的data字段，所以使用原始数据
+            # 而不是经过make_lm_sanitized_and_original处理的数据
+            
+            # 统计信息
+            processed_count = 0
+            error_count = 0
+            description_count = 0
+            api_400_count = 0
+            sensitive_files = []
+            safe = True
+            
+            # 遍历所有消息，找到图片类型的消息
+            image_count = 0
+            for item in messages:
+                if 'message' in item and isinstance(item['message'], list):
+                    for msg in item['message']:
+                        if msg.get('type') == 'image':
+                            image_count += 1
+                            # 查找对应的图片文件
+                            file_name = None
+                            
+                            # 方法1: 尝试从data字段获取文件名
+                            if 'data' in msg and 'url' in msg['data']:
+                                # 优先使用URL字段，因为它包含实际的文件路径
+                                url = msg['data']['url']
+                                logging.debug(f"从data.url获取URL: {url}")
+                                if url.startswith('file://'):
+                                    file_name = os.path.basename(url[7:])  # 去掉file://前缀
+                                    logging.debug(f"从URL提取文件名: {file_name}")
+                            elif 'data' in msg and 'file' in msg['data']:
+                                file_name = os.path.basename(msg['data']['file'])
+                                logging.debug(f"从data.file获取文件名: {file_name}")
+                            elif 'file' in msg:
+                                file_name = os.path.basename(msg['file'])
+                                logging.debug(f"从msg.file获取文件名: {file_name}")
+                            
+                            # 方法2: 如果找不到文件名，尝试按tag-index.png格式匹配
+                            if not file_name:
+                                # 查找匹配的图片文件
+                                for f in files:
+                                    if f.startswith(f"{tag}-{image_count}.") and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp')):
+                                        file_name = f
+                                        break
+                            
+                            # 方法3: 如果仍然找不到，尝试匹配任何图片文件
+                            if not file_name and len(files) == 1:
+                                # 如果只有一个文件，直接使用它
+                                file_name = files[0]
+                                logging.info(f"只有一个图片文件，直接使用: {file_name}")
+                            elif not file_name:
+                                # 如果有多个文件，尝试按顺序匹配
+                                for f in files:
+                                    if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp')):
+                                        file_name = f
+                                        logging.info(f"按顺序匹配到图片文件: {file_name}")
+                                        break
+                            
+                            if file_name and file_name in files:
+                                image_path = os.path.join(folder, file_name)
+                                try:
+                                    logging.info(f"处理图片: {file_name}")
+                                    
+                                    # 步骤1: 压缩图片
+                                    compress_image(image_path, max_pixels, size_limit)
+                                    
+                                    # 步骤2: 同时进行安全检查和描述生成
+                                    is_safe, description = process_image_safety_and_description(image_path, model, api_key)
+                                    
+                                    if not is_safe:
+                                        logging.warning(f"图片 {file_name} 被标记为不安全")
+                                        safe = False
+                                        sensitive_files.append(file_name)
+                                    
+                                    if description:
+                                        # 将描述添加到消息的顶层，这样大模型可以看到
+                                        msg['describe'] = description
+                                        description_count += 1
+                                        logging.info(f"成功为图片 {file_name} 添加描述")
+                                    else:
+                                        logging.warning(f"图片 {file_name} 描述生成失败")
+                                        error_count += 1
+                                    
+                                    processed_count += 1
+                                    
+                                except Exception as e:
+                                    error_msg = str(e).lower()
+                                    if '400' in error_msg or 'bad request' in error_msg:
+                                        logging.error(f"图片 {file_name} 触发API 400错误，可能包含极度敏感内容: {e}")
+                                        safe = False
+                                        sensitive_files.append(file_name)
+                                        api_400_count += 1
+                                    else:
+                                        logging.error(f"处理图片 {file_name} 时出错: {e}")
+                                        error_count += 1
+                            else:
+                                logging.warning(f"未找到图片文件，image_count={image_count}, 可用文件: {files}")
+                                logging.debug(f"图片消息结构: {json.dumps(msg, ensure_ascii=False)}")
+            
+            # 更新数据库
+            if description_count > 0 or not safe:
+                # 更新safemsg字段
+                if not safe:
+                    data['safemsg'] = 'false'
+                
+                updated_data = json.dumps(data, ensure_ascii=False, indent=4)
+                cur.execute('UPDATE preprocess SET AfterLM=? WHERE tag=?', (updated_data, tag))
+                conn.commit()
+                logging.info(f"成功更新数据库，添加了 {description_count} 个图片描述，安全状态: {'不安全' if not safe else '安全'}")
+            
+            # 详细的统计信息
+            logging.info(f"图片综合处理完成:")
+            logging.info(f"  - 总图片文件数: {len(files)}")
+            logging.info(f"  - 处理的图片消息: {processed_count} 个")
+            logging.info(f"  - 成功生成描述: {description_count} 个")
+            logging.info(f"  - 处理错误: {error_count} 个")
+            logging.info(f"  - API 400错误: {api_400_count} 个")
+            logging.info(f"  - 敏感文件: {len(sensitive_files)} 个")
+            if sensitive_files:
+                logging.warning(f"  - 敏感文件列表: {sensitive_files}")
+            logging.info(f"  - 最终安全结果: {'安全' if safe else '不安全'}")
+            
+            # 如果有API 400错误，记录特殊标记
+            if api_400_count > 0:
+                logging.warning(f"标签 {tag} 包含 {api_400_count} 个可能极度敏感的文件，已被标记为不安全")
+            
+        except json.JSONDecodeError as e:
+            logging.error(f"解析JSON数据失败: {e}")
+            raise
+        except sqlite3.Error as e:
+            logging.error(f"数据库操作失败: {e}")
+            raise
 
 ############################################
 #      Flexible per-type redact & restore  #
@@ -556,34 +798,196 @@ def finalize_item_for_output(item_origin):
 
     return out_item
 
+
+@retry_on_exception(max_retries=2, exceptions=(Exception,))
+def fetch_response_in_parts(prompt, config, max_rounds=5):
+    """分多轮流式获取大模型响应，拼接完整输出"""
+    if not prompt or not config:
+        logging.error("缺少必要参数: prompt 或 config")
+        return ""
+    
+    messages = [{'role': 'system', 'content': '你是一个校园墙投稿管理员'},
+                {'role': 'user', 'content': prompt}]
+
+    # Debug输出：显示发送给文本模型的输入，用户消息显示完整的
+    logging.debug(f"发送给文本模型的输入:")
+    logging.debug(f"  模型: {config.get('text_model', 'qwen-plus-latest')}")
+    logging.debug(f"  消息数量: {len(messages)}")
+    logging.debug(f"  系统消息: {messages[0]['content']}")
+    logging.debug(f"  用户消息长度: {len(messages[1]['content'])} 字符")
+    logging.debug(f"  用户消息完整内容: {messages[1]['content']}")
+
+    full_response = ""
+    round_count = 0
+    is_complete = False
+    previous_output = ""
+
+    while not is_complete and round_count < max_rounds:
+        seed = 1354
+        logging.info(f"Round {round_count + 1} - Using seed: {seed}")
+
+        try:
+            # 使用流式输出方式调用生成模型
+            responses = Generation.call(
+                model=config.get('text_model', 'qwen-plus-latest'),
+                messages=messages,
+                seed=seed,
+                result_format='message',
+                stream=True,
+                incremental_output=True,
+                max_tokens=8192,
+                temperature=0.50,
+                repetition_penalty=1.0,
+                timeout=API_TIMEOUT
+            )
+
+            # 处理流式响应
+            output_content = ""
+            for response in responses:
+                # 只拼接内容，不访问status_code
+                chunk = response.output.get('choices', [])[0].get('message', {}).get('content', '')
+                output_content += chunk
+                sys.stdout.flush()
+            
+            # Debug输出：显示本轮接收到的内容
+            logging.debug(f"Round {round_count + 1} 接收到的内容长度: {len(output_content)} 字符")
+            logging.debug(f"Round {round_count + 1} 接收到的内容: {output_content}")
+                
+        except Exception as e:
+            logging.error(f"API调用错误: {e}")
+            break
+
+        if previous_output:
+            # 获取上一次输出的最后100个字符
+            overlap_content = previous_output[-100:]
+            # 在当前输出的前500字符中查找重叠部分
+            start_index = output_content[:500].find(overlap_content)
+            if start_index != -1:
+                # 如果找到，去除重叠部分
+                output_content = output_content[start_index + len(overlap_content):]
+                logging.debug(f"Round {round_count + 1} 去除重叠内容后长度: {len(output_content)} 字符")
+
+        # 更新完整响应
+        full_response += output_content
+        previous_output = output_content
+
+        # 检查输出是否以结束标志'```'结尾
+        if output_content.endswith('```'):
+            logging.info("响应完成!")
+            is_complete = True
+        else:
+            # 截断最后100字符后加入messages，防止重复
+            truncated_output = output_content[:-100] if len(output_content) > 100 else output_content
+            messages.append({
+                'role': Role.ASSISTANT,
+                'content': truncated_output
+            })
+            # 提示模型继续输出，不要重复内容
+            continue_prompt = '接着上次停下的地方继续输出，不要重复之前的内容，不要重复sender和needpriv等内容，不要在开头重复一遍```json {"time": },{"message": [{"type": ,"data": {，不要在开头重复任何格式内容，直接接着上次结束的那个字继续,但是如果json已经到达末尾，请用\n```结束输出'
+            messages.append({'role': Role.USER, 'content': continue_prompt})
+            
+            # Debug输出：显示继续提示
+            logging.debug(f"Round {round_count + 1} 添加继续提示: {continue_prompt}")
+        round_count += 1
+
+    if not is_complete:
+        logging.warning(f"在 {max_rounds} 轮后仍未完成响应")
+    
+    # Debug输出：显示最终完整响应
+    logging.debug(f"文本模型最终完整响应长度: {len(full_response)} 字符")
+    logging.debug(f"文本模型最终完整响应: {full_response}")
+    
+    return full_response
+
+
+@retry_on_exception(max_retries=3, exceptions=(sqlite3.Error,))
+def save_to_sqlite(output_data, tag):
+    """将结果保存到SQLite数据库"""
+    if not output_data or not tag:
+        logging.error("缺少必要参数: output_data 或 tag")
+        return False
+    
+    with safe_db_connection() as conn:
+        cursor = conn.cursor()
+        try:
+            sql_update_query = '''UPDATE preprocess SET AfterLM = ? WHERE tag = ?'''
+            cursor.execute(sql_update_query, (output_data, tag))
+            conn.commit()
+            logging.info(f"数据成功保存到SQLite，标签: {tag}")
+            return True
+        except sqlite3.Error as e:
+            logging.error(f"SQLite错误: {e}")
+            raise
+
+
 def main():
     # 配置日志输出
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,  # 改为DEBUG级别以显示debug输出
         format='LMWork:%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
         ]
     )
 
-    # 主入口，处理输入、调用模型、保存结果
-    config = read_config('oqqwall.config')
-    dashscope.api_key = config.get('apikey')
-    data = json.load(sys.stdin)
-    # === 基于 per_type_rules 的精细化删改 ===
-    lm_messages, origin_messages = make_lm_sanitized_and_original(data)
+    try:
+        # 验证命令行参数
+        if len(sys.argv) < 2:
+            logging.error("缺少必要的命令行参数: tag")
+            sys.exit(1)
+        
+        tag = sys.argv[1]
+        logging.info(f"开始处理标签: {tag}")
+        
+        # 读取配置
+        config = read_config('oqqwall.config')
+        if not config.get('apikey'):
+            logging.error("配置中缺少API密钥")
+            sys.exit(1)
+        
+        dashscope.api_key = config.get('apikey')
+        
+        # 读取输入数据
+        try:
+            data = json.load(sys.stdin)
+        except json.JSONDecodeError as e:
+            logging.error(f"输入JSON解析错误: {e}")
+            sys.exit(1)
+        
+        # === 第一步：先处理图片（压缩、安全检查、描述生成） ===
+        logging.info("第一步：开始处理图片（压缩、安全检查、描述生成）...")
+        process_images_comprehensive(tag, config)
+        
+        # === 第二步：重新读取处理后的数据 ===
+        with safe_db_connection() as conn:
+            cur = conn.cursor()
+            try:
+                row = cur.execute('SELECT AfterLM FROM preprocess WHERE tag=?', (tag,)).fetchone()
+                if row:
+                    # 重新加载可能被图片处理更新的数据
+                    data = json.loads(row[0])
+                    logging.info("重新加载了图片处理后的数据")
+                else:
+                    logging.warning(f"未找到标签 {tag} 的记录，使用原始数据")
+            except json.JSONDecodeError as e:
+                logging.error(f"重新加载数据时JSON解析错误: {e}")
+                # 继续使用原始数据
+        
+        # === 第三步：基于 per_type_rules 的精细化删改 ===
+        lm_messages, origin_messages = make_lm_sanitized_and_original(data)
 
-    lm_input = {
-        "notregular": data.get("notregular"),
-        "messages": lm_messages
-    }
+        lm_input = {
+            "notregular": data.get("notregular"),
+            "messages": lm_messages
+        }
 
-    input_content = json.dumps(lm_input, ensure_ascii=False, indent=4)
-    timenow = time.time()
+        input_content = json.dumps(lm_input, ensure_ascii=False, indent=4)
+        timenow = time.time()
 
-    print(f"input content:\n{input_content}\n")
-    # 构造prompt，详细说明分组和输出要求
-    prompt = f"""当前时间 {timenow}
+        logging.info(f"输入内容长度: {len(input_content)} 字符")
+        
+        # 构造prompt，详细说明分组和输出要求
+        prompt = f"""当前时间 {timenow}
     以下内容是一组按时间顺序排列的校园墙投稿聊天记录：
 
     {input_content}
@@ -591,17 +995,17 @@ def main():
     请根据以下标准，提取出这些消息中属于**最后一组投稿**的信息：
 
     ### 分组标准
-    - 通常以关键词“在吗”、“投稿”、“墙”等开始，但这些关键词可能出现在中途或根本不出现。
+    - 通常以关键词"在吗"、"投稿"、"墙"等开始，但这些关键词可能出现在中途或根本不出现。
     - 属于同一组投稿的消息，时间间隔一般较近（通常小于 600 秒），但也存在例外。
     - 投稿内容可能包含文本、图片（image）、视频（video）、文件（file）、戳一戳（poke）、合并转发的聊天记录（forward）等多种类型。
     - 你无法查看合并转发的聊天记录的内容
     - 大多数情况下该记录只包含一组投稿，这种情况下认为所有消息都在组中，偶尔可能有多组，需要你自己判断。
-    - 信息只可能包含多个完整的投稿，户可能出现半个投稿+一个投稿的情况，如果真的出现了，说明你判断错误，前面那个“半个投稿”，是后面投稿的一部分。
+    - 信息只可能包含多个完整的投稿，户可能出现半个投稿+一个投稿的情况，如果真的出现了，说明你判断错误，前面那个"半个投稿"，是后面投稿的一部分。
 
     ### 你需要给出的判断
 
     - `needpriv`（是否需要匿名）  
-    - 如果信息中明确表达“匿名”意图或使用谐音字（如：“匿”、“腻”、“拟”、“逆”、“🐎”、“🐴”、“马” 等），则为 `true`。  
+    - 如果信息中明确表达"匿名"意图或使用谐音字（如："匿"、"腻"、"拟"、"逆"、"🐎"、"🐴"、"马" 等），则为 `true`。  
     - 当信息仅包含单个含义模糊的字或 emoji 时，也应考虑匿名的可能性。  
     - 否则为 `false`。
     - 如果用户明确说了不匿(也可能是不腻，不码，不马之类的谐音内容)，那么一定为`false`
@@ -611,11 +1015,11 @@ def main():
     - 否则为 `true`。
 
     - `isover`（投稿是否完整）  
-    - 若投稿者明确表示“发完了”、“没了”、“完毕”等；或投稿语义完整且最后一条消息距离当前时间较远，则为 `true`。  
-    - 若存在“没发完”之类的未结束迹象，或最后消息距当前时间较近且不明确，则为 `false`。
+    - 若投稿者明确表示"发完了"、"没了"、"完毕"等；或投稿语义完整且最后一条消息距离当前时间较远，则为 `true`。  
+    - 若存在"没发完"之类的未结束迹象，或最后消息距当前时间较近且不明确，则为 `false`。
 
     - `notregular`（投稿是否异常）  
-    - 若投稿者明确表示“不合常规”或你主观判断此内容异常，则为 `true`。  
+    - 若投稿者明确表示"不合常规"或你主观判断此内容异常，则为 `true`。  
     - 否则为 `false`。
 
     ### 输出格式
@@ -637,34 +1041,66 @@ def main():
     ```
     """
 
-    # 使用流式传输获取模型响应
-    final_response = fetch_response_in_parts(prompt, config)
-    final_response = clean_json_output(final_response)
-    print(f"final response:{final_response}")
-    # 解析并保存最终的JSON响应
-    try:
-        tag = sys.argv[1]
-        # 去除markdown格式并加载JSON内容
-        final_response_json = json.loads(final_response.strip('```json\n').strip('\n```'))
-        # 以原始消息为基准恢复 + 按规则裁剪（保留 hide_from_LM_only）
-        origin_lookup = {msg["message_id"]: msg for msg in origin_messages}
-        final_list = []
-        for mid in final_response_json.get("messages", []):
-            if mid in origin_lookup:
-                final_list.append(finalize_item_for_output(origin_lookup[mid]))
-        final_response_json["messages"] = final_list
+        # 使用流式传输获取模型响应
+        logging.info("第二步：开始调用大模型API...")
+        final_response = fetch_response_in_parts(prompt, config)
+        
+        if not final_response:
+            logging.error("未获得有效的模型响应")
+            sys.exit(1)
+        
+        final_response = clean_json_output(final_response)
+        logging.info(f"模型响应长度: {len(final_response)} 字符")
+        
+        # 解析并保存最终的JSON响应
+        try:
+            # 去除markdown格式并加载JSON内容
+            cleaned_response = final_response.strip('```json\n').strip('\n```')
+            final_response_json = json.loads(cleaned_response)
+            
+            # 以原始消息为基准恢复 + 按规则裁剪（保留 hide_from_LM_only）
+            origin_lookup = {msg["message_id"]: msg for msg in origin_messages}
+            final_list = []
+            for mid in final_response_json.get("messages", []):
+                if mid in origin_lookup:
+                    final_list.append(finalize_item_for_output(origin_lookup[mid]))
+                else:
+                    logging.warning(f"未找到消息ID: {mid}")
+            
+            final_response_json["messages"] = final_list
 
-        output_data = json.dumps(final_response_json, ensure_ascii=False, indent=4)
-        save_to_sqlite(output_data, tag)
+            output_data = json.dumps(final_response_json, ensure_ascii=False, indent=4)
+            
+            # 保存到数据库
+            if save_to_sqlite(output_data, tag):
+                logging.info("数据保存成功")
+            else:
+                logging.error("数据保存失败")
+                sys.exit(1)
 
-        # 压缩并检测图片安全性，更新safemsg
-        process_image_safety(tag, config)
+            logging.info("处理完成")
 
-    except json.JSONDecodeError as e:
-        print(f"JSON解析错误: {e}\n返回内容: {final_response}")
-        with open(output_file_path_error, 'w', encoding='utf-8') as errorfile:
-            errorfile.write(final_response)
-        print("错误的JSON已保存到:", output_file_path_error)
+        except json.JSONDecodeError as e:
+            logging.error(f"JSON解析错误: {e}")
+            logging.error(f"返回内容: {final_response}")
+            
+            # 保存错误内容到文件
+            try:
+                with open(output_file_path_error, 'w', encoding='utf-8') as errorfile:
+                    errorfile.write(final_response)
+                logging.info(f"错误的JSON已保存到: {output_file_path_error}")
+            except Exception as save_error:
+                logging.error(f"保存错误文件失败: {save_error}")
+            
+            sys.exit(1)
+            
+    except KeyboardInterrupt:
+        logging.info("用户中断操作")
+        sys.exit(0)
+    except Exception as e:
+        logging.error(f"程序执行过程中发生未预期的错误: {e}")
+        logging.error(traceback.format_exc())
+        sys.exit(1)
 
 
 if __name__ == '__main__':
