@@ -22,7 +22,15 @@ fi
 # get watermark_text
 json_file="./AcountGroupcfg.json"
 groupname=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT ACgroup FROM preprocess WHERE tag = '$tag';")
-watermark_text=$(jq -r --arg g "$groupname" '.[$g].watermark_text' "$json_file")
+# 取到第一个非空字符串；若都没有则输出为空
+watermark_text=$(jq -r --arg g "$groupname" '
+  [ .[$g].watermark_text, .[$g].watermark, .MethGroup.watermark ]
+  | map(select(type=="string" and length>0))
+  | .[0] // empty
+' "$json_file")
+
+# 为了在 JS 里安全插入字符串（避免引号/换行把脚本弄坏），准备一个 JSON 编码版本
+wm_js=$(jq -n --arg t "$watermark_text" '$t')
 
 
 # === Generate QRs for every card jumpUrl (support nested forward) ===
@@ -95,6 +103,7 @@ echo "$json_data" | jq -r --arg DBG "$DEBUG" '
 ' | while IFS=$'\t' read -r key url; do
   [[ -z "$url" ]] && continue
   log "qrencode key=${key} url=${url}"
+  command -v qrencode >/dev/null || { echo "qrencode 未安装"; exit 1; }
   qrencode "$url" -t PNG -o "$qr_dir/qr_${key}.png" -m 0 \
     || { log "qrencode failed key=${key}"; exit 1; }
 done
@@ -183,7 +192,7 @@ message_html=$(echo "$json_data" | jq -r \
 
     elif .type == "video" then
       "<video controls autoplay muted><source src=\"" +
-      (.data.url // "") +
+      ((.data.url // .data.file // "") | tostring) +
       "\" type=\"video/mp4\">Your browser does not support the video tag.</video>"
 
     elif .type == "poke" then
@@ -837,15 +846,18 @@ html_content=$(cat <<EOF
             const style = document.createElement('style');
             style.innerHTML = '@page { size: ' + pageSize + '; margin: 0 !important; }';
             document.head.appendChild(style);
-            addWatermark({
-                text: '${watermark_text}',
+            const wmText = /*bash*/ ${wm_js};
+            if (typeof wmText === 'string' && wmText.trim() !== '') {
+              addWatermark({
+                text: wmText,
                 // 4in 宽(≈384px)推荐默认——更小更克制
                 opacity: 0.12,
                 angle: 24,
                 fontSize: 40,   // ← 从 56~64 降到 36~44 更合适
                 tile: 480,      // ← 间距也相应减小，避免密度太大
                 jitter: 10
-            });
+              });
+            }
 
             function addWatermark(opts) {
                 const container = document.querySelector('.container');
@@ -865,12 +877,12 @@ html_content=$(cat <<EOF
                 const H = container.scrollHeight;     // 高度按内容
                 overlay.style.width = W + 'px';
                 overlay.style.height = H + 'px';
-                const text = opts.text ?? ('Shared • ' + new Date().toISOString().slice(0, 10));
-                const opacity = 0.1;
-                const angle = Math.max(0, opts.angle ?? 24);
-                const fontSize = 28;
-                const tile = 220;
-                const jitter = opts.jitter ?? 10;
+                const text = String(opts.text);
+                const opacity = (typeof opts.opacity === 'number') ? opts.opacity : 0.12;
+                const angle = Number.isFinite(opts.angle) ? opts.angle : 24;
+                const fontSize = Number.isFinite(opts.fontSize) ? opts.fontSize : 40;
+                const tile = Number.isFinite(opts.tile) ? opts.tile : 480;
+                const jitter = Number.isFinite(opts.jitter) ? opts.jitter : 10;
 
                 // 先创建一个隐藏样本元素，量出旋转后的包围盒尺寸，便于“限界”布点
                 const probe = document.createElement('span');
