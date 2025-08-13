@@ -83,6 +83,8 @@ else
     sendmsggroup LLM处理错误，请检查相关信息
   fi
 fi
+
+echo '开始处理json到html及渲染'
 # Step 2: Lock the cache files and process HTML to PDF
 {
   flock -x 200  # Acquire exclusive oock
