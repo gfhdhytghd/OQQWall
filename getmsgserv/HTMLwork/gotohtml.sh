@@ -183,7 +183,7 @@ message_html=$(echo "$json_data" | jq -r \
 
     elif .type == "video" then
       "<video controls autoplay muted><source src=\"" +
-      (if .data.file then .data.url end) +
+      (.data.url // "") +
       "\" type=\"video/mp4\">Your browser does not support the video tag.</video>"
 
     elif .type == "poke" then

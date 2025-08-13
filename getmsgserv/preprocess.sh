@@ -84,7 +84,7 @@ else
   fi
 fi
 
-echo '开始处理json到html及渲染'
+echo '开始处理json到html'
 # Step 2: Lock the cache files and process HTML to PDF
 {
   flock -x 200  # Acquire exclusive oock
@@ -98,6 +98,7 @@ wait_stable() { local f="$1" last=0; while :; do
 done; }
 wait_stable /dev/shm/OQQWall/oqqwallhtmlcache.html
 
+echo '开始处理html到pdf'
 # Step 3: Process the output into JPG
 # ---- 1. 选择可执行文件 ---------------------------------------------------
 # 依次查找可用的浏览器可执行文件

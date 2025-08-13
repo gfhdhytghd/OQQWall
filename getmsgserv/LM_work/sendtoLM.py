@@ -963,12 +963,12 @@ def main():
             cur = conn.cursor()
             try:
                 row = cur.execute('SELECT AfterLM FROM preprocess WHERE tag=?', (tag,)).fetchone()
-                if row:
+                if row and row[0] is not None:
                     # 重新加载可能被图片处理更新的数据
                     data = json.loads(row[0])
                     logging.info("重新加载了图片处理后的数据")
                 else:
-                    logging.warning(f"未找到标签 {tag} 的记录，使用原始数据")
+                    logging.warning(f"未找到标签 {tag} 的记录或AfterLM字段为空，使用原始数据")
             except json.JSONDecodeError as e:
                 logging.error(f"重新加载数据时JSON解析错误: {e}")
                 # 继续使用原始数据
