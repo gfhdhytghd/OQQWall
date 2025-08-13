@@ -1,0 +1,63 @@
+{
+  "session_id": "20250101_120000",
+  "start_time": "2025-01-01T12:00:00",
+  "end_time": "2025-01-01T12:05:00",
+  "requests": [
+    {
+      "request_id": 1,
+      "timestamp": "2025-01-01T12:00:01",
+      "method": "POST",
+      "path": "/",
+      "headers": {
+        "Content-Type": "application/json",
+        "User-Agent": "NapCat/1.0"
+      },
+      "body": "{\"post_type\":\"message\",\"message_type\":\"group\",\"group_id\":123456,\"user_id\":789012,\"message\":\"Hello World!\",\"self_id\":345678}",
+      "body_parsed": {
+        "post_type": "message",
+        "message_type": "group",
+        "group_id": 123456,
+        "user_id": 789012,
+        "message": "Hello World!",
+        "self_id": 345678
+      }
+    },
+    {
+      "request_id": 2,
+      "timestamp": "2025-01-01T12:00:30",
+      "method": "POST",
+      "path": "/",
+      "headers": {
+        "Content-Type": "application/json",
+        "User-Agent": "NapCat/1.0"
+      },
+      "body": "{\"post_type\":\"message\",\"message_type\":\"private\",\"user_id\":789012,\"message\":\"测试私聊消息\",\"self_id\":345678}",
+      "body_parsed": {
+        "post_type": "message",
+        "message_type": "private",
+        "user_id": 789012,
+        "message": "测试私聊消息",
+        "self_id": 345678
+      }
+    },
+    {
+      "request_id": 3,
+      "timestamp": "2025-01-01T12:01:00",
+      "method": "POST",
+      "path": "/",
+      "headers": {
+        "Content-Type": "application/json",
+        "User-Agent": "NapCat/1.0"
+      },
+      "body": "{\"post_type\":\"message\",\"message_type\":\"group\",\"group_id\":123456,\"user_id\":999999,\"message\":\"这是一条测试消息，用于演示重放功能\",\"self_id\":345678}",
+      "body_parsed": {
+        "post_type": "message",
+        "message_type": "group",
+        "group_id": 123456,
+        "user_id": 999999,
+        "message": "这是一条测试消息，用于演示重放功能",
+        "self_id": 345678
+      }
+    }
+  ]
+}

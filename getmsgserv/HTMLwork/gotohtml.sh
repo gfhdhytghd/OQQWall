@@ -418,6 +418,7 @@ html_content=$(cat <<EOF
             margin-bottom: 10px;
             max-width: 50%;
             max-height: 300px;
+            box-shadow: 0px 0px 6px rgba(0, 0, 0, 0.2);
         }
 
         .content video {

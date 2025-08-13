@@ -18,6 +18,8 @@ import copy
 import traceback
 import signal
 import ssl
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 import urllib3
 from typing import Dict, Any, List, Optional, Tuple
 from contextlib import contextmanager
@@ -461,8 +463,79 @@ def process_image_safety_and_description(path, model, api_key):
             return True, ""  # 默认安全，无描述
 
 
+def process_single_image_task(image_info):
+    """
+    处理单个图片的完整任务（压缩+安全检查+描述生成）
+    
+    Args:
+        image_info: dict containing:
+            - image_path: 图片文件路径
+            - file_name: 图片文件名
+            - model: 视觉模型名称
+            - api_key: API密钥
+            - max_pixels: 最大像素数
+            - size_limit: 大小限制
+            - msg: 消息对象（用于添加描述）
+            - is_additional: 是否为额外图片（非消息关联的图片）
+    
+    Returns:
+        dict: 处理结果
+    """
+    try:
+        image_path = image_info['image_path']
+        file_name = image_info['file_name']
+        model = image_info['model']
+        api_key = image_info['api_key']
+        max_pixels = image_info['max_pixels']
+        size_limit = image_info['size_limit']
+        msg = image_info.get('msg')
+        is_additional = image_info.get('is_additional', False)
+        
+        thread_id = threading.current_thread().ident
+        logging.info(f"[线程{thread_id}] 开始处理图片: {file_name}")
+        
+        # 步骤1: 压缩图片
+        compress_image(image_path, max_pixels, size_limit)
+        
+        # 步骤2: 安全检查和描述生成
+        is_safe, description = process_image_safety_and_description(image_path, model, api_key)
+        
+        result = {
+            'file_name': file_name,
+            'image_path': image_path,
+            'is_safe': is_safe,
+            'description': description,
+            'msg': msg,
+            'is_additional': is_additional,
+            'thread_id': thread_id,
+            'success': True,
+            'error': None
+        }
+        
+        logging.info(f"[线程{thread_id}] 完成处理图片: {file_name}, 安全: {is_safe}, 描述长度: {len(description)}")
+        return result
+        
+    except Exception as e:
+        error_msg = str(e).lower()
+        result = {
+            'file_name': image_info.get('file_name', 'unknown'),
+            'image_path': image_info.get('image_path', ''),
+            'is_safe': False if ('400' in error_msg or 'bad request' in error_msg) else True,
+            'description': '',
+            'msg': image_info.get('msg'),
+            'is_additional': image_info.get('is_additional', False),
+            'thread_id': threading.current_thread().ident,
+            'success': False,
+            'error': str(e),
+            'is_api_400': '400' in error_msg or 'bad request' in error_msg
+        }
+        
+        logging.error(f"[线程{result['thread_id']}] 处理图片 {result['file_name']} 时出错: {e}")
+        return result
+
+
 @retry_on_exception(max_retries=3, exceptions=(sqlite3.Error, json.JSONDecodeError))
-def process_images_comprehensive(tag, config):
+def process_images_comprehensive(tag, config, input_data=None):
     """对指定tag的所有图片进行压缩、安全检查、描述生成，并更新JSON数据。"""
     if not tag or not config:
         logging.error("缺少必要参数: tag 或 config")
@@ -500,31 +573,37 @@ def process_images_comprehensive(tag, config):
     with safe_db_connection() as conn:
         cur = conn.cursor()
         try:
-            # 首先尝试从preprocess表的AfterLM字段获取数据
-            row = cur.execute('SELECT AfterLM FROM preprocess WHERE tag=?', (tag,)).fetchone()
-            if row and row[0] is not None:
-                data = json.loads(row[0])
+            # 优先使用传入的input_data
+            if input_data is not None:
+                data = input_data
                 messages = data.get('messages', [])
-                logging.info("从AfterLM字段获取消息数据")
+                logging.info("使用传入的input_data")
             else:
-                # 如果AfterLM字段为空，从sender表的rawmsg字段获取原始数据
-                logging.info("AfterLM字段为空，尝试从sender表获取原始消息数据")
-                sender_row = cur.execute('''
-                    SELECT s.rawmsg 
-                    FROM sender s 
-                    JOIN preprocess p ON s.senderid = p.senderid AND s.receiver = p.receiver 
-                    WHERE p.tag = ?
-                ''', (tag,)).fetchone()
-                
-                if not sender_row or sender_row[0] is None:
-                    logging.warning(f"未找到标签 {tag} 的原始消息数据")
-                    return
-                
-                raw_messages = json.loads(sender_row[0])
-                # 构造data结构以保持一致性
-                data = {"messages": raw_messages}
-                messages = raw_messages
-                logging.info("从sender.rawmsg字段获取原始消息数据")
+                # 首先尝试从preprocess表的AfterLM字段获取数据
+                row = cur.execute('SELECT AfterLM FROM preprocess WHERE tag=?', (tag,)).fetchone()
+                if row and row[0] is not None:
+                    data = json.loads(row[0])
+                    messages = data.get('messages', [])
+                    logging.info("从AfterLM字段获取消息数据")
+                else:
+                    # 如果AfterLM字段为空，从sender表的rawmsg字段获取原始数据
+                    logging.info("AfterLM字段为空，尝试从sender表获取原始消息数据")
+                    sender_row = cur.execute('''
+                        SELECT s.rawmsg 
+                        FROM sender s 
+                        JOIN preprocess p ON s.senderid = p.senderid AND s.receiver = p.receiver 
+                        WHERE p.tag = ?
+                    ''', (tag,)).fetchone()
+                    
+                    if not sender_row or sender_row[0] is None:
+                        logging.warning(f"未找到标签 {tag} 的原始消息数据")
+                        return
+                    
+                    raw_messages = json.loads(sender_row[0])
+                    # 构造data结构以保持一致性
+                    data = {"messages": raw_messages}
+                    messages = raw_messages
+                    logging.info("从sender.rawmsg字段获取原始消息数据")
             
             # 为了图片处理，我们需要访问完整的data字段，所以使用原始数据
             # 而不是经过make_lm_sanitized_and_original处理的数据
@@ -541,11 +620,18 @@ def process_images_comprehensive(tag, config):
             image_count = 0
             processed_files = set()  # 记录已处理的文件
             
-            # 首先处理消息中的图片
+            # 首先收集所有需要处理的常规图片任务
+            regular_image_tasks = []
             for item in messages:
                 if 'message' in item and isinstance(item['message'], list):
                     for msg in item['message']:
                         if msg.get('type') == 'image':
+                            # 检查sub_type，只处理sub_type为0的图片
+                            sub_type = msg.get('data', {}).get('sub_type', 0)
+                            if sub_type != 0:
+                                logging.info(f"跳过处理sub_type={sub_type}的图片，只处理sub_type=0的图片")
+                                continue
+                            
                             image_count += 1
                             # 查找对应的图片文件
                             file_name = None
@@ -589,50 +675,233 @@ def process_images_comprehensive(tag, config):
                             if file_name and file_name in files:
                                 processed_files.add(file_name)
                                 image_path = os.path.join(folder, file_name)
-                                try:
-                                    logging.info(f"处理图片: {file_name}")
-                                    
-                                    # 步骤1: 压缩图片
-                                    compress_image(image_path, max_pixels, size_limit)
-                                    
-                                    # 步骤2: 同时进行安全检查和描述生成
-                                    is_safe, description = process_image_safety_and_description(image_path, model, api_key)
-                                    
-                                    if not is_safe:
-                                        logging.warning(f"图片 {file_name} 被标记为不安全")
-                                        safe = False
-                                        sensitive_files.append(file_name)
-                                    
-                                    if description:
-                                        # 将描述添加到消息的顶层，这样大模型可以看到
-                                        msg['describe'] = description
-                                        description_count += 1
-                                        logging.info(f"成功为图片 {file_name} 添加描述")
-                                    else:
-                                        logging.warning(f"图片 {file_name} 描述生成失败")
-                                        error_count += 1
-                                    
-                                    processed_count += 1
-                                    
-                                except Exception as e:
-                                    error_msg = str(e).lower()
-                                    if '400' in error_msg or 'bad request' in error_msg:
-                                        logging.error(f"图片 {file_name} 触发API 400错误，可能包含极度敏感内容: {e}")
-                                        safe = False
-                                        sensitive_files.append(file_name)
-                                        api_400_count += 1
-                                    else:
-                                        logging.error(f"处理图片 {file_name} 时出错: {e}")
-                                        error_count += 1
+                                
+                                # 添加到任务列表
+                                task_info = {
+                                    'image_path': image_path,
+                                    'file_name': file_name,
+                                    'model': model,
+                                    'api_key': api_key,
+                                    'max_pixels': max_pixels,
+                                    'size_limit': size_limit,
+                                    'msg': msg,
+                                    'is_additional': False
+                                }
+                                regular_image_tasks.append(task_info)
                             else:
                                 logging.warning(f"未找到图片文件，image_count={image_count}, 可用文件: {files}")
                                 logging.debug(f"图片消息结构: {json.dumps(msg, ensure_ascii=False)}")
             
-            # 处理剩余的图片文件（没有对应消息记录的）
+            # 并行处理常规图片任务
+            if regular_image_tasks:
+                logging.info(f"开始并行处理 {len(regular_image_tasks)} 个常规图片消息")
+                max_workers = min(len(regular_image_tasks), 3)  # 限制最大并发数
+                
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # 提交所有任务
+                    future_to_task = {executor.submit(process_single_image_task, task): task for task in regular_image_tasks}
+                    
+                    # 收集结果
+                    for future in as_completed(future_to_task):
+                        task = future_to_task[future]
+                        try:
+                            result = future.result()
+                            file_name = result['file_name']
+                            msg = result['msg']
+                            
+                            if result['success']:
+                                # 处理成功
+                                if not result['is_safe']:
+                                    logging.warning(f"图片 {file_name} 被标记为不安全")
+                                    safe = False
+                                    sensitive_files.append(file_name)
+                                
+                                if result['description']:
+                                    # 将描述添加到消息的顶层，这样大模型可以看到
+                                    msg['describe'] = result['description']
+                                    description_count += 1
+                                    logging.info(f"[线程{result['thread_id']}] 成功为图片 {file_name} 添加描述")
+                                else:
+                                    logging.warning(f"图片 {file_name} 描述生成失败")
+                                    error_count += 1
+                                
+                                processed_count += 1
+                                
+                            else:
+                                # 处理失败
+                                if result.get('is_api_400', False):
+                                    logging.error(f"图片 {file_name} 触发API 400错误，可能包含极度敏感内容: {result['error']}")
+                                    safe = False
+                                    sensitive_files.append(file_name)
+                                    api_400_count += 1
+                                else:
+                                    logging.error(f"处理图片 {file_name} 时出错: {result['error']}")
+                                    error_count += 1
+                                
+                        except Exception as e:
+                            logging.error(f"获取常规图片任务结果时出错: {task['file_name']}, 错误: {e}")
+                            error_count += 1
+                
+                logging.info(f"常规图片并行处理完成，总计 {len(regular_image_tasks)} 个文件")
+            
+            # 处理剩余的图片文件（没有对应消息记录的，比如forward聊天记录中的图片）
             remaining_files = [f for f in files if f not in processed_files and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'))]
+            
+            # 收集forward聊天记录中sub_type=0的图片文件名 - 需要递归处理嵌套forward
+            def collect_subtype_0_images(item_list, depth=0):
+                subtype_0_files = set()
+                logging.debug(f"递归深度 {depth}: 处理 {len(item_list)} 个项目")
+                
+                for i, item in enumerate(item_list):
+                    logging.debug(f"递归深度 {depth}: 处理项目 {i}, 类型: {type(item)}, 键: {list(item.keys()) if isinstance(item, dict) else 'N/A'}")
+                    
+                    # 如果item有message字段，处理其中的消息
+                    if 'message' in item and isinstance(item['message'], list):
+                        logging.debug(f"递归深度 {depth}: 项目 {i} 有 {len(item['message'])} 个消息")
+                        for j, msg in enumerate(item['message']):
+                            msg_type = msg.get('type')
+                            logging.debug(f"递归深度 {depth}: 消息 {j} 类型: {msg_type}")
+                            if msg_type == 'forward' and 'data' in msg:
+                                logging.debug(f"递归深度 {depth}: 处理forward消息")
+                                data_keys = list(msg['data'].keys())
+                                logging.debug(f"递归深度 {depth}: forward data键: {data_keys}")
+                                # 处理forward消息的content或messages字段
+                                if 'content' in msg['data'] and isinstance(msg['data']['content'], list):
+                                    logging.debug(f"递归深度 {depth}: 找到forward消息content，{len(msg['data']['content'])} 个内容项")
+                                    sub_files = collect_subtype_0_images(msg['data']['content'], depth + 1)
+                                    subtype_0_files.update(sub_files)
+                                elif 'messages' in msg['data'] and isinstance(msg['data']['messages'], list):
+                                    logging.debug(f"递归深度 {depth}: 找到forward消息messages，{len(msg['data']['messages'])} 个消息项")
+                                    sub_files = collect_subtype_0_images(msg['data']['messages'], depth + 1)
+                                    subtype_0_files.update(sub_files)
+                                else:
+                                    logging.debug(f"递归深度 {depth}: forward消息没有有效的content或messages字段")
+                            elif msg_type == 'image':
+                                logging.debug(f"递归深度 {depth}: 处理image消息")
+                                sub_type = msg.get('data', {}).get('sub_type')
+                                logging.debug(f"递归深度 {depth}: 找到image消息，sub_type={sub_type}")
+                                if sub_type == 0:
+                                    logging.debug(f"递归深度 {depth}: 找到sub_type=0图片消息")
+                                    # 直接使用URL中的文件名进行精确匹配
+                                    url = msg.get('data', {}).get('url', '')
+                                    if url.startswith('file://'):
+                                        cache_file_name = os.path.basename(url[7:])  # 去掉file://前缀
+                                        logging.debug(f"从URL提取文件名: {cache_file_name}, remaining_files包含: {cache_file_name in remaining_files}")
+                                        if cache_file_name in remaining_files:
+                                            subtype_0_files.add(cache_file_name)
+                                            logging.debug(f"找到sub_type=0的图片: {cache_file_name}")
+                                        else:
+                                            logging.debug(f"sub_type=0图片文件不存在: {cache_file_name}")
+                                    else:
+                                        logging.debug(f"URL格式不正确: {url}")
+                                else:
+                                    logging.debug(f"递归深度 {depth}: 跳过sub_type={sub_type}的图片")
+                            else:
+                                logging.debug(f"递归深度 {depth}: 跳过消息类型: {msg_type}")
+                    
+                    # 如果item是原始forward messages格式（包含所有元数据的消息项）
+                    elif 'message' in item and isinstance(item['message'], list):
+                        # 这个条件重复了，移除
+                        pass
+                    
+                    # 如果item本身就是消息格式（content数组中的直接消息项）
+                    elif item.get('type') == 'image' and item.get('data', {}).get('sub_type') == 0:
+                        logging.debug(f"递归深度 {depth}: 项目 {i} 是sub_type=0图片")
+                        url = item.get('data', {}).get('url', '')
+                        if url.startswith('file://'):
+                            cache_file_name = os.path.basename(url[7:])  # 去掉file://前缀
+                            if cache_file_name in remaining_files:
+                                subtype_0_files.add(cache_file_name)
+                                logging.debug(f"找到sub_type=0的图片: {cache_file_name}")
+                            else:
+                                logging.debug(f"sub_type=0图片文件不存在: {cache_file_name}")
+                
+                logging.debug(f"递归深度 {depth}: 找到 {len(subtype_0_files)} 个sub_type=0图片: {subtype_0_files}")
+                return subtype_0_files
+            
+            subtype_0_files = collect_subtype_0_images(messages)
+            
+            # 只处理sub_type=0的图片文件
+            files_to_process = [f for f in remaining_files if f in subtype_0_files]
+            
             if remaining_files:
-                logging.info(f"发现 {len(remaining_files)} 个没有对应消息记录的图片文件，跳过处理: {remaining_files}")
-                logging.info("这些文件可能是之前处理留下的，或者没有对应的消息记录，跳过处理以避免误判")
+                logging.info(f"发现 {len(remaining_files)} 个没有对应消息记录的图片文件")
+                logging.info(f"其中 {len(files_to_process)} 个是sub_type=0的图片，需要进行安全检查: {files_to_process}")
+                logging.info(f"跳过 {len(remaining_files) - len(files_to_process)} 个非sub_type=0的图片")
+            
+            if files_to_process:
+                # 并行处理剩余图片文件
+                logging.info(f"开始并行处理 {len(files_to_process)} 个图片文件")
+                
+                # 准备并行任务
+                image_tasks = []
+                for file_name in files_to_process:
+                    image_path = os.path.join(folder, file_name)
+                    task_info = {
+                        'image_path': image_path,
+                        'file_name': file_name,
+                        'model': model,
+                        'api_key': api_key,
+                        'max_pixels': max_pixels,
+                        'size_limit': size_limit,
+                        'msg': None,
+                        'is_additional': True
+                    }
+                    image_tasks.append(task_info)
+                
+                # 使用线程池并行处理
+                max_workers = min(len(files_to_process), 3)  # 限制最大并发数为3，避免API频率限制
+                logging.info(f"使用 {max_workers} 个线程并行处理图片")
+                
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    # 提交所有任务
+                    future_to_task = {executor.submit(process_single_image_task, task): task for task in image_tasks}
+                    
+                    # 收集结果
+                    for future in as_completed(future_to_task):
+                        task = future_to_task[future]
+                        try:
+                            result = future.result()
+                            file_name = result['file_name']
+                            
+                            if result['success']:
+                                # 处理成功
+                                if not result['is_safe']:
+                                    logging.warning(f"图片 {file_name} 被标记为不安全")
+                                    safe = False
+                                    sensitive_files.append(file_name)
+                                
+                                if result['description']:
+                                    logging.info(f"[线程{result['thread_id']}] 为图片 {file_name} 生成了描述: {result['description'][:100]}...")
+                                    description_count += 1
+                                    
+                                    # 添加到additional_images
+                                    if 'additional_images' not in data:
+                                        data['additional_images'] = []
+                                    data['additional_images'].append({
+                                        'file': file_name,
+                                        'description': result['description'],
+                                        'source': 'forward_content'
+                                    })
+                                
+                                processed_count += 1
+                                
+                            else:
+                                # 处理失败
+                                if result.get('is_api_400', False):
+                                    logging.error(f"图片 {file_name} 触发API 400错误，可能包含极度敏感内容: {result['error']}")
+                                    safe = False
+                                    sensitive_files.append(file_name)
+                                    api_400_count += 1
+                                else:
+                                    logging.error(f"处理图片 {file_name} 时出错: {result['error']}")
+                                    error_count += 1
+                                
+                        except Exception as e:
+                            logging.error(f"获取并行任务结果时出错: {task['file_name']}, 错误: {e}")
+                            error_count += 1
+                
+                logging.info(f"并行图片处理完成，总计 {len(files_to_process)} 个文件")
             
             # 更新数据库
             if description_count > 0 or not safe:
@@ -773,6 +1042,7 @@ def _remove_many(obj, paths):
 def clean_forward_content(content_list):
     """
     递归清理forward消息内容，删除不需要发给模型的字段，支持嵌套forward。
+    同时对forward内部的每个消息按照per_type_rules进行处理。
     
     Args:
         content_list: forward消息的content列表
@@ -797,13 +1067,23 @@ def clean_forward_content(content_list):
                 if isinstance(msg, dict):
                     cleaned_msg = msg.copy()
                     
+                    # 对每个消息按照类型应用per_type_rules
+                    mtype = msg.get("type")
+                    rules = per_type_rules.get(mtype, default_rules)
+                    
+                    # 应用hide_from_LM_only规则（删除对LM隐藏的字段）
+                    for field_path in rules.get('hide_from_LM_only', []):
+                        _pop_path(cleaned_msg, field_path)
+                    
+                    # 如果是图片消息，且有描述信息，需要从图片处理结果中获取描述并添加
+                    # 这里先保留消息结构，描述会在外层函数中添加
+                    
                     # 如果是嵌套的forward消息，递归清理
-                    if msg.get("type") == "forward" and "data" in msg:
-                        cleaned_msg["data"] = msg["data"].copy()
-                        if "content" in msg["data"]:
-                            cleaned_msg["data"]["content"] = clean_forward_content(msg["data"]["content"])
-                        elif "messages" in msg["data"]:
-                            cleaned_msg["data"]["messages"] = clean_forward_content(msg["data"]["messages"])
+                    if mtype == "forward" and "data" in cleaned_msg:
+                        if "content" in cleaned_msg["data"]:
+                            cleaned_msg["data"]["content"] = clean_forward_content(cleaned_msg["data"]["content"])
+                        elif "messages" in cleaned_msg["data"]:
+                            cleaned_msg["data"]["messages"] = clean_forward_content(cleaned_msg["data"]["messages"])
                     
                     cleaned_item["message"].append(cleaned_msg)
                 else:
@@ -1055,19 +1335,28 @@ def main():
         
         # === 第一步：先处理图片（压缩、安全检查、描述生成） ===
         logging.info("第一步：开始处理图片（压缩、安全检查、描述生成）...")
-        process_images_comprehensive(tag, config)
+        process_images_comprehensive(tag, config, data)
         
         # === 第二步：重新读取处理后的数据（只在有图片处理的情况下） ===
-        # 检查是否有图片消息需要合并处理结果
-        has_image_messages = False
-        for item in data.get("messages", []):
-            if "message" in item and isinstance(item["message"], list):
-                for msg in item["message"]:
-                    if msg.get("type") == "image":
-                        has_image_messages = True
-                        break
-                if has_image_messages:
-                    break
+        # 检查是否有图片消息需要合并处理结果（包括forward消息中的图片）
+        def has_images_in_data(messages):
+            """递归检查消息中是否包含图片（包括forward消息内部的图片）"""
+            for item in messages:
+                if "message" in item and isinstance(item["message"], list):
+                    for msg in item["message"]:
+                        if msg.get("type") == "image":
+                            return True
+                        elif msg.get("type") == "forward" and "data" in msg:
+                            # 检查forward消息内部的图片
+                            if "messages" in msg["data"] and isinstance(msg["data"]["messages"], list):
+                                if has_images_in_data(msg["data"]["messages"]):
+                                    return True
+                            elif "content" in msg["data"] and isinstance(msg["data"]["content"], list):
+                                if has_images_in_data(msg["data"]["content"]):
+                                    return True
+            return False
+        
+        has_image_messages = has_images_in_data(data.get("messages", []))
         
         if has_image_messages:
             with safe_db_connection() as conn:
@@ -1080,6 +1369,8 @@ def main():
                         
                         # 合并图片处理结果（describe字段）到原始数据
                         image_descriptions = {}
+                        
+                        # 收集顶层图片消息的描述
                         for item in processed_data.get("messages", []):
                             if "message" in item and isinstance(item["message"], list):
                                 for msg in item["message"]:
@@ -1088,14 +1379,42 @@ def main():
                                         key = f"{item.get('message_id')}_{msg.get('type')}"
                                         image_descriptions[key] = msg["describe"]
                         
+                        # 收集additional_images中的描述（来自forward消息中的图片）
+                        additional_images = processed_data.get("additional_images", [])
+                        additional_descriptions = {}
+                        for img_info in additional_images:
+                            if "file" in img_info and "description" in img_info:
+                                # 使用文件名作为key
+                                file_name = img_info["file"]
+                                additional_descriptions[file_name] = img_info["description"]
+                        
                         # 将描述信息合并到原始数据中
-                        for item in data.get("messages", []):
-                            if "message" in item and isinstance(item["message"], list):
-                                for msg in item["message"]:
-                                    if msg.get("type") == "image":
-                                        key = f"{item.get('message_id')}_{msg.get('type')}"
-                                        if key in image_descriptions:
-                                            msg["describe"] = image_descriptions[key]
+                        def merge_descriptions_recursive(messages, depth=0):
+                            """递归合并图片描述到forward消息中"""
+                            for item in messages:
+                                if "message" in item and isinstance(item["message"], list):
+                                    for msg in item["message"]:
+                                        if msg.get("type") == "image":
+                                            # 首先尝试匹配顶层图片
+                                            key = f"{item.get('message_id')}_{msg.get('type')}"
+                                            if key in image_descriptions:
+                                                msg["describe"] = image_descriptions[key]
+                                            else:
+                                                # 尝试匹配additional_images中的描述（通过URL文件名）
+                                                url = msg.get("data", {}).get("url", "")
+                                                if url.startswith("file://"):
+                                                    file_name = os.path.basename(url[7:])
+                                                    if file_name in additional_descriptions:
+                                                        msg["describe"] = additional_descriptions[file_name]
+                                                        logging.debug(f"为forward中的图片 {file_name} 添加了描述")
+                                        elif msg.get("type") == "forward" and "data" in msg:
+                                            # 递归处理forward消息内部的图片
+                                            if "messages" in msg["data"]:
+                                                merge_descriptions_recursive(msg["data"]["messages"], depth + 1)
+                                            elif "content" in msg["data"]:
+                                                merge_descriptions_recursive(msg["data"]["content"], depth + 1)
+                        
+                        merge_descriptions_recursive(data.get("messages", []))
                         
                         logging.info("合并了图片处理结果到原始数据")
                     else:
