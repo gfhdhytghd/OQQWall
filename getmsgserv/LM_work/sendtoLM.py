@@ -17,9 +17,15 @@ import sqlite3
 import copy
 import traceback
 import signal
+import ssl
+import urllib3
 from typing import Dict, Any, List, Optional, Tuple
 from contextlib import contextmanager
 from functools import wraps
+
+# 配置SSL和HTTP设置
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+ssl._create_default_https_context = ssl._create_unverified_context
 
 # 错误JSON输出的文件路径
 output_file_path_error = "./cache/LM_error.json"
@@ -441,6 +447,9 @@ def process_image_safety_and_description(path, model, api_key):
             logging.warning(f"捕获到400错误异常，图片可能包含极度敏感内容: {path}")
             logging.debug(f"400错误异常详情: {str(e)}")
             return False, ""  # 标记为不安全，无描述
+        elif 'ssl' in error_msg:
+            logging.warning(f"图片处理SSL错误: {path}, 错误: {str(e)}")
+            return True, ""  # 默认安全，无描述
         elif 'timeout' in error_msg or 'timed out' in error_msg:
             logging.warning(f"图片处理超时: {path}")
             return True, ""  # 默认安全，无描述
@@ -491,13 +500,31 @@ def process_images_comprehensive(tag, config):
     with safe_db_connection() as conn:
         cur = conn.cursor()
         try:
+            # 首先尝试从preprocess表的AfterLM字段获取数据
             row = cur.execute('SELECT AfterLM FROM preprocess WHERE tag=?', (tag,)).fetchone()
-            if not row:
-                logging.warning(f"未找到标签 {tag} 的记录")
-                return
-            
-            data = json.loads(row[0])
-            messages = data.get('messages', [])
+            if row and row[0] is not None:
+                data = json.loads(row[0])
+                messages = data.get('messages', [])
+                logging.info("从AfterLM字段获取消息数据")
+            else:
+                # 如果AfterLM字段为空，从sender表的rawmsg字段获取原始数据
+                logging.info("AfterLM字段为空，尝试从sender表获取原始消息数据")
+                sender_row = cur.execute('''
+                    SELECT s.rawmsg 
+                    FROM sender s 
+                    JOIN preprocess p ON s.senderid = p.senderid AND s.receiver = p.receiver 
+                    WHERE p.tag = ?
+                ''', (tag,)).fetchone()
+                
+                if not sender_row or sender_row[0] is None:
+                    logging.warning(f"未找到标签 {tag} 的原始消息数据")
+                    return
+                
+                raw_messages = json.loads(sender_row[0])
+                # 构造data结构以保持一致性
+                data = {"messages": raw_messages}
+                messages = raw_messages
+                logging.info("从sender.rawmsg字段获取原始消息数据")
             
             # 为了图片处理，我们需要访问完整的data字段，所以使用原始数据
             # 而不是经过make_lm_sanitized_and_original处理的数据
@@ -512,6 +539,9 @@ def process_images_comprehensive(tag, config):
             
             # 遍历所有消息，找到图片类型的消息
             image_count = 0
+            processed_files = set()  # 记录已处理的文件
+            
+            # 首先处理消息中的图片
             for item in messages:
                 if 'message' in item and isinstance(item['message'], list):
                     for msg in item['message']:
@@ -557,6 +587,7 @@ def process_images_comprehensive(tag, config):
                                         break
                             
                             if file_name and file_name in files:
+                                processed_files.add(file_name)
                                 image_path = os.path.join(folder, file_name)
                                 try:
                                     logging.info(f"处理图片: {file_name}")
@@ -596,6 +627,40 @@ def process_images_comprehensive(tag, config):
                             else:
                                 logging.warning(f"未找到图片文件，image_count={image_count}, 可用文件: {files}")
                                 logging.debug(f"图片消息结构: {json.dumps(msg, ensure_ascii=False)}")
+            
+            # 处理剩余的图片文件（没有对应消息记录的）
+            remaining_files = [f for f in files if f not in processed_files and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'))]
+            if remaining_files:
+                logging.info(f"发现 {len(remaining_files)} 个没有对应消息记录的图片文件，进行安全检查: {remaining_files}")
+                
+                for file_name in remaining_files:
+                    image_path = os.path.join(folder, file_name)
+                    try:
+                        logging.info(f"处理未关联的图片: {file_name}")
+                        
+                        # 步骤1: 压缩图片
+                        compress_image(image_path, max_pixels, size_limit)
+                        
+                        # 步骤2: 只进行安全检查，不生成描述（因为没有消息记录）
+                        is_safe, _ = process_image_safety_and_description(image_path, model, api_key)
+                        
+                        if not is_safe:
+                            logging.warning(f"未关联的图片 {file_name} 被标记为不安全")
+                            safe = False
+                            sensitive_files.append(file_name)
+                        
+                        processed_count += 1
+                        
+                    except Exception as e:
+                        error_msg = str(e).lower()
+                        if '400' in error_msg or 'bad request' in error_msg:
+                            logging.error(f"未关联的图片 {file_name} 触发API 400错误，可能包含极度敏感内容: {e}")
+                            safe = False
+                            sensitive_files.append(file_name)
+                            api_400_count += 1
+                        else:
+                            logging.error(f"处理未关联的图片 {file_name} 时出错: {e}")
+                            error_count += 1
             
             # 更新数据库
             if description_count > 0 or not safe:
@@ -854,8 +919,18 @@ def fetch_response_in_parts(prompt, config, max_rounds=5):
             logging.debug(f"Round {round_count + 1} 接收到的内容: {output_content}")
                 
         except Exception as e:
-            logging.error(f"API调用错误: {e}")
-            break
+            error_msg = str(e).lower()
+            if 'ssl' in error_msg or 'connection' in error_msg or 'timeout' in error_msg:
+                logging.warning(f"Round {round_count + 1} 网络错误，尝试重试: {e}")
+                if round_count < max_rounds - 1:  # 如果不是最后一轮，继续重试
+                    time.sleep(2)  # 等待2秒后重试
+                    continue
+                else:
+                    logging.error(f"在 {max_rounds} 轮后仍然遇到网络错误: {e}")
+                    break
+            else:
+                logging.error(f"API调用错误: {e}")
+                break
 
         if previous_output:
             # 获取上一次输出的最后100个字符
@@ -923,7 +998,7 @@ def save_to_sqlite(output_data, tag):
 def main():
     # 配置日志输出
     logging.basicConfig(
-        level=logging.INFO,  # 改为DEBUG级别以显示debug输出
+        level=logging.DEBUG,  # 改为DEBUG级别以显示debug输出
         format='LMWork:%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),

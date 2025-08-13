@@ -644,7 +644,7 @@ should_fire_now() {
     local g="$1" hm="$2"
     local today
     today=$(date +%F)
-    [[ "${LASTFIRE[$g|$hm]}" == "$today" ]] && return 1 || return 0
+    [[ "${LASTFIRE[$g|$hm]:-}" == "$today" ]] && return 1 || return 0
 }
 
 # 调度循环

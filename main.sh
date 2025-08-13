@@ -99,6 +99,12 @@ elif [[ $1 == --test ]]; then
   if pgrep -f "python3 SendQzone/qzone-serv-pipe.py" > /dev/null; then
     pgrep -f "python3 SendQzone/qzone-serv-pipe.py" | xargs kill -15
   fi
+   if pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" > /dev/null; then
+    pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" | xargs kill -15
+  fi
+  if pgrep -f "python3 getmsgserv/serv.py" > /dev/null; then
+      pgrep -f "python3 getmsgserv/serv.py" | xargs kill -15
+  fi
 fi
 
 # 确保配置文件存在
