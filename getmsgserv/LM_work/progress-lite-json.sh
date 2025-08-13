@@ -214,12 +214,12 @@ resolve_forward_messages() {
 
   for ((depth=1; depth<=MAX_DEPTH; depth++)); do
     # 抓取当前 JSON 中所有深度的 forward id（字符串化去重）
-    mapfile -t ids < <(jq -r '
+    mapfile -t ids < <(printf '%s' "$updated" | jq -r '
       (if type=="array" then . else [.] end)
       | .. | objects
       | select(.type? == "forward" and (.data.id?))
       | (.data.id | tostring)
-    ' <<<"$updated" | sort -u)
+    ' | sort -u)
 
     # 统计这一轮是否有新增替换
     local replaced_any=false
@@ -238,7 +238,11 @@ resolve_forward_messages() {
       [[ -z "$payload" ]] && continue
 
       # 深度替换：在整棵树中把匹配该 fid 的 .data 替换为 payload，并保留原始 id
-      updated="$(jq --arg fid "$fid" --argjson payload "$payload" '
+      # Use temporary file to avoid argument list too long error
+      local tmpfile=$(mktemp)
+      printf '%s' "$payload" > "$tmpfile"
+      updated="$(printf '%s' "$updated" | jq --arg fid "$fid" --slurpfile payload_arr "$tmpfile" '
+        ($payload_arr[0]) as $payload |
         def fill:
           if type=="object" then
             ( if (.type?=="forward" and (.data.id|tostring)==$fid)
@@ -252,7 +256,8 @@ resolve_forward_messages() {
             .
           end;
         (if type=="array" then . else [.] end) | fill
-      ' <<<"$updated")"
+      ')"
+      rm -f "$tmpfile"
 
       seen["$fid"]=1
       replaced_any=true
@@ -307,7 +312,7 @@ resolve_file_urls() {
 
     # 递归替换：任何深度的 file 节点，只要 file_id 匹配就改成 image
     updated_json=$(
-      jq --arg id "$file_id" --arg url "$new_url" '
+      printf '%s' "$updated_json" | jq --arg id "$file_id" --arg url "$new_url" '
         def upd:
           if type=="object" then
             ( if (.type?=="file" and (.data.file_id // "")==$id)
@@ -319,15 +324,15 @@ resolve_file_urls() {
             map(upd)
           else . end;
         (if type=="array" then . else [.] end) | upd
-      ' <<<"$updated_json"
+      '
     )
 
     seen_ids["$file_id"]=1
-  done < <(jq -c '
+  done < <(printf '%s' "$updated_json" | jq -c '
       (if type=="array" then . else [.] end)
       | .. | objects
       | select(.type?=="file" and (.data.file_id?))
-    ' <<<"$updated_json")
+    ')
 
   echo "$updated_json"
 }
@@ -373,7 +378,7 @@ download_and_replace_images() {
 
     if [[ -f "$final_file" ]]; then
       updated_json=$(
-        jq \
+        printf '%s' "$updated_json" | jq \
           --arg old_url "$url" \
           --arg new_url "file://$pwd_path/cache/picture/${tag}/$(basename "$final_file")" '
           def upd:
@@ -387,17 +392,17 @@ download_and_replace_images() {
               map(upd)
             else . end;
           (if type=="array" then . else [.] end) | upd
-        ' <<<"$updated_json"
+        '
       )
     fi
 
     seen_urls["$url"]=1
     next_file_index=$((next_file_index + 1))
-  done < <(jq -c '
+  done < <(printf '%s' "$processed_json" | jq -c '
       (if type=="array" then . else [.] end)
       | .. | objects
       | select(.type?=="image" and (.data.url?))
-    ' <<<"$processed_json")
+    ')
 
   echo "$updated_json"
 }
@@ -474,7 +479,7 @@ download_and_replace_videos() {
 
     if [[ -f "$final_file" ]]; then
       updated_json=$(
-        jq \
+        printf '%s' "$updated_json" | jq \
           --arg old_url "$url" \
           --arg new_url "file://$pwd_path/cache/picture/${tag}/$(basename "$final_file")" '
           def upd:
@@ -488,17 +493,17 @@ download_and_replace_videos() {
               map(upd)
             else . end;
           (if type=="array" then . else [.] end) | upd
-        ' <<<"$updated_json"
+        '
       )
     fi
 
     seen_urls["$url"]=1
     next_file_index=$((next_file_index + 1))
-  done < <(jq -c '
+  done < <(printf '%s' "$processed_json" | jq -c '
       (if type=="array" then . else [.] end)
       | .. | objects
       | select(.type?=="video" and (.data.url?))
-    ' <<<"$processed_json")
+    ')
 
   echo "$updated_json"
 }

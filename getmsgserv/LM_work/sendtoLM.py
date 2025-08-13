@@ -631,36 +631,8 @@ def process_images_comprehensive(tag, config):
             # 处理剩余的图片文件（没有对应消息记录的）
             remaining_files = [f for f in files if f not in processed_files and f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'))]
             if remaining_files:
-                logging.info(f"发现 {len(remaining_files)} 个没有对应消息记录的图片文件，进行安全检查: {remaining_files}")
-                
-                for file_name in remaining_files:
-                    image_path = os.path.join(folder, file_name)
-                    try:
-                        logging.info(f"处理未关联的图片: {file_name}")
-                        
-                        # 步骤1: 压缩图片
-                        compress_image(image_path, max_pixels, size_limit)
-                        
-                        # 步骤2: 只进行安全检查，不生成描述（因为没有消息记录）
-                        is_safe, _ = process_image_safety_and_description(image_path, model, api_key)
-                        
-                        if not is_safe:
-                            logging.warning(f"未关联的图片 {file_name} 被标记为不安全")
-                            safe = False
-                            sensitive_files.append(file_name)
-                        
-                        processed_count += 1
-                        
-                    except Exception as e:
-                        error_msg = str(e).lower()
-                        if '400' in error_msg or 'bad request' in error_msg:
-                            logging.error(f"未关联的图片 {file_name} 触发API 400错误，可能包含极度敏感内容: {e}")
-                            safe = False
-                            sensitive_files.append(file_name)
-                            api_400_count += 1
-                        else:
-                            logging.error(f"处理未关联的图片 {file_name} 时出错: {e}")
-                            error_count += 1
+                logging.info(f"发现 {len(remaining_files)} 个没有对应消息记录的图片文件，跳过处理: {remaining_files}")
+                logging.info("这些文件可能是之前处理留下的，或者没有对应的消息记录，跳过处理以避免误判")
             
             # 更新数据库
             if description_count > 0 or not safe:
@@ -755,10 +727,10 @@ per_type_rules = {
         "hide_from_LM_only": ["data"]
     },
     "forward": {
-        "remove_in_data": [],
+        "remove_in_data": ["id"],  # 删除data.id字段
         "remove_msg": [],
         "remove_event": [],
-        "hide_from_LM_only": ["data"]
+        "hide_from_LM_only": []
     },
 }
 
@@ -798,6 +770,51 @@ def _remove_many(obj, paths):
         _pop_path(obj, p)
 
 
+def clean_forward_content(content_list):
+    """
+    递归清理forward消息内容，删除不需要发给模型的字段，支持嵌套forward。
+    
+    Args:
+        content_list: forward消息的content列表
+    
+    Returns:
+        清理后的content列表
+    """
+    if not isinstance(content_list, list):
+        return content_list
+    
+    cleaned_content = []
+    for item in content_list:
+        if not isinstance(item, dict):
+            cleaned_content.append(item)
+            continue
+        
+        # 只保留message字段，删除id、message_id、message_seq、real_id、real_seq、time、sender、message_type、raw_message、font、sub_type、message_format、post_type、group_id、self_id、user_id
+        cleaned_item = {}
+        if "message" in item and isinstance(item["message"], list):
+            cleaned_item["message"] = []
+            for msg in item["message"]:
+                if isinstance(msg, dict):
+                    cleaned_msg = msg.copy()
+                    
+                    # 如果是嵌套的forward消息，递归清理
+                    if msg.get("type") == "forward" and "data" in msg:
+                        cleaned_msg["data"] = msg["data"].copy()
+                        if "content" in msg["data"]:
+                            cleaned_msg["data"]["content"] = clean_forward_content(msg["data"]["content"])
+                        elif "messages" in msg["data"]:
+                            cleaned_msg["data"]["messages"] = clean_forward_content(msg["data"]["messages"])
+                    
+                    cleaned_item["message"].append(cleaned_msg)
+                else:
+                    cleaned_item["message"].append(msg)
+        
+        if cleaned_item:  # 只有当有message字段时才添加
+            cleaned_content.append(cleaned_item)
+    
+    return cleaned_content
+
+
 def make_lm_sanitized_and_original(data_root):
     """
     返回两个列表：
@@ -818,6 +835,13 @@ def make_lm_sanitized_and_original(data_root):
             for msg in item["message"]:
                 mtype = msg.get("type")
                 rules = per_type_rules.get(mtype, default_rules)
+
+                # 对forward消息进行特殊清理
+                if mtype == "forward" and "data" in msg:
+                    if "content" in msg["data"]:
+                        msg["data"]["content"] = clean_forward_content(msg["data"]["content"])
+                    elif "messages" in msg["data"]:
+                        msg["data"]["messages"] = clean_forward_content(msg["data"]["messages"])
 
                 # msg 顶层删除
                 _remove_many(msg, rules.get('remove_msg', []))
@@ -998,7 +1022,7 @@ def save_to_sqlite(output_data, tag):
 def main():
     # 配置日志输出
     logging.basicConfig(
-        level=logging.info,  # 改为DEBUG级别以显示debug输出
+        level=logging.DEBUG,  # 改为DEBUG级别以显示debug输出
         format='LMWork:%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
@@ -1033,23 +1057,80 @@ def main():
         logging.info("第一步：开始处理图片（压缩、安全检查、描述生成）...")
         process_images_comprehensive(tag, config)
         
-        # === 第二步：重新读取处理后的数据 ===
-        with safe_db_connection() as conn:
-            cur = conn.cursor()
-            try:
-                row = cur.execute('SELECT AfterLM FROM preprocess WHERE tag=?', (tag,)).fetchone()
-                if row and row[0] is not None:
-                    # 重新加载可能被图片处理更新的数据
-                    data = json.loads(row[0])
-                    logging.info("重新加载了图片处理后的数据")
-                else:
-                    logging.warning(f"未找到标签 {tag} 的记录或AfterLM字段为空，使用原始数据")
-            except json.JSONDecodeError as e:
-                logging.error(f"重新加载数据时JSON解析错误: {e}")
-                # 继续使用原始数据
+        # === 第二步：重新读取处理后的数据（只在有图片处理的情况下） ===
+        # 检查是否有图片消息需要合并处理结果
+        has_image_messages = False
+        for item in data.get("messages", []):
+            if "message" in item and isinstance(item["message"], list):
+                for msg in item["message"]:
+                    if msg.get("type") == "image":
+                        has_image_messages = True
+                        break
+                if has_image_messages:
+                    break
+        
+        if has_image_messages:
+            with safe_db_connection() as conn:
+                cur = conn.cursor()
+                try:
+                    row = cur.execute('SELECT AfterLM FROM preprocess WHERE tag=?', (tag,)).fetchone()
+                    if row and row[0] is not None:
+                        # 只有在有图片消息时才重新加载数据库中的数据
+                        processed_data = json.loads(row[0])
+                        
+                        # 合并图片处理结果（describe字段）到原始数据
+                        image_descriptions = {}
+                        for item in processed_data.get("messages", []):
+                            if "message" in item and isinstance(item["message"], list):
+                                for msg in item["message"]:
+                                    if msg.get("type") == "image" and "describe" in msg:
+                                        # 使用消息ID+类型作为key来匹配
+                                        key = f"{item.get('message_id')}_{msg.get('type')}"
+                                        image_descriptions[key] = msg["describe"]
+                        
+                        # 将描述信息合并到原始数据中
+                        for item in data.get("messages", []):
+                            if "message" in item and isinstance(item["message"], list):
+                                for msg in item["message"]:
+                                    if msg.get("type") == "image":
+                                        key = f"{item.get('message_id')}_{msg.get('type')}"
+                                        if key in image_descriptions:
+                                            msg["describe"] = image_descriptions[key]
+                        
+                        logging.info("合并了图片处理结果到原始数据")
+                    else:
+                        logging.warning(f"未找到标签 {tag} 的记录或AfterLM字段为空，使用原始数据")
+                except json.JSONDecodeError as e:
+                    logging.error(f"重新加载数据时JSON解析错误: {e}")
+                    # 继续使用原始数据
+        else:
+            logging.info("没有图片消息，直接使用原始输入数据")
         
         # === 第三步：基于 per_type_rules 的精细化删改 ===
+        
+        # 调试：检查原始数据中的forward消息
+        original_forward_count = 0
+        for item in data.get("messages", []):
+            if "message" in item and isinstance(item["message"], list):
+                for msg in item["message"]:
+                    if msg.get("type") == "forward":
+                        original_forward_count += 1
+                        logging.debug(f"原始数据中发现forward消息: {json.dumps(msg, ensure_ascii=False)}")
+        
+        logging.info(f"原始数据中包含 {original_forward_count} 个forward消息")
+        
         lm_messages, origin_messages = make_lm_sanitized_and_original(data)
+
+        # 调试：检查forward消息是否被保留
+        forward_count = 0
+        for item in lm_messages:
+            if "message" in item and isinstance(item["message"], list):
+                for msg in item["message"]:
+                    if msg.get("type") == "forward":
+                        forward_count += 1
+                        logging.debug(f"处理后的forward消息: {json.dumps(msg, ensure_ascii=False)}")
+        
+        logging.info(f"处理后的消息中包含 {forward_count} 个forward消息")
 
         lm_input = {
             "notregular": data.get("notregular"),
@@ -1073,7 +1154,6 @@ def main():
     - 通常以关键词"在吗"、"投稿"、"墙"等开始，但这些关键词可能出现在中途或根本不出现。
     - 属于同一组投稿的消息，时间间隔一般较近（通常小于 600 秒），但也存在例外。
     - 投稿内容可能包含文本、图片（image）、视频（video）、文件（file）、戳一戳（poke）、合并转发的聊天记录（forward）等多种类型。
-    - 你无法查看合并转发的聊天记录的内容
     - 大多数情况下该记录只包含一组投稿，这种情况下认为所有消息都在组中，偶尔可能有多组，需要你自己判断。
     - 信息只可能包含多个完整的投稿，户可能出现半个投稿+一个投稿的情况，如果真的出现了，说明你判断错误，前面那个"半个投稿"，是后面投稿的一部分。
 
