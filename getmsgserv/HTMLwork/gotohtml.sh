@@ -347,85 +347,142 @@ html_content=$(cat <<EOF
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OQQWall消息页</title>
     <style>
+        /* CSS变量定义 */
+        :root {
+            /* 颜色系统 */
+            --primary-color: #007aff;
+            --secondary-color: #71a1cc;
+            --background-color: #f2f2f2;
+            --card-background: #ffffff;
+            --text-primary: #000000;
+            --text-secondary: #666666;
+            --text-muted: #888888;
+            --border-color: #e0e0e0;
+            
+            /* 间距系统 */
+            --spacing-xs: 4px;
+            --spacing-sm: 6px;
+            --spacing-md: 8px;
+            --spacing-lg: 10px;
+            --spacing-xl: 12px;
+            --spacing-xxl: 20px;
+            
+            /* 圆角系统 */
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            
+            /* 阴影系统 */
+            --shadow-sm: 0 0 5px rgba(0, 0, 0, 0.1);
+            --shadow-md: 0px 0px 6px rgba(0, 0, 0, 0.2);
+            --shadow-lg: 0 0 10px rgba(0, 0, 0, 0.3);
+            
+            /* 字体系统 */
+            --font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+            --font-size-xs: 11px;
+            --font-size-sm: 12px;
+            --font-size-md: 14px;
+            --font-size-lg: 24px;
+            
+            /* 布局尺寸 */
+            --container-width: 4in;
+            --avatar-size: 50px;
+            --qr-size: 48px;
+            --file-icon-size: 40px;
+            --card-max-width: 276px;
+        }
+
+        /* 重置和基础样式 */
+        * {
+            box-sizing: border-box;
+        }
+
         @page {
             margin: 0 !important;
             size: 4in 8in;
         }
 
         body {
-            font-family: "PingFang SC","Microsoft YaHei",Arial,sans-serif;
-            background-color: #f2f2f2;
+            font-family: var(--font-family);
+            background-color: var(--background-color);
             margin: 0;
             padding: 5px;
+            line-height: 1.5;
         }
 
+        /* 容器布局 */
         .container {
-            width: 4in;
+            width: var(--container-width);
             margin: 0 auto;
-            padding: 20px;
-            border-radius: 12px;
-            background-color: #f2f2f2;
-            box-sizing: border-box;
+            padding: var(--spacing-xxl);
+            border-radius: var(--radius-lg);
+            background-color: var(--background-color);
+            position: relative;
         }
 
+        /* 头部样式 */
         .header {
             display: flex;
             align-items: center;
+            gap: var(--spacing-lg);
         }
 
         .header img {
             border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            margin-right: 10px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.3);
+            width: var(--avatar-size);
+            height: var(--avatar-size);
+            box-shadow: var(--shadow-lg);
+            flex-shrink: 0;
         }
 
         .header-text {
             display: block;
+            flex: 1;
         }
 
         .header h1 {
-            font-size: 24px;
+            font-size: var(--font-size-lg);
             margin: 0;
+            font-weight: 600;
         }
 
         .header h2 {
-            font-size: 12px;
+            font-size: var(--font-size-sm);
             margin: 0;
+            color: var(--text-secondary);
         }
 
+        /* 内容区域 */
         .content {
-            margin-top: 20px;
+            margin-top: var(--spacing-xxl);
         }
 
+        /* 通用消息样式 */
         .bubble {
-          display: block;
-          background-color: #ffffff;
-          border-radius: 12px;
-          padding: 6px 10px 6px 10px;
-          margin-bottom: 10px;
-          word-break: break-word;
-          max-width: fit-content;
-          line-height: 1.5;
-          box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+            display: block;
+            background-color: var(--card-background);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-sm) var(--spacing-lg);
+            margin-bottom: var(--spacing-lg);
+            word-break: break-word;
+            max-width: fit-content;
+            box-shadow: var(--shadow-sm);
+            line-height: 1.5;
         }
 
-        .content img:not(.thumb):not(.qr-code):not(.brand-icon):not(.card-tag-icon):not(.bubble):not(.cqface):not(.file-icon):not(.card),
+        /* 媒体元素样式 */
+        .content img:not(.thumb):not(.qr-code):not(.brand-icon):not(.card-tag-icon):not(.bubble):not(.cqface):not(.file-icon):not(.card-preview),
         .content video:not(.thumb):not(.qr-code):not(.brand-icon):not(.card-tag-icon) {
             display: block;
-            border-radius: 12px;
-            padding: 0px;
-            margin-bottom: 10px;
+            border-radius: var(--radius-lg);
+            margin-bottom: var(--spacing-lg);
             max-width: 50%;
             max-height: 300px;
-            box-shadow: 0px 0px 6px rgba(0, 0, 0, 0.2);
-        }
-
-        .content video {
+            box-shadow: var(--shadow-md);
             background-color: transparent;
         }
 
+        /* QQ表情样式 */
         .cqface {
             vertical-align: middle;
             width: 20px !important;
@@ -436,27 +493,27 @@ html_content=$(cat <<EOF
             transform: translateY(-0.1em);
         }
 
+        /* 文件块样式 */
         .file-block {
             display: flex !important;
             flex-direction: row-reverse;
-            /* icon 在右 */
             align-items: flex-start;
-            background-color: #ffffff;
-            border-radius: 12px;
+            background-color: var(--card-background);
+            border-radius: var(--radius-lg);
             padding: 7px;
-            margin-bottom: 10px;
-            align-items: stretch;
-            gap: 6px;
+            margin-bottom: var(--spacing-lg);
+            gap: var(--spacing-sm);
             line-height: 1.4;
             word-break: break-all;
             width: fit-content;
             max-width: 100%;
+            box-shadow: var(--shadow-sm);
         }
 
         .file-icon {
-            width: 40px !important;
-            height: 40px !important;
-            flex: 0 0 40px;
+            width: var(--file-icon-size) !important;
+            height: var(--file-icon-size) !important;
+            flex: 0 0 var(--file-icon-size);
             margin: 0 !important;
             padding: 0 !important;
             border-radius: 0px !important;
@@ -467,21 +524,17 @@ html_content=$(cat <<EOF
             display: flex;
             flex-direction: column;
             align-items: flex-start;
-            justify-content: center;
             justify-content: space-between;
-            /* 顶部放文件名，底部放 meta */
-            min-height: 40px;
-            /* 与 .file-icon 高度一致，保证能“贴底” */
+            min-height: var(--file-icon-size);
+            flex: 1;
         }
 
         .file-name {
-            font-size: 14px;
-            flex: 1 1 auto;
-            display: inline-block;
+            font-size: var(--font-size-md);
             line-height: 1.3;
-            align-self: flex-start;
-            color: #000000;
+            color: var(--text-primary);
             text-decoration: none;
+            word-break: break-word;
         }
 
         .file-name:hover {
@@ -489,58 +542,57 @@ html_content=$(cat <<EOF
         }
 
         .file-meta {
-
-            font-size: 11px;
-            color: #888;
+            font-size: var(--font-size-xs);
+            color: var(--text-muted);
             margin: 0px 0px 1px 1px;
             line-height: 1;
-            align-self: flex-start;
-            /* 调整为靠左下角 */
         }
 
-        /* === Card (JSON message) === */
+        /* 卡片样式系统 */
         .card {
             display: block;
-            background-color: #ffffff;
-            border-radius: 12px;
-            padding: 8px;
-            margin-bottom: 10px;
+            background-color: var(--card-background);
+            border-radius: var(--radius-lg);
+            padding: var(--spacing-md);
+            margin-bottom: var(--spacing-lg);
             text-decoration: none;
-            color: #000000;
-            box-sizing: border-box;
+            color: var(--text-primary);
             width: fit-content;
-            max-width: 276px;
+            max-width: var(--card-max-width);
+            box-shadow: var(--shadow-sm);
+            transition: box-shadow 0.2s ease;
         }
 
         .card:hover {
             text-decoration: none;
+            box-shadow: var(--shadow-md);
         }
 
+        /* 联系人卡片 */
         .card-contact {
-            /* 联系人卡片：横向布局 */
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: var(--spacing-md);
         }
 
-        /* 覆盖 .content img 的全局约束，避免被 50% 宽等影响 */
+        /* 卡片媒体元素 */
         .card img:not(.thumb):not(.qr-code):not(.brand-icon):not(.card-tag-icon) {
             max-width: 100% !important;
-            margin-top: 6px;
+            margin-top: var(--spacing-sm);
             padding: 0 !important;
+            box-shadow: none !important;
         }
 
-        /* 头像/小缩略图 */
         .card-media img {
-            width: 48px !important;
-            height: 48px !important;
-            border-radius: 4px !important;
+            width: var(--qr-size) !important;
+            height: var(--qr-size) !important;
+            border-radius: var(--radius-sm) !important;
             margin: 0 !important;
             object-fit: cover;
             display: block;
         }
 
-        /* 纵向卡片（文档/新闻等）：上图下文 */
+        /* 纵向卡片 */
         .card-vertical .card-preview img {
             width: 100% !important;
             height: auto !important;
@@ -557,24 +609,27 @@ html_content=$(cat <<EOF
         }
 
         .card-title {
-            font-size: 14px;
+            font-size: var(--font-size-md);
             font-weight: 600;
             line-height: 1.3;
+            margin: 0;
         }
 
         .card-desc {
-            font-size: 12px;
-            color: #666;
+            font-size: var(--font-size-sm);
+            color: var(--text-secondary);
             line-height: 1.2;
+            margin: 0;
         }
 
+        /* 卡片标签 */
         .card-tag-row {
             display: flex;
             align-items: center;
-            gap: 4px;
-            margin-top: 6px;
-            font-size: 11px;
-            color: #888;
+            gap: var(--spacing-xs);
+            margin-top: var(--spacing-sm);
+            font-size: var(--font-size-xs);
+            color: var(--text-muted);
         }
 
         .card-tag-icon {
@@ -585,47 +640,49 @@ html_content=$(cat <<EOF
             margin: 0 !important;
         }
 
-        /* Tag 文本样式 */
         .card-tag {
-            display:block;
-            font-size: 11px;
-            color: #888;
+            display: block;
+            font-size: var(--font-size-xs);
+            color: var(--text-muted);
         }
 
-        /* === New: QQ official-like header layout === */
+        /* 卡片头部布局 */
         .card-header {
             display: flex;
             align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            margin-bottom: 6px;
+            justify-content: flex-start;
+            gap: var(--spacing-md);
+            margin-bottom: var(--spacing-sm);
         }
 
         .card-header-left {
             min-width: 0;
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: var(--spacing-sm);
+            flex: 1;
         }
+
         .card-bottom {
             display: flex;
             align-items: flex-start;
             justify-content: space-between;
-            gap: 8px;
-            padding-top: 7px;
+            gap: var(--spacing-md);
+            padding-top: 4px;
         }
 
         .card-bottom-left {
             min-width: 0;
             display: flex;
             flex-direction: column;
-            gap: 4px;
+            gap: var(--spacing-xs);
         }
 
+        /* 品牌信息 */
         .brand-inline {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: var(--spacing-sm);
         }
 
         .brand-inline .brand-icon {
@@ -637,183 +694,154 @@ html_content=$(cat <<EOF
         }
 
         .brand-inline .brand-text {
-            font-size: 12px;
-            color: #666;
+            font-size: var(--font-size-sm);
+            color: var(--text-secondary);
         }
 
         .card-header-right {
             display: flex;
             align-items: flex-start;
-            gap: 8px;
+            gap: var(--spacing-md);
+            flex: 1;
+            min-width: 0;
         }
 
         .card-header .thumb {
-            width: 48px !important;
-            height: 48px !important;
-            border-radius: 4px !important;
+            width: var(--qr-size) !important;
+            height: var(--qr-size) !important;
+            border-radius: var(--radius-sm) !important;
             margin: 0 !important;
             object-fit: cover;
         }
 
+        /* 二维码样式 */
         .qr-code {
-            width: 48px !important;
-            height: 48px !important;
+            width: var(--qr-size) !important;
+            height: var(--qr-size) !important;
             border-radius: 0px !important;
             margin: 0px !important;
+            margin-left: auto !important;
+            flex: 0 0 var(--qr-size);
         }
 
+        /* 回复样式 */
         .reply {
-          border-left: 3px solid #e0e0e0;
-          background: #fafafa;
-          border-radius: 6px;
-          padding: 6px 8px;
-          margin-bottom: 4px;
+            border-left: 3px solid var(--border-color);
+            background: #fafafa;
+            border-radius: var(--radius-sm);
+            padding: var(--spacing-sm) var(--spacing-md);
+            margin-bottom: var(--spacing-xs);
         }
+
         .reply .reply-meta {
-          font-size: 0.85em;
-          color: #666;
-          margin-bottom: 2px;
+            font-size: 0.85em;
+            color: var(--text-secondary);
+            margin-bottom: 2px;
         }
+
         .reply .reply-body {
-          white-space: pre-wrap; /* 保留换行 */
-          color: #333;
+            white-space: pre-wrap;
+            color: #333;
         }
 
-        /* === Forward (合并转发) Apple Mail 引用风格 === */
+        /* 转发样式 */
         .forward {
-          display: inline-block;
-          border-left: 3px solid #71a1cc;
-          padding-left: 10px;
-          padding-bottom: 0px;
-          margin: 0 0 10px 0;
-          border-radius: 0px;
+            display: inline-block;
+            border-left: 3px solid var(--secondary-color);
+            padding-left: var(--spacing-lg);
+            padding-bottom: 0px;
+            margin: 0 0 var(--spacing-lg) 0;
+            border-radius: 0px;
         }
+
         .forward-title {
-          font-size: 12px;
-          color: #666;
-          margin: 0px 0 4px 0;
+            font-size: var(--font-size-sm);
+            color: var(--text-secondary);
+            margin: 0px 0 var(--spacing-xs) 0;
         }
+
         .forward-item {
-          margin: 6px 0 6px 4px;
-        }
-        /* 嵌套转发时逐级缩进更明显 */
-        .forward .forward { margin-left: 6px; }
-
-        /* =========================================================
-        Overrides: 标题左贴缩略图、二维码最右、标题允许两行并纵向居中
-        仅影响结构为：<div class="card-header"><img.thumb> <div.card-header-right><div.card-title>…</div></div> <img.qr-code></div>
-        ========================================================= */
-        .card-header {
-          justify-content: flex-start;   /* 让子项按顺序排布，由二维码自身推到右侧 */
-          align-items: center;           /* 纵向居中 thumb / 标题列 / QR */
-          gap: 8px;
+            margin: var(--spacing-sm) 0 var(--spacing-sm) var(--spacing-xs);
         }
 
-        /* 中间列吃掉剩余空间，确保 QR 被推到最右 */
-        .card-header .thumb + .card-header-right {
-          flex: 1 1 auto;
-          min-width: 0;
-          display: flex;
-          align-items: center;           /* 标题块在列内纵向居中 */
-          gap: 0;
-          margin-left: 0;
+        .forward .forward {
+            margin-left: var(--spacing-sm);
         }
 
-        /* QR 固定在最右侧且尺寸稳定 */
-        .card-header .qr-code {
-          margin-left: auto;             /* 将其推到最右侧 */
-          flex: 0 0 48px;
+        /* 纵向卡片特殊布局 */
+        .card.card-vertical {
+            width: 100%;
+            max-width: var(--card-max-width);
         }
 
-        /* 标题：左贴缩略图；允许两行并截断 */
-        .card-header .thumb + .card-header-right > .card-title {
-          margin: 0;
-          text-align: left;
-          white-space: normal;           /* 允许换行 */
-          overflow: hidden;
+        .card.card-vertical .card-header {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: var(--spacing-md);
+        }
 
-          /* 两行截断（兼容旧 WebKit） */
-          display: -webkit-box;
-          -webkit-box-orient: vertical;
-          -webkit-line-clamp: 2;
-          line-clamp: 2;
+        .card.card-vertical .card-header-left {
+            flex: 1;
+            min-width: 0;
+        }
 
-          word-break: break-word;        /* 处理超长英文/URL */
-          /* 如需更激进换行可改用：overflow-wrap: anywhere; */
-          }
-              /* 让纵向卡片本体可以占满到 max-width，避免 fit-content 影响 header 拉伸 */
-          .card.card-vertical {
-          width: 100%;          /* 占满可用宽度 */
-          max-width: 276px;     /* 沿用你原本的上限 */
-          }
+        .card.card-vertical .card-header-left .card-title {
+            margin: 0;
+            white-space: normal;
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            line-clamp: 2;
+            word-break: break-word;
+        }
 
-          /* Header 铺满整张卡片，并保持纵向居中 */
-          .card.card-vertical .card-header {
-          width: 100%;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          }
-
-          /* 左侧信息列吃掉中间空间，QR 才能被推到最右 */
-          .card.card-vertical .card-header-left {
-          flex: 1 1 auto;
-          min-width: 0;         /* 允许内部换行/截断 */
-          }
-
-          /* 二维码固定在最右侧，尺寸稳定 */
-          .card.card-vertical .qr-code {
-          margin-left: auto;    /* 关键：推到最右 */
-          flex: 0 0 48px;
-          }
-
-          /* 标题允许两行并截断（在 header-left 里） */
-          .card.card-vertical .card-header-left .card-title {
-          margin: 0;
-          white-space: normal;
-          overflow: hidden;
-
-          display: -webkit-box;
-          -webkit-box-orient: vertical;
-          -webkit-line-clamp: 2;
-          line-clamp: 2;
-
-          word-break: break-word;      /* 处理超长英文/URL */
-          /* 如果希望更激进换行可改为：overflow-wrap: anywhere; */
-          }
-          /* 覆盖层不占位，不挡交互 */
-          .container { position: relative; }
-
-          .wm-overlay{
+        /* 水印样式 */
+        .wm-overlay {
             position: absolute;
-            inset: 0;                 /* 覆盖整个 .container */
-            pointer-events: none;     /* 不阻挡点击/选择 */
+            inset: 0;
+            pointer-events: none;
             z-index: 999;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+        }
 
-          }
-
-          .wm-item{
+        .wm-item {
             position: absolute;
             white-space: nowrap;
             user-select: none;
-            font-family: "PingFang SC","Microsoft YaHei",Arial,sans-serif;
+            font-family: var(--font-family);
             font-weight: 500;
-            /* 低透明+微描边：在深/浅底都能看清，但不刺眼 */
-            color: rgba(0,0,0,1);
-            text-shadow:
-              0 0 1px rgba(255,255,255,0.25),
-              0 0 1px rgba(255,255,255,0.25);
+            color: rgba(0, 0, 0, 1);
+            text-shadow: 0 0 1px rgba(255, 255, 255, 0.25), 0 0 1px rgba(255, 255, 255, 0.25);
             transform: rotate(-24deg);
             line-height: 1;
-            mix-blend-mode: multiply;  /* 让颜色更自然地贴合背景 */
-          }
+            mix-blend-mode: multiply;
+        }
 
-          @media print {
-            /* 打印时部分浏览器对混合模式支持一般，关掉更稳 */
-            .wm-item{ mix-blend-mode: normal; }
-          }
+        @media print {
+            .wm-item {
+                mix-blend-mode: normal;
+            }
+        }
+
+        /* 响应式优化 */
+        @media (max-width: 400px) {
+            .container {
+                width: 100%;
+                padding: var(--spacing-lg);
+            }
+            
+            .content img:not(.thumb):not(.qr-code):not(.brand-icon):not(.card-tag-icon):not(.bubble):not(.cqface):not(.file-icon):not(.card-preview),
+            .content video:not(.thumb):not(.qr-code):not(.brand-icon):not(.card-tag-icon) {
+                max-width: 100%;
+            }
+            
+            .card {
+                max-width: 100%;
+            }
+        }
     </style>
 </head>
 <body>
