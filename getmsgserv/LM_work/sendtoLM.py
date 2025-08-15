@@ -1302,7 +1302,7 @@ def save_to_sqlite(output_data, tag):
 def main():
     # 配置日志输出
     logging.basicConfig(
-        level=logging.DEBUG,  # 改为DEBUG级别以显示debug输出
+        level=logging.INFO,  # 改为DEBUG级别以显示debug输出
         format='LMWork:%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),

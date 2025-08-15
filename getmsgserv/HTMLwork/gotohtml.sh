@@ -353,7 +353,7 @@ html_content=$(cat <<EOF
         }
 
         body {
-            font-family: Arial, sans-serif;
+            font-family: "PingFang SC","Microsoft YaHei",Arial,sans-serif;
             background-color: #f2f2f2;
             margin: 0;
             padding: 5px;
@@ -363,7 +363,7 @@ html_content=$(cat <<EOF
             width: 4in;
             margin: 0 auto;
             padding: 20px;
-            border-radius: 10px;
+            border-radius: 12px;
             background-color: #f2f2f2;
             box-sizing: border-box;
         }
@@ -400,20 +400,21 @@ html_content=$(cat <<EOF
         }
 
         .bubble {
-            display: block;
-            background-color: #ffffff;
-            border-radius: 10px;
-            padding: 7px 7px 4.1px 7px;
-            margin-bottom: 10px;
-            word-break: break-word;
-            max-width: fit-content;
-            line-height: 1.5;
+          display: block;
+          background-color: #ffffff;
+          border-radius: 12px;
+          padding: 6px 10px 6px 10px;
+          margin-bottom: 10px;
+          word-break: break-word;
+          max-width: fit-content;
+          line-height: 1.5;
+          box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
         }
 
-        .content img:not(.thumb):not(.qr-code):not(.brand-icon):not(.card-tag-icon),
+        .content img:not(.thumb):not(.qr-code):not(.brand-icon):not(.card-tag-icon):not(.bubble):not(.cqface):not(.file-icon):not(.card),
         .content video:not(.thumb):not(.qr-code):not(.brand-icon):not(.card-tag-icon) {
             display: block;
-            border-radius: 10px;
+            border-radius: 12px;
             padding: 0px;
             margin-bottom: 10px;
             max-width: 50%;
@@ -441,7 +442,7 @@ html_content=$(cat <<EOF
             /* icon 在右 */
             align-items: flex-start;
             background-color: #ffffff;
-            border-radius: 10px;
+            border-radius: 12px;
             padding: 7px;
             margin-bottom: 10px;
             align-items: stretch;
@@ -501,7 +502,7 @@ html_content=$(cat <<EOF
         .card {
             display: block;
             background-color: #ffffff;
-            border-radius: 10px;
+            border-radius: 12px;
             padding: 8px;
             margin-bottom: 10px;
             text-decoration: none;

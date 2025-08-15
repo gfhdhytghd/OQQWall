@@ -102,7 +102,7 @@ echo '开始处理html到pdf'
 # Step 3: Process the output into JPG
 # ---- 1. 选择可执行文件 ---------------------------------------------------
 # 依次查找可用的浏览器可执行文件
-for candidate in chromium-browser chromium chrome google-chrome; do
+for candidate in  google-chrome-stable chrome chromium-browser chromium; do
     if command -v "$candidate" >/dev/null 2>&1; then
         CHROME_BIN=$(command -v "$candidate")
         break
@@ -123,12 +123,12 @@ COMMON_ARGS=(
     --headless
     --run-all-compositor-stages-before-draw
     --no-pdf-header-footer
-    --virtual-time-budget=2000
+    --virtual-time-budget=20000
     --pdf-page-orientation=portrait
     --no-margins
     --enable-background-graphics
     --print-background=true
-    --allow-file-access-from-files \
+    --allow-file-access-from-files 
         --print-to-pdf="$PDF_OUT"
     )
 
