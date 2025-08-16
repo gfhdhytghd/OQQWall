@@ -462,7 +462,7 @@ html_content=$(cat <<EOF
             display: block;
             background-color: var(--card-background);
             border-radius: var(--radius-lg);
-            padding: var(--spacing-sm) var(--spacing-lg);
+            padding: 4px 8px;
             margin-bottom: var(--spacing-lg);
             word-break: break-word;
             max-width: fit-content;
@@ -644,6 +644,7 @@ html_content=$(cat <<EOF
             display: block;
             font-size: var(--font-size-xs);
             color: var(--text-muted);
+            line-height: 1;
         }
 
         /* 卡片头部布局 */

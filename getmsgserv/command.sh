@@ -138,8 +138,19 @@ case $object in
         if [ -z $numbpending ]; then
             sendmsggroup 没有待处理项目
         else
-            sendmsggroup "待处理项目:
-$numbpending"
+            group_pending=""
+            for tag in $numbpending; do
+                group=$(sqlite3 ./cache/OQQWall.db "SELECT ACgroup FROM preprocess WHERE tag = '$tag';")
+                if [[ "$group" == "$groupname" ]]; then
+                    group_pending="$group_pending$tag"$'\n'
+                fi
+            done
+            if [[ -z "$group_pending" ]]; then
+                sendmsggroup "本组没有待处理项目"
+            else
+                sendmsggroup "本组待处理项目:
+$group_pending"
+            fi
         fi
         ;;
     "删除待处理")
