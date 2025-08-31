@@ -339,7 +339,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                 logger.error(f'Error deleting message from database: {e}')
 
     def handle_friend_request(self, data):
-        """自动同意好友请求，并将该请求的 comment 记录为 2 分钟的抑制关键词。"""
+        """自动同意好友请求，并将该请求的 comment 记录为几分钟的抑制关键词。"""
         user_id = str(data.get('user_id') or '')
         flag = str(data.get('flag') or '')
         self_id = str(data.get('self_id') or '')

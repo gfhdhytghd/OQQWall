@@ -197,41 +197,55 @@ cleanup_cache_dirs() {
 # =============================================================================
 
 # 生成@列表
+# 生成@列表（替换原函数）
 generate_at_list() {
     [[ "$at_unprived_sender" == "false" ]] && return 1
-    
+
     local final_at=''
     local t
-    local -A seen_senders  # 用于去重
-    
+    declare -A seen_senders  # 去重
+
     echo "DEBUG: generate_at_list called with tags: $*" >&2
-    
+
     for t in "$@"; do
-        local raw_output
-        raw_output=$(timeout 10s sqlite3 -separator '|' "$DB_PATH" \
-            "SELECT AfterLM,senderid FROM preprocess WHERE tag = '$t';")
-        
-        # 检查是否有结果
-        if [[ -z "$raw_output" ]]; then
-            echo "DEBUG: No result for tag $t" >&2
+        # 清理 tag 里的不可见字符（防止 WHERE 不命中）
+        local t_clean
+        t_clean=$(printf '%s' "$t" | tr -d '\r\n\t ')
+
+        # 拉数据；用 COALESCE 防止 NULL 变空串
+        local afterlm_raw atsenderid
+        afterlm_raw=$(timeout 10s sqlite3 "$DB_PATH" \
+            "SELECT COALESCE(AfterLM,'') FROM preprocess WHERE tag = '$t_clean';")
+        atsenderid=$(timeout 10s sqlite3 "$DB_PATH" \
+            "SELECT COALESCE(senderid,'') FROM preprocess WHERE tag = '$t_clean';")
+
+        if [[ -z "$afterlm_raw" ]]; then
+            echo "DEBUG: No result for tag $t_clean" >&2
             continue
         fi
-        
-        local json_data atsenderid
-        IFS='|' read -r json_data atsenderid <<< "$raw_output"
+
         local need_priv
-        need_priv=$(echo "$json_data" | jq -r '.needpriv' 2>/dev/null)
-        
-        echo "DEBUG: Tag $t -> needpriv=$need_priv, senderid=$atsenderid" >&2
-        
-        if [[ "$need_priv" == "false" && -n "$atsenderid" && -z "${seen_senders[$atsenderid]}" ]]; then
+        need_priv=$(
+            printf '%s' "$afterlm_raw" | jq -r 'try .needpriv catch empty' 2>/dev/null
+        )
+        if [[ -z "$need_priv" ]]; then
+            need_priv=$(
+                printf '%s' "$afterlm_raw" | jq -r 'try (fromjson | .needpriv) catch empty' 2>/dev/null
+            )
+        fi
+
+        echo "DEBUG: Tag $t_clean -> needpriv=$need_priv, senderid=$atsenderid" >&2
+
+        if [[ "$need_priv" == "false" && -n "$atsenderid" && -z "${seen_senders[$atsenderid]:-}" ]]; then
             final_at+=", @{uin:$atsenderid,nick:,who:1}"
-            seen_senders[$atsenderid]=1  # 标记为已处理
+            seen_senders[$atsenderid]=1
         fi
     done
-    
-    echo "DEBUG: Final at list: ${final_at#, }" >&2
-    echo "${final_at#, }"
+
+    # 去掉前导逗号+空格
+    final_at="${final_at#, }"
+    echo "DEBUG: Final at list: $final_at" >&2
+    printf '%s' "$final_at"
 }
 
 # =============================================================================
@@ -592,89 +606,104 @@ flush_staged_posts() {
     local tags=()
     mapfile -t tags < <(get_stored_posts "$target_group")
     
-    if (( ${#tags[@]} == 0 )); then
-        sendmsggroup "flush: 组 ${target_group} 暂存为空，无需发送"
+    if [[ -z "${tags[*]// }" ]]; then
+        sendmsggroup "暂存区调度器: 组 ${target_group} 暂存为空，无需发送"
         return 0
     fi
     
     # 发送所有暂存内容
     if manage_posts "${tags[@]}"; then
-        sendmsggroup "flush: 组 ${target_group} 暂存内容已全部发送"
+        sendmsggroup "暂存区调度器: 组 ${target_group} 暂存内容已全部发送"
         return 0
     else
         log_error "flush_staged_posts: 发送失败（组：$target_group）"
         return 1
     fi
 }
-
 # =============================================================================
-# 定时调度模块
+# 定时调度模块（单实例 + 分钟锁 + 当日标记）
 # =============================================================================
 
-# 调度配置
-declare -A SCHEDULES   # 组 -> "HH:MM,HH:MM"
-declare -A LASTFIRE    # "组|HH:MM" -> YYYY-MM-DD
+readonly SCHED_GLOBAL_LOCK="./cache/.sched.global.lock"
+readonly SCHED_PID_FILE="./cache/.sched.pid"
 
-# 加载调度配置
-load_schedules() {
-    SCHEDULES=()
-    
-    local rows
-    rows=$(jq -r '
-        to_entries[]
-        | select(.value.send_schedule? and (.value.send_schedule|length)>0)
-        | [ (.value.acgroup // .key), (.value.send_schedule | map(gsub("\\s+"; "")) | join(",")) ]
-        | @tsv
-    ' "$ACCOUNT_CONFIG_FILE" 2>/dev/null) || rows=""
-    
+# 读取：每行  <group>\t<HH:MM,HH:MM,...>
+_load_schedules() {
+  jq -r '
+    to_entries[]
+    | select(.value.send_schedule? and (.value.send_schedule|length)>0)
+    | [ (.value.acgroup // .key), (.value.send_schedule | map(gsub("\\s+"; "")) | join(",")) ]
+    | @tsv
+  ' "$ACCOUNT_CONFIG_FILE" 2>/dev/null
+}
+
+# 当日只触发一次 + 同一分钟互斥
+_fire_once() {
+  local g="$1" hm="$2"
+  local today markfile lockdir
+  today=$(date +%F)
+  markfile="./cache/.sched.fired.${g}.${hm}.${today}"
+  lockdir="./cache/.sched.lock.${g}.${hm}"
+
+  # 已触发过：直接返回
+  [[ -f "$markfile" ]] && return 0
+
+  # 同一分钟锁
+  if mkdir "$lockdir" 2>/dev/null; then
+    : > "$markfile"  # 先落地“已触发”标记，避免失败后重复
+    if ! flush_staged_posts "$g"; then
+      echo "sendcontrol $(date '+%F %T') 定时发送失败：组 ${g} @ ${hm}" >> ./cache/SendControl_CrashReport.txt
+    fi
+    # 锁保持到分钟跳变
+    while [[ "$(date +%H:%M)" == "$hm" ]]; do sleep 1; done
+    rmdir "$lockdir" 2>/dev/null || true
+  fi
+}
+
+# 单实例守护的 scheduler（不要再另起旧的 scheduler_loop）
+_run_scheduler() {
+  mkdir -p ./cache
+
+  # 全局单实例锁：整个进程生命周期持有
+  exec {__sched_fd}> "$SCHED_GLOBAL_LOCK" || true
+  if ! flock -n "${__sched_fd}"; then
+    echo "scheduler 已在运行（跳过重复启动）"
+    return 0
+  fi
+  echo $$ > "$SCHED_PID_FILE"
+
+  # 正常循环：对齐到整分
+  while true; do
+    local nowHM; nowHM=$(date +%H:%M)
+
     while IFS=$'\t' read -r g times; do
-        [[ -z "$g" || -z "$times" ]] && continue
-        SCHEDULES["$g"]="$times"
-    done <<< "$rows"
+      [[ -z "$g" || -z "$times" ]] && continue
+      IFS=',' read -r -a arr <<< "$times"
+      for hm in "${arr[@]}"; do
+        [[ "$hm" == "$nowHM" ]] && _fire_once "$g" "$hm"
+      done
+    done < <(_load_schedules)
+
+    sleep $((60-10#$(date +%S)))
+  done
 }
 
-# 标记已执行
-mark_fired() {
-    local g="$1" hm="$2"
-    LASTFIRE["$g|$hm"]="$(date +%F)"
+# 对外启动函数：确保旧实例被清掉、且只启动一次
+start_scheduler() {
+  mkdir -p ./cache
+  # 如果有残留 PID 但进程已不存在，清理
+  if [[ -f "$SCHED_PID_FILE" ]]; then
+    local oldpid; oldpid=$(cat "$SCHED_PID_FILE" 2>/dev/null || true)
+    if [[ -n "$oldpid" && ! -d "/proc/$oldpid" ]]; then
+      rm -f "$SCHED_PID_FILE"
+    fi
+  fi
+
+  # 后台启动单实例调度器
+  _run_scheduler &
+  echo "scheduler 已启动(单实例)"
 }
 
-# 检查是否应该执行
-should_fire_now() {
-    local g="$1" hm="$2"
-    local today
-    today=$(date +%F)
-    [[ "${LASTFIRE[$g|$hm]:-}" == "$today" ]] && return 1 || return 0
-}
-
-# 调度循环
-scheduler_loop() {
-    while true; do
-        load_schedules
-        local nowHM
-        nowHM=$(date +%H:%M)
-        
-        local g times hm list
-        for g in "${!SCHEDULES[@]}"; do
-            IFS=',' read -r -a list <<< "${SCHEDULES[$g]}"
-            for hm in "${list[@]}"; do
-                [[ "$hm" == "$nowHM" ]] || continue
-                should_fire_now "$g" "$hm" || continue
-                
-                # 互斥锁，避免重入
-                local LOCKDIR="./cache/.sched.lock"
-                if mkdir "$LOCKDIR" 2>/dev/null; then
-                    {
-                        flush_staged_posts "$g" || log_error "定时发送失败：组 $g @ $hm"
-                        mark_fired "$g" "$hm"
-                    }
-                    rmdir "$LOCKDIR" 2>/dev/null || true
-                fi
-            done
-        done
-        sleep 20
-    done
-}
 
 # =============================================================================
 # 错误处理模块
@@ -701,7 +730,7 @@ initialize() {
     [[ ! -p ./presend_out_fifo ]] && mkfifo ./presend_out_fifo
     
     # 启动定时调度
-    scheduler_loop &
+    start_scheduler
     
     echo "sendcontrol初始化完成"
 }
