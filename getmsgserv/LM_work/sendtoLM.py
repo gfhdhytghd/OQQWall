@@ -60,7 +60,7 @@ def get_logging_config():
         print(f"日志同时输出到文件: {os.path.abspath(LOG_FILE_PATH)}")
     
     return {
-        'level': logging.DEBUG,
+        'level': logging.INFO,
         'format': 'LMWork:%(asctime)s - %(levelname)s - %(message)s',
         'handlers': handlers
     }
