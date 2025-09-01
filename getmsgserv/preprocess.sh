@@ -181,11 +181,7 @@ need_priv=$(echo $LMjson | jq -r '.needpriv' )
 isover=$(echo $LMjson | jq -r '.isover')
 notregular=$(echo $LMjson | jq -r '.notregular')
 safemsg=$(echo $LMjson | jq -r '.safemsg')
-if [ "$notregular" = "false" ]; then
-  MSGcache=有常规消息
-else
-  MSGcache=有非常规消息
-fi
+MSGcache=有投稿消息
 if [ "$isover" = "true" ]; then
   MSGcache+=,AI判断已写完
 else

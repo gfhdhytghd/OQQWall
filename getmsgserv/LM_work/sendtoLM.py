@@ -7,12 +7,14 @@ import logging
 import dashscope
 from http import HTTPStatus
 from dashscope import Generation, MultiModalConversation
-from dashscope.api_entities.dashscope_response import Role
+# from dashscope.api_entities.dashscope_response import Role  # 不再需要，已删除多轮对话
 from PIL import Image
 from PIL import ImageFile
 from PIL import UnidentifiedImageError
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 import re
+import regex
+import unicodedata
 import sqlite3
 import copy
 import traceback
@@ -25,20 +27,668 @@ from typing import Dict, Any, List, Optional, Tuple
 from contextlib import contextmanager
 from functools import wraps
 
-# 配置SSL和HTTP设置
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-ssl._create_default_https_context = ssl._create_unverified_context
+# ============================================================================
+# 配置区域：词典、规则、提示词模板
+# ============================================================================
 
-# 错误JSON输出的文件路径
-output_file_path_error = "./cache/LM_error.json"
+# 日志配置
+LOG_FILE_PATH = './logs/sendtoLM_debug.log'
+ENABLE_FILE_LOGGING = True  # 是否启用文件日志记录（设为False则只输出到控制台）
 
-# 重试配置
+def get_logging_config():
+    """动态生成日志配置，确保日志目录存在"""
+    handlers = [logging.StreamHandler()]  # 始终输出到控制台
+    
+    # 如果启用文件日志，添加文件处理器
+    if ENABLE_FILE_LOGGING:
+        # 确保日志目录存在
+        log_dir = os.path.dirname(LOG_FILE_PATH)
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir, exist_ok=True)
+        
+        # 创建文件处理器，带有轮转功能
+        from logging.handlers import RotatingFileHandler
+        file_handler = RotatingFileHandler(
+            LOG_FILE_PATH, 
+            maxBytes=10*1024*1024,  # 10MB
+            backupCount=5,
+            encoding='utf-8'
+        )
+        handlers.append(file_handler)
+        
+        # 打印日志文件位置信息（仅在第一次时打印）
+        print(f"日志同时输出到文件: {os.path.abspath(LOG_FILE_PATH)}")
+    
+    return {
+        'level': logging.DEBUG,
+        'format': 'LMWork:%(asctime)s - %(levelname)s - %(message)s',
+        'handlers': handlers
+    }
+
+# 明确"要匿名"的正向信号（命中任一则偏向 needpriv=true）
+POSITIVE_PATTERNS = [
+    r"(求|请|要|需要|帮我|给我)?(打?马|打?码|马赛克)",   # 求打码/打马
+    r"(匿名|匿)(一下|处理|发)?",                     # 匿名/匿一下
+    r"别(显示|露|暴露)(我的)?(名字|姓名|id|qq|q号|号)", # 别显示名字/ID
+    r"(不要|别|不想)实名",                           # 不要实名=要匿名
+    r"不留名",                                       # 不留名
+    r"(代发|帮朋友(匿名)?发|代po)",                  # 代发/帮朋友匿名发
+    r"(走马|走码)",                                  # 口语
+    r"(匿下|腻|拟|逆|尼)",                          # 谐音变体
+    r"🙈|🐎|🐴|🆔|🔒",                             # 表情符号
+    r"(打|加|上)马赛克",                            # 打马赛克
+    r"(隐藏|遮挡|屏蔽)(姓名|名字|id|账号)",          # 隐藏信息
+]
+
+# 明确"不匿名/公开"的反向信号（命中任一则偏向 needpriv=false）  
+NEGATIVE_PATTERNS = [
+    r"不(用|要)?(匿名|匿)",                          # 不匿名/不用匿名
+    r"不(用|要)?打?马",                              # 不用打马
+    r"不(用|要)?打?码",                              # 不用打码
+    r"不(用|要)?(马赛克)",                           # 不用马赛克
+    r"不(用|要)?(腻|拟|逆|尼)",                      # 不腻/不拟等（谐音否定）
+    r"(?<!不要)(?<!不想)(?<!别)(实名|公开|可留名|署名)", # 实名/公开等（但排除"不要实名"等）
+    r"可以?(挂|显示)(我|id|账号|名字)",              # 可以挂我ID等
+    r"(直接|就)发",                                  # 直接发
+    r"(不用|无需)(匿名|打码|马赛克)",                # 不用匿名等
+]
+
+# 图像中若出现疑似个人信息的提示词（弱信号；仅加权）
+IMAGE_PRIV_SIGNALS = [
+    r"(姓名|真实?姓名|学号|工号|手机号|电话|身份证|名片|二维码|微信|qq号?|学生证|校园卡|课表|住址|邮箱)",
+    r"(个人信息|联系方式|联系电话|手机|微信号|qq号)",
+    r"(证件|学生卡|工作证|身份证明)",
+]
+
+# 安全检查规则（简化版本，可扩展为更复杂的规则系统）
+UNSAFE_PATTERNS = [
+    r"(傻逼|草泥马|fuck|shit|妈的|操你|去死|滚)",  # 基础脏话
+    r"(法轮功|六四|天安门|习近平|毛泽东|共产党)",    # 政治敏感（简化示例）
+    r"(人身攻击|恶意中伤|网络暴力)",              # 攻击性
+]
+
+# LLM兜底判断的提示词模板
+LLM_PRIVACY_PROMPT_TEMPLATE = """你是内容安全与意图判定助手。基于下面的投稿文本内容，判断"是否需要匿名(needpriv)"。
+只在出现明确表达（包括否定表达、谐音、口语、emoji）或明显隐私线索时才判定为 true/false；否则应基于常识给出合理判断并说明不确定性。
+
+示例(要匿名)：
+- "求打马""帮我匿名一下""不要实名""代发/帮朋友匿名发""别显示名字/ID""匿一下""🙈""🐎"
+- "腻""拟""逆""打码""马赛克""走马""走码"
+
+示例(不匿名)：
+- "不匿名""实名/公开""可以挂我ID/署名""不用打码/马""直接发"
+
+注意否定作用域：
+- "不要实名" => 要匿名；"不匿名/公开/实名" => 不匿名；相邻最近表达优先。
+
+请仅以 JSON 输出：
+{{
+  "needpriv": "true" or "false",
+  "reason": "简要依据（引用关键片段）",
+  "confidence": 0.0~1.0
+}}
+
+投稿文本内容：
+{payload}
+"""
+
+# 主要分组任务的提示词模板
+MAIN_GROUPING_PROMPT_TEMPLATE = """当前时间 {timenow}
+以下内容是一组按时间顺序排列的校园墙投稿聊天记录，格式为"消息ID: 内容"：
+
+{input_content}
+
+请根据以下标准，提取出这些消息中属于**最后一组投稿**的信息：
+
+### 分组标准
+- 通常以关键词"在吗"、"投稿"、"墙"等开始，但这些关键词可能出现在中途或根本不出现。
+- 属于同一组投稿的消息，时间间隔一般较近（通常小于 600 秒），但也存在例外。
+- 投稿内容可能包含文本、图片、视频、文件、戳一戳、合并转发的聊天记录等多种类型。
+- 大多数情况下该记录只包含一组投稿，这种情况下认为所有消息都在组中，偶尔可能有多组，需要你自己判断。
+- 信息只可能包含多个完整的投稿，户可能出现半个投稿+一个投稿的情况，如果真的出现了，说明你判断错误，前面那个"半个投稿"，是后面投稿的一部分。
+
+### 你需要给出的判断
+
+- `isover`（投稿是否完整）  
+- 若投稿者明确表示"发完了"、"没了"、"完毕"等；或投稿语义完整且最后一条消息距离当前时间较远，则为 `true`。  
+- 若存在"没发完"之类的未结束迹象，或最后消息距当前时间较近且不明确，则为 `false`。
+
+### 输出格式
+
+严格按照下面的 JSON 格式输出，仅填写最后一组投稿的 `message_id`，不要输出任何额外的文字或说明：
+
+```json
+{{"isover": "true/false","messages":["message_id1","message_id2",...]}}
+```
+"""
+
+# 图片安全检查和描述生成的提示词
+IMAGE_ANALYSIS_PROMPT = '''请分析这张图片并回答以下两个问题：
+
+1. 安全性检查：这张图片是否含有暴力、血腥、色情、政治敏感，人生攻击或其他敏感内容(发到国内平台，被举报后会导致处罚的都算)？如果安全请回答"safe"，否则回答"unsafe"。
+
+2. 图片描述：请详细描述这张图片的内容，包括图片中的主要元素、场景、颜色、风格等。描述要准确、详细，但不要过于冗长。
+
+请按以下格式回答：
+安全性：[safe/unsafe]
+描述：[详细描述内容]'''
+
+# 文本内容安全检查的提示词模板
+TEXT_SAFETY_PROMPT_TEMPLATE = """你是内容安全审查专家。请分析以下校园墙投稿文本内容的安全性。
+
+投稿文本内容：
+{text_content}
+
+请根据以下标准判断内容是否安全：
+
+### 不安全内容包括：
+- 暴力威胁、仇恨言论、人身攻击
+- 色情、低俗、猥亵内容  
+- 政治敏感信息、煽动性言论
+- 恶意诽谤、造谣传谣
+- 歧视性言论（种族、性别、地域等）
+- 自杀、自残等危险行为倡导
+- 违法犯罪相关内容
+- 严重脏话谩骂、恶意中伤
+
+### 可接受的内容：
+- 正常的情感表达和抱怨
+- 学术讨论和观点交流
+- 日常生活分享
+- 轻微的网络用语和俚语
+- 善意的玩笑和调侃
+
+请仅以 JSON 格式输出判断结果：
+{{
+  "safe": true/false,
+  "reason": "简要说明判断依据",
+  "severity": "low/medium/high"
+}}
+
+注意：
+- safe: true表示内容安全，false表示不安全
+- reason: 说明判断的主要依据
+- severity: 如果不安全，标注严重程度（low=轻微违规, medium=中等违规, high=严重违规）
+"""
+
+# 重试和API配置
 MAX_RETRIES = 3
 RETRY_DELAY = 2  # 秒
 API_TIMEOUT = 30  # 秒
 
-# 数据库连接配置
+# 数据库和文件路径配置
 DB_PATH = './cache/OQQWall.db'
+OUTPUT_FILE_PATH_ERROR = "./cache/LM_error.json"
+
+# 图片处理配置
+DEFAULT_MAX_PIXELS = 12000000
+DEFAULT_SIZE_LIMIT_MB = 9.5
+DEFAULT_VISION_MODEL = 'qwen-vl-max-latest'
+DEFAULT_TEXT_MODEL = 'qwen-plus-latest'
+
+# ============================================================================
+# 文本标准化与匿名判定规则系统
+# ============================================================================
+
+def normalize_text(s: str) -> str:
+    """文本标准化：NFKC归一化 + 小写 + 去控制字符 + 压缩空白"""
+    if not isinstance(s, str):
+        return ""
+    # NFKC 归一化 + 小写
+    s = unicodedata.normalize("NFKC", s).lower()
+    # 去控制字符
+    s = regex.sub(r"[\p{C}]+", "", s)
+    # 压缩空白
+    s = regex.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def extract_text_windows(grouped_messages: list, window: int = 12) -> list[str]:
+    """抽取最近 window 条消息中的可读文本（text + image.describe + file name 等）"""
+    buf = []
+    # 取最后window条消息
+    last_msgs = grouped_messages[-window:] if len(grouped_messages) > window else grouped_messages
+    
+    for item in last_msgs:
+        if "message" in item and isinstance(item["message"], list):
+            for sub in item["message"]:
+                msg_type = sub.get("type", "")
+                if msg_type == "text":
+                    text_content = sub.get("data", {}).get("text", "")
+                    if text_content:
+                        buf.append(text_content)
+                elif msg_type == "image":
+                    # 描述优先
+                    if "describe" in sub:
+                        buf.append(sub["describe"])
+                elif msg_type == "file":
+                    file_name = sub.get("data", {}).get("name", "")
+                    if file_name:
+                        buf.append(file_name)
+                elif msg_type == "forward":
+                    # 可选：递归 forward 里的内容（这里简化处理）
+                    buf.append("[转发的聊天记录]")
+    
+    return [normalize_text(x) for x in buf if x.strip()]
+
+
+def rule_needpriv_vote(grouped_messages: list) -> tuple[Optional[bool], dict]:
+    """
+    基于规则判定匿名倾向
+    返回: (倾向结果, 证据字典)
+    - 倾向结果: True(要匿名), False(不匿名), None(不确定)
+    - 证据字典: 包含命中的模式和文本
+    """
+    texts = extract_text_windows(grouped_messages, window=12)
+    evidence = {"positive": [], "negative": [], "image_hits": []}
+    
+    # 1) 强规则：最近优先（倒序扫描，命中即返回）
+    for idx, text in enumerate(reversed(texts), 1):
+        # 先检查反向信号（优先级更高，因为用户明确说不匿名）
+        for pat in NEGATIVE_PATTERNS:
+            if regex.search(pat, text):
+                evidence["negative"].append({
+                    "text": text, 
+                    "pattern": pat, 
+                    "rank": idx
+                })
+                logging.debug(f"命中反向匿名信号 (rank {idx}): {pat} in '{text[:50]}...'")
+                return False, evidence
+        
+        # 再检查正向信号
+        for pat in POSITIVE_PATTERNS:
+            if regex.search(pat, text):
+                evidence["positive"].append({
+                    "text": text, 
+                    "pattern": pat, 
+                    "rank": idx
+                })
+                logging.debug(f"命中正向匿名信号 (rank {idx}): {pat} in '{text[:50]}...'")
+                return True, evidence
+    
+    # 2) 弱规则：图片隐私线索（仅加权，不直接定案）
+    weak_bias = 0
+    for item in grouped_messages:
+        if "message" in item and isinstance(item["message"], list):
+            for sub in item["message"]:
+                if sub.get("type") == "image":
+                    desc = normalize_text(sub.get("describe", ""))
+                    if desc:
+                        for pat in IMAGE_PRIV_SIGNALS:
+                            if regex.search(pat, desc):
+                                evidence["image_hits"].append({
+                                    "desc": desc[:100] + "..." if len(desc) > 100 else desc, 
+                                    "pattern": pat
+                                })
+                                weak_bias += 1
+                                logging.debug(f"图片隐私信号: {pat} in '{desc[:50]}...'")
+    
+    # 记录弱偏向
+    if weak_bias > 0:
+        logging.debug(f"发现 {weak_bias} 个图片隐私线索，倾向匿名但需LLM确认")
+        return None, evidence  # 表示倾向匿名，但仍需 LLM 兜底
+    
+    # 无任何命中 => 交由 LLM 兜底
+    logging.debug("未发现明确的匿名信号，交由LLM判断")
+    return None, evidence
+
+
+def extract_all_text_content(grouped_messages: list) -> str:
+    """
+    提取所有文本内容用于安全检查
+    包括：文本消息、图片描述、文件名、forward消息中的文本等
+    """
+    text_parts = []
+    
+    def extract_from_messages(messages):
+        """递归提取消息中的文本内容"""
+        for item in messages:
+            if "message" in item and isinstance(item["message"], list):
+                for sub in item["message"]:
+                    msg_type = sub.get("type", "")
+                    
+                    if msg_type == "text":
+                        text_content = sub.get("data", {}).get("text", "").strip()
+                        if text_content:
+                            text_parts.append(text_content)
+                    
+                    elif msg_type == "image":
+                        # 包含图片描述（如果有）
+                        if "describe" in sub:
+                            desc = sub["describe"].strip()
+                            if desc:
+                                text_parts.append(f"[图片描述: {desc}]")
+                    
+                    elif msg_type == "file":
+                        # 包含文件名
+                        file_name = sub.get("data", {}).get("name", "").strip()
+                        if file_name:
+                            text_parts.append(f"[文件: {file_name}]")
+                    
+                    elif msg_type == "json":
+                        # 包含json消息的title（如果已经被提取）
+                        title = sub.get("title", "")
+                        if title:
+                            text_parts.append(f"[分享: {title}]")
+                        else:
+                            # 如果没有title字段，尝试从原始data中提取
+                            try:
+                                json_data = sub.get("data", {}).get("data", "")
+                                if json_data:
+                                    parsed_json = json.loads(json_data)
+                                    if "meta" in parsed_json and "news" in parsed_json["meta"]:
+                                        extracted_title = parsed_json["meta"]["news"].get("title", "")
+                                        if extracted_title:
+                                            text_parts.append(f"[分享: {extracted_title}]")
+                                        else:
+                                            text_parts.append("[分享内容]")
+                                    else:
+                                        prompt = sub.get("data", {}).get("prompt", "")
+                                        if prompt:
+                                            text_parts.append(f"[分享: {prompt}]")
+                                        else:
+                                            text_parts.append("[分享内容]")
+                                else:
+                                    prompt = sub.get("data", {}).get("prompt", "")
+                                    if prompt:
+                                        text_parts.append(f"[分享: {prompt}]")
+                                    else:
+                                        text_parts.append("[分享内容]")
+                            except (json.JSONDecodeError, KeyError, TypeError):
+                                text_parts.append("[分享内容]")
+                    
+                    elif msg_type == "forward":
+                        # 递归处理forward消息中的内容
+                        forward_data = sub.get("data", {})
+                        if "content" in forward_data and isinstance(forward_data["content"], list):
+                            extract_from_messages(forward_data["content"])
+                        elif "messages" in forward_data and isinstance(forward_data["messages"], list):
+                            extract_from_messages(forward_data["messages"])
+    
+    extract_from_messages(grouped_messages)
+    
+    # 合并所有文本，用换行分隔
+    combined_text = "\n".join(text_parts)
+    return combined_text.strip()
+
+
+def llm_text_safety_check(text_content: str, config: dict) -> dict:
+    """
+    使用LLM进行文本安全检查
+    返回: {"safe": bool, "reason": str, "severity": str}
+    """
+    if not text_content or not text_content.strip():
+        return {"safe": True, "reason": "无文本内容", "severity": "low"}
+    
+    if not config:
+        logging.error("缺少配置参数")
+        return {"safe": True, "reason": "配置错误，默认安全", "severity": "low"}
+    
+    prompt = TEXT_SAFETY_PROMPT_TEMPLATE.format(text_content=text_content)
+    
+    try:
+        response = fetch_response_simple(prompt, config)
+        if not response:
+            logging.warning("文本安全检查未获得响应，默认为安全")
+            return {"safe": True, "reason": "API无响应，默认安全", "severity": "low"}
+        
+        # 清理响应并解析JSON
+        cleaned_response = response.strip('```json\n').strip('\n```').strip()
+        result = json.loads(cleaned_response)
+        
+        # 验证和标准化结果
+        safe = result.get("safe", True)
+        if not isinstance(safe, bool):
+            safe = str(safe).lower() == "true"
+        
+        reason = result.get("reason", "")
+        if not isinstance(reason, str):
+            reason = "LLM判断"
+        
+        severity = result.get("severity", "low")
+        if severity not in ["low", "medium", "high"]:
+            severity = "low"
+        
+        final_result = {
+            "safe": safe,
+            "reason": reason,
+            "severity": severity
+        }
+        
+        logging.info(f"文本安全检查结果: safe={safe}, reason='{reason[:100]}', severity={severity}")
+        return final_result
+        
+    except json.JSONDecodeError as e:
+        logging.error(f"文本安全检查JSON解析失败: {e}")
+        logging.error(f"原始响应: {response}")
+        return {"safe": True, "reason": "解析错误，默认安全", "severity": "low"}
+    except Exception as e:
+        logging.error(f"文本安全检查异常: {e}")
+        return {"safe": True, "reason": "检查异常，默认安全", "severity": "low"}
+
+
+def simplify_for_llm(grouped_messages: list) -> dict:
+    """将分组消息简化为LLM可处理的简洁格式
+    返回格式: {"message_id": "content", ...}
+    """
+    simplified = {}
+    
+    for item in grouped_messages:
+        message_id = item.get("message_id", "")
+        if not message_id:
+            continue
+            
+        content_parts = []
+        
+        if "message" in item and isinstance(item["message"], list):
+            for sub in item["message"]:
+                msg_type = sub.get("type", "")
+                
+                if msg_type == "text":
+                    text_content = sub.get("data", {}).get("text", "")
+                    if text_content:
+                        content_parts.append(text_content)
+                        
+                elif msg_type == "image":
+                    # 优先使用描述，如果没有则使用文件名
+                    if "describe" in sub:
+                        content_parts.append(f"[图片内容]: {sub['describe']}")
+                    else:
+                        file_name = sub.get("data", {}).get("file", "")
+                        if file_name:
+                            content_parts.append(f"[图片内容]: {file_name}")
+                        else:
+                            content_parts.append("[图片内容]: 无描述")
+                            
+                elif msg_type == "file":
+                    file_name = sub.get("data", {}).get("name", "")
+                    if file_name:
+                        content_parts.append(f"[文件: {file_name}]")
+                    else:
+                        content_parts.append("[文件]")
+                        
+                elif msg_type == "forward":
+                    # 对于forward消息，提取其中的文本内容
+                    forward_content = extract_forward_text_content(sub)
+                    if forward_content:
+                        # 使用结构化格式存储转发内容
+                        content_parts.append({
+                            "[转发内容]": forward_content
+                        })
+                    else:
+                        content_parts.append("[转发聊天记录]")
+                        
+                elif msg_type == "video":
+                    file_name = sub.get("data", {}).get("file", "")
+                    if file_name:
+                        content_parts.append(f"[视频: {file_name}]")
+                    else:
+                        content_parts.append("[视频]")
+                        
+                elif msg_type == "audio":
+                    content_parts.append("[语音]")
+                    
+                elif msg_type == "json":
+                    # 检查是否已经被make_lm_sanitized_and_original处理过
+                    if "title" in sub:
+                        # 已经被处理过，直接使用title字段
+                        title = sub.get("title", "")
+                        if title and title != "[分享内容]":
+                            content_parts.append(f"[分享内容]: {title}")
+                        else:
+                            content_parts.append("[分享内容]: 无标题")
+                    else:
+                        # 未被处理过，使用原始的extract_json_title函数
+                        title = extract_json_title(sub)
+                        if title:
+                            content_parts.append(f"[分享内容]: {title}")
+                        else:
+                            content_parts.append("[分享内容]: 无标题")
+                        
+                elif msg_type == "poke":
+                    content_parts.append("[戳一戳]")
+                    
+                elif msg_type == "reply":
+                    # 回复消息，提取引用的文本
+                    reply_id = sub.get("data", {}).get("id", "")
+                    if reply_id:
+                        content_parts.append(f"[回复消息{reply_id}]")
+                    else:
+                        content_parts.append("[回复]")
+                        
+                else:
+                    content_parts.append(f"[{msg_type}消息]")
+        
+        # 合并所有内容部分
+        if content_parts:
+            # 检查是否包含结构化内容（如转发消息）
+            has_structured_content = any(isinstance(part, dict) for part in content_parts)
+            
+            if has_structured_content:
+                # 如果有结构化内容，创建混合格式
+                result_content = {}
+                text_parts = []
+                
+                for part in content_parts:
+                    if isinstance(part, dict):
+                        # 结构化内容直接添加
+                        result_content.update(part)
+                    else:
+                        # 普通文本内容收集到text_parts
+                        text_parts.append(part)
+                
+                # 如果有普通文本内容，添加到"文本内容"字段
+                if text_parts:
+                    result_content["文本内容"] = " ".join(text_parts)
+                
+                simplified[str(message_id)] = result_content
+            else:
+                # 纯文本内容，使用原来的格式
+                simplified[str(message_id)] = " ".join(content_parts)
+        else:
+            simplified[str(message_id)] = "[无内容]"
+    
+    return simplified
+
+
+def extract_forward_text_content(forward_msg: dict) -> list:
+    """从forward消息中提取文本内容，返回文本列表"""
+    content_parts = []
+    
+    def extract_from_content(content_list, depth=0):
+        """递归提取forward内容中的文本"""
+        if not isinstance(content_list, list) or depth > 3:  # 防止无限递归
+            return
+            
+        for item in content_list:
+            if not isinstance(item, dict):
+                continue
+                
+            if "message" in item and isinstance(item["message"], list):
+                for msg in item["message"]:
+                    if msg.get("type") == "text":
+                        text = msg.get("data", {}).get("text", "")
+                        if text:
+                            content_parts.append(text.strip())  # 保留完整文本，去除首尾空格
+                    elif msg.get("type") == "image":
+                        content_parts.append("[图片]")
+                    elif msg.get("type") == "forward":
+                        # 递归处理嵌套forward
+                        if depth < 3:
+                            extract_from_content(msg.get("data", {}).get("content", []), depth + 1)
+                            extract_from_content(msg.get("data", {}).get("messages", []), depth + 1)
+    
+    # 处理forward消息的content和messages字段
+    if "data" in forward_msg:
+        extract_from_content(forward_msg["data"].get("content", []))
+        extract_from_content(forward_msg["data"].get("messages", []))
+    
+    # 返回文本列表，过滤空字符串
+    return [text for text in content_parts if text.strip()]
+
+
+def extract_json_title(json_msg: dict) -> str:
+    """从json消息中提取标题"""
+    try:
+        if "data" in json_msg and "data" in json_msg["data"]:
+            json_data = json_msg["data"]["data"]
+            if isinstance(json_data, str):
+                parsed = json.loads(json_data)
+                if "meta" in parsed and "news" in parsed["meta"]:
+                    return parsed["meta"]["news"].get("title", "")
+                elif "meta" in parsed and "miniapp" in parsed["meta"]:
+                    return parsed["meta"]["miniapp"].get("title", "")
+                elif "meta" in parsed and "contact" in parsed["meta"]:
+                    return parsed["meta"]["contact"].get("nickname", "")
+        elif "data" in json_msg and "prompt" in json_msg["data"]:
+            return json_msg["data"]["prompt"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        pass
+    
+    return ""
+
+
+def llm_needpriv_fallback(text_content: str, config: dict) -> dict:
+    """
+    LLM兜底判断匿名需求
+    返回: {"needpriv": "true"/"false", "reason": "...", "confidence": 0.0~1.0}
+    """
+    prompt = LLM_PRIVACY_PROMPT_TEMPLATE.format(payload=text_content)
+
+    try:
+        response = fetch_response_simple(prompt, config)
+        if not response:
+            return {"needpriv": "false", "reason": "no-response", "confidence": 0.4}
+        
+        cleaned = response.strip('```json').strip('```').strip()
+        result = json.loads(cleaned)
+        
+        # 兜底健壮化
+        needpriv_val = str(result.get("needpriv", "")).lower().strip()
+        result["needpriv"] = "true" if needpriv_val == "true" else "false"
+        
+        conf = result.get("confidence")
+        if not isinstance(conf, (int, float)) or conf < 0 or conf > 1:
+            result["confidence"] = 0.5
+        
+        reason = result.get("reason", "")
+        if not isinstance(reason, str):
+            result["reason"] = "llm-judgment"
+        
+        logging.debug(f"LLM兜底判断: needpriv={result['needpriv']}, confidence={result['confidence']}, reason='{reason[:100]}'")
+        return result
+        
+    except json.JSONDecodeError as e:
+        logging.error(f"LLM兜底判断JSON解析失败: {e}")
+        return {"needpriv": "false", "reason": "parse-error", "confidence": 0.4}
+    except Exception as e:
+        logging.error(f"LLM兜底判断异常: {e}")
+        return {"needpriv": "false", "reason": "error", "confidence": 0.3}
+
+
+# 配置SSL和HTTP设置
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+ssl._create_default_https_context = ssl._create_unverified_context
 
 # 信号处理
 def signal_handler(signum, frame):
@@ -111,11 +761,18 @@ def read_config(file_path):
                 except ValueError as e:
                     logging.warning(f"配置文件第 {line_num} 行解析错误: {line}, 错误: {e}")
         
-        # 验证必要的配置项
-        required_keys = ['apikey', 'text_model', 'vision_model']
+        # 验证必要的配置项，并设置默认值
+        if 'text_model' not in config:
+            config['text_model'] = DEFAULT_TEXT_MODEL
+            logging.info(f"使用默认文本模型: {DEFAULT_TEXT_MODEL}")
+        if 'vision_model' not in config:
+            config['vision_model'] = DEFAULT_VISION_MODEL
+            logging.info(f"使用默认视觉模型: {DEFAULT_VISION_MODEL}")
+        
+        required_keys = ['apikey']
         missing_keys = [key for key in required_keys if key not in config]
         if missing_keys:
-            logging.warning(f"配置文件缺少必要项: {missing_keys}")
+            logging.error(f"配置文件缺少必要项: {missing_keys}")
         
         return config
     except Exception as e:
@@ -239,11 +896,11 @@ def compress_image(path, max_pixels, size_limit):
             fmt_hint = (img.format or "").upper()
             width, height = img.size
             pixels = width * height
-            logging.info(f"图片尺寸: {width}x{height}, 总像素: {pixels}, 模式: {img.mode}, 格式: {fmt_hint or 'N/A'}")
+            logging.debug(f"图片尺寸: {width}x{height}, 总像素: {pixels}, 模式: {img.mode}, 格式: {fmt_hint or 'N/A'}")
 
             # === Step 1: 降位深到 8bit（若需要） ===
             if _is_high_bitdepth(img):
-                logging.info("检测到高位深图像，转换到 8bit…")
+                logging.debug("检测到高位深图像，转换到 8bit…")
                 # 将所有情况统一转换到 8bit 通道：
                 #   有 alpha => RGBA；否则 RGB 或 L
                 if "A" in img.getbands():
@@ -253,7 +910,7 @@ def compress_image(path, max_pixels, size_limit):
                     img = img.convert("RGB" if len(img.getbands()) >= 3 else "L")
                 _save_with_format(img, path, fmt_hint)
                 new_size = os.path.getsize(path)
-                logging.info(f"位深降到 8bit 后大小: {new_size/1024/1024:.2f}MB")
+                logging.debug(f"位深降到 8bit 后大小: {new_size/1024/1024:.2f}MB")
 
             # 读取最新文件/尺寸状态
             with Image.open(path) as img2:
@@ -264,25 +921,25 @@ def compress_image(path, max_pixels, size_limit):
 
             # 若位深处理后已满足大小要求，并且像素也不超上限，直接返回
             if file_size <= size_limit and pixels <= max_pixels:
-                logging.info("已满足大小与像素限制，结束。")
+                logging.debug("已满足大小与像素限制，结束。")
                 return
 
             # === Step 2a: 若像素数超上限，按上限等比缩放 ===
             if pixels > max_pixels:
                 ratio = (max_pixels / float(pixels)) ** 0.5
                 new_w, new_h = max(1, int(width * ratio)), max(1, int(height * ratio))
-                logging.info(f"像素超过上限，调整至: {new_w}x{new_h}")
+                logging.debug(f"像素超过上限，调整至: {new_w}x{new_h}")
                 with Image.open(path) as img2:
                     img2 = img2.resize((new_w, new_h), Image.Resampling.LANCZOS)
                     _save_with_format(img2, path, fmt_hint, quality=85)
                 file_size = os.path.getsize(path)
                 width, height = new_w, new_h
                 pixels = width * height
-                logging.info(f"像素降至上限后大小: {file_size/1024/1024:.2f}MB")
+                logging.debug(f"像素降至上限后大小: {file_size/1024/1024:.2f}MB")
 
             # === Step 2b: 若仍超 size_limit，再按需降低分辨率（并结合格式化参数） ===
             if file_size > size_limit:
-                logging.info(f"图片大小({file_size/1024/1024:.2f}MB)超过限制({size_limit/1024/1024:.2f}MB)，开始降分辨率/有损压缩…")
+                logging.debug(f"图片大小({file_size/1024/1024:.2f}MB)超过限制({size_limit/1024/1024:.2f}MB)，开始降分辨率/有损压缩…")
 
                 # 为了减少循环次数，按理论比例一次性给出初始缩放因子（再细调）
                 # （体积大约与像素数近似线性，先按 sqrt 比例缩）
@@ -306,15 +963,15 @@ def compress_image(path, max_pixels, size_limit):
                         # PNG 路线（无损）：先按最大压缩保存
                         _save_with_format(img2, path, "PNG")
                         file_size = os.path.getsize(path)
-                        logging.info(f"PNG 最大压缩后大小: {file_size/1024/1024:.2f}MB")
+                        logging.debug(f"PNG 最大压缩后大小: {file_size/1024/1024:.2f}MB")
 
                         # 若仍然很大（截图/大色彩图常见），尝试调色板 256 色（仍是 PNG，但更小）
                         if file_size > size_limit:
-                            logging.info("尝试 PNG 调色板(256色)以进一步压缩…")
+                            logging.debug("尝试 PNG 调色板(256色)以进一步压缩…")
                             pal = img2.convert("P", palette=Image.ADAPTIVE, colors=256)
                             _save_with_format(pal, path, "PNG")
                             file_size = os.path.getsize(path)
-                            logging.info(f"PNG 调色板后大小: {file_size/1024/1024:.2f}MB")
+                            logging.debug(f"PNG 调色板后大小: {file_size/1024/1024:.2f}MB")
 
                         # 若还是超限，继续等比缩小，直到达标或边长到阈值
                         while file_size > size_limit and min(img2.size) > 512:
@@ -327,7 +984,7 @@ def compress_image(path, max_pixels, size_limit):
                                 pal = img2.convert("P", palette=Image.ADAPTIVE, colors=256)
                                 _save_with_format(pal, path, "PNG")
                             file_size = os.path.getsize(path)
-                            logging.info(f"继续降分辨率到 {nw}x{nh}，当前大小: {file_size/1024/1024:.2f}MB")
+                            logging.debug(f"继续降分辨率到 {nw}x{nh}，当前大小: {file_size/1024/1024:.2f}MB")
 
         logging.info("图片压缩流程完成。")
     except UnidentifiedImageError:
@@ -359,15 +1016,7 @@ def process_image_safety_and_description(path, model, api_key):
         'role': 'user',
         'content': [
             {'image': 'file://' + os.path.abspath(path)},
-            {'text': '''请分析这张图片并回答以下两个问题：
-
-1. 安全性检查：这张图片是否含有暴力、血腥、色情、政治敏感，人生攻击或其他敏感内容(发到国内平台，被举报后会导致处罚的都算)？如果安全请回答"safe"，否则回答"unsafe"。
-
-2. 图片描述：请详细描述这张图片的内容，包括图片中的主要元素、场景、颜色、风格等。描述要准确、详细，但不要过于冗长。
-
-请按以下格式回答：
-安全性：[safe/unsafe]
-描述：[详细描述内容]'''}
+            {'text': IMAGE_ANALYSIS_PROMPT}
         ]
     }]
     
@@ -560,13 +1209,13 @@ def process_images_comprehensive(tag, config, input_data=None):
         return
     
     try:
-        max_pixels = int(config.get('vision_pixel_limit', 12000000))
-        size_limit = float(config.get('vision_size_limit_mb', 9.5)) * 1024 * 1024
+        max_pixels = int(config.get('vision_pixel_limit', DEFAULT_MAX_PIXELS))
+        size_limit = float(config.get('vision_size_limit_mb', DEFAULT_SIZE_LIMIT_MB)) * 1024 * 1024
     except (ValueError, TypeError) as e:
         logging.error(f"配置参数解析错误: {e}")
         return
     
-    model = config.get('vision_model', 'qwen-vl-max-latest')
+    model = config.get('vision_model', DEFAULT_VISION_MODEL)
     dashscope.api_key = api_key
 
     # 读取当前数据库中的JSON数据
@@ -577,17 +1226,17 @@ def process_images_comprehensive(tag, config, input_data=None):
             if input_data is not None:
                 data = input_data
                 messages = data.get('messages', [])
-                logging.info("使用传入的input_data")
+                logging.debug("使用传入的input_data")
             else:
                 # 首先尝试从preprocess表的AfterLM字段获取数据
                 row = cur.execute('SELECT AfterLM FROM preprocess WHERE tag=?', (tag,)).fetchone()
                 if row and row[0] is not None:
                     data = json.loads(row[0])
                     messages = data.get('messages', [])
-                    logging.info("从AfterLM字段获取消息数据")
+                    logging.debug("从AfterLM字段获取消息数据")
                 else:
                     # 如果AfterLM字段为空，从sender表的rawmsg字段获取原始数据
-                    logging.info("AfterLM字段为空，尝试从sender表获取原始消息数据")
+                    logging.debug("AfterLM字段为空，尝试从sender表获取原始消息数据")
                     sender_row = cur.execute('''
                         SELECT s.rawmsg 
                         FROM sender s 
@@ -603,7 +1252,7 @@ def process_images_comprehensive(tag, config, input_data=None):
                     # 构造data结构以保持一致性
                     data = {"messages": raw_messages}
                     messages = raw_messages
-                    logging.info("从sender.rawmsg字段获取原始消息数据")
+                    logging.debug("从sender.rawmsg字段获取原始消息数据")
             
             # 为了图片处理，我们需要访问完整的data字段，所以使用原始数据
             # 而不是经过make_lm_sanitized_and_original处理的数据
@@ -629,7 +1278,7 @@ def process_images_comprehensive(tag, config, input_data=None):
                             # 检查sub_type，只处理sub_type为0的图片
                             sub_type = msg.get('data', {}).get('sub_type', 0)
                             if sub_type != 0:
-                                logging.info(f"跳过处理sub_type={sub_type}的图片，只处理sub_type=0的图片")
+                                logging.debug(f"跳过处理sub_type={sub_type}的图片，只处理sub_type=0的图片")
                                 continue
                             
                             image_count += 1
@@ -720,7 +1369,7 @@ def process_images_comprehensive(tag, config, input_data=None):
                                     # 将描述添加到消息的顶层，这样大模型可以看到
                                     msg['describe'] = result['description']
                                     description_count += 1
-                                    logging.info(f"[线程{result['thread_id']}] 成功为图片 {file_name} 添加描述")
+                                    logging.debug(f"[线程{result['thread_id']}] 成功为图片 {file_name} 添加描述")
                                 else:
                                     logging.warning(f"图片 {file_name} 描述生成失败")
                                     error_count += 1
@@ -941,13 +1590,13 @@ def process_images_comprehensive(tag, config, input_data=None):
 #      Flexible per-type redact & restore  #
 ############################################
 
-# 支持更复杂的“按消息类型字段处理”配置：
+# 支持更复杂的"按消息类型字段处理"配置：
 # - remove_in_data:     从 msg.data 中删除
 # - remove_msg:         从 msg 顶层(非data)删除
 # - remove_event:       从事件(item)顶层删除（与类型无关的通用字段放在 global_event_rules）
 # - hide_from_LM_only:  仅用于发给LM时隐藏，最终输出时会恢复（或保留）
 #
-# 说明：hide_from_LM_only 使用“点路径”语法，例如：
+# 说明：hide_from_LM_only 使用"点路径"语法，例如：
 #   - 'data.file'      指向 msg.data.file
 #   - 'summary'        指向 msg.summary（如果存在）
 #   - 事件(item)级请使用 global_event_rules.hide_from_LM_only
@@ -1089,8 +1738,12 @@ def clean_forward_content(content_list):
                 else:
                     cleaned_item["message"].append(msg)
         
-        if cleaned_item:  # 只有当有message字段时才添加
+        # 只有当有message字段时才添加，但也要检查message是否为空
+        if cleaned_item and "message" in cleaned_item and cleaned_item["message"]:
             cleaned_content.append(cleaned_item)
+        elif cleaned_item and "message" in cleaned_item:
+            # 如果message字段存在但为空，记录警告
+            logging.warning(f"发现空的message字段: {cleaned_item}")
     
     return cleaned_content
 
@@ -1104,6 +1757,7 @@ def make_lm_sanitized_and_original(data_root):
     """
     origin_messages = copy.deepcopy(data_root.get("messages", []))
     lm_messages = copy.deepcopy(origin_messages)
+    logging.debug(f"make_lm_sanitized_and_original: 原始消息数量: {len(origin_messages)}")
 
     # 事件级字段（对LM删除 remove_event + hide_from_LM_only）
     for item in lm_messages:
@@ -1123,6 +1777,61 @@ def make_lm_sanitized_and_original(data_root):
                     elif "messages" in msg["data"]:
                         msg["data"]["messages"] = clean_forward_content(msg["data"]["messages"])
 
+                # 对json类型消息进行特殊处理：提取title字段
+                if mtype == "json":
+                    logging.debug(f"处理json类型消息: {json.dumps(msg, ensure_ascii=False)[:200]}...")
+                    if "data" in msg:
+                        try:
+                            json_data = msg["data"].get("data", "")
+                            if json_data:
+                                parsed_json = json.loads(json_data)
+                                # 尝试提取title字段 - 使用extract_json_title函数的逻辑
+                                title = ""
+                                if "meta" in parsed_json and "news" in parsed_json["meta"]:
+                                    title = parsed_json["meta"]["news"].get("title", "")
+                                elif "meta" in parsed_json and "miniapp" in parsed_json["meta"]:
+                                    title = parsed_json["meta"]["miniapp"].get("title", "")
+                                elif "meta" in parsed_json and "contact" in parsed_json["meta"]:
+                                    title = parsed_json["meta"]["contact"].get("nickname", "")
+                                
+                                if title:
+                                    # 替换原有的data字段为title字段
+                                    msg["title"] = title
+                                    msg.pop("data", None)
+                                    logging.debug(f"提取json消息title: {title}")
+                                else:
+                                    # 如果没有从meta中提取到title，尝试使用prompt字段
+                                    prompt = msg["data"].get("prompt", "")
+                                    if prompt:
+                                        msg["title"] = prompt
+                                        msg.pop("data", None)
+                                        logging.debug(f"提取json消息prompt: {prompt}")
+                                    else:
+                                        msg["title"] = "[分享内容]"
+                                        msg.pop("data", None)
+                                        logging.debug("json消息无法提取标题，使用默认值")
+                            else:
+                                # 如果没有data.data字段，尝试使用prompt字段
+                                prompt = msg["data"].get("prompt", "")
+                                if prompt:
+                                    msg["title"] = prompt
+                                    msg.pop("data", None)
+                                else:
+                                    msg["title"] = "[分享内容]"
+                                    msg.pop("data", None)
+                        except (json.JSONDecodeError, KeyError, TypeError) as e:
+                            logging.warning(f"解析json消息失败: {e}")
+                            # 如果解析失败，尝试使用prompt字段作为备选
+                            prompt = msg["data"].get("prompt", "")
+                            if prompt:
+                                msg["title"] = prompt
+                                msg.pop("data", None)
+                            else:
+                                msg["title"] = "[分享内容]"
+                                msg.pop("data", None)
+                    else:
+                        logging.warning(f"json消息没有data字段: {json.dumps(msg, ensure_ascii=False)}")
+
                 # msg 顶层删除
                 _remove_many(msg, rules.get('remove_msg', []))
                 _remove_many(msg, rules.get('hide_from_LM_only', []))  # 对LM隐藏
@@ -1131,6 +1840,7 @@ def make_lm_sanitized_and_original(data_root):
                 if isinstance(msg.get("data"), dict):
                     _remove_many(msg, [f"data.{k}" for k in rules.get('remove_in_data', [])])
 
+    logging.debug(f"make_lm_sanitized_and_original: 处理后消息数量: lm_messages={len(lm_messages)}, origin_messages={len(origin_messages)}")
     return lm_messages, origin_messages
 
 
@@ -1169,8 +1879,8 @@ def finalize_item_for_output(item_origin):
 
 
 @retry_on_exception(max_retries=2, exceptions=(Exception,))
-def fetch_response_in_parts(prompt, config, max_rounds=5):
-    """分多轮流式获取大模型响应，拼接完整输出"""
+def fetch_response_simple(prompt, config):
+    """简单的单轮调用大模型获取响应"""
     if not prompt or not config:
         logging.error("缺少必要参数: prompt 或 config")
         return ""
@@ -1178,105 +1888,149 @@ def fetch_response_in_parts(prompt, config, max_rounds=5):
     messages = [{'role': 'system', 'content': '你是一个校园墙投稿管理员'},
                 {'role': 'user', 'content': prompt}]
 
-    # Debug输出：显示发送给文本模型的输入，用户消息显示完整的
+    # Debug输出：显示发送给文本模型的输入
     logging.debug(f"发送给文本模型的输入:")
-    logging.debug(f"  模型: {config.get('text_model', 'qwen-plus-latest')}")
+    logging.debug(f"  模型: {config.get('text_model', DEFAULT_TEXT_MODEL)}")
     logging.debug(f"  消息数量: {len(messages)}")
     logging.debug(f"  系统消息: {messages[0]['content']}")
     logging.debug(f"  用户消息长度: {len(messages[1]['content'])} 字符")
     logging.debug(f"  用户消息完整内容: {messages[1]['content']}")
 
-    full_response = ""
-    round_count = 0
-    is_complete = False
-    previous_output = ""
-
-    while not is_complete and round_count < max_rounds:
+    try:
         seed = 1354
-        logging.info(f"Round {round_count + 1} - Using seed: {seed}")
+        logging.info(f"调用大模型API - Using seed: {seed}")
 
-        try:
-            # 使用流式输出方式调用生成模型
-            responses = Generation.call(
-                model=config.get('text_model', 'qwen-plus-latest'),
-                messages=messages,
-                seed=seed,
-                result_format='message',
-                stream=True,
-                incremental_output=True,
-                max_tokens=8192,
-                temperature=0.50,
-                repetition_penalty=1.0,
-                timeout=API_TIMEOUT
-            )
+        # 使用流式输出方式调用生成模型
+        responses = Generation.call(
+            model=config.get('text_model', DEFAULT_TEXT_MODEL),
+            messages=messages,
+            seed=seed,
+            result_format='message',
+            stream=True,
+            incremental_output=True,
+            max_tokens=8192,
+            temperature=0.50,
+            repetition_penalty=1.0,
+            timeout=API_TIMEOUT
+        )
 
-            # 处理流式响应
-            output_content = ""
-            for response in responses:
-                # 只拼接内容，不访问status_code
-                chunk = response.output.get('choices', [])[0].get('message', {}).get('content', '')
-                output_content += chunk
-                sys.stdout.flush()
-            
-            # Debug输出：显示本轮接收到的内容
-            logging.debug(f"Round {round_count + 1} 接收到的内容长度: {len(output_content)} 字符")
-            logging.debug(f"Round {round_count + 1} 接收到的内容: {output_content}")
+        # 处理流式响应
+        output_content = ""
+        for response in responses:
+            # 只拼接内容，不访问status_code
+            chunk = response.output.get('choices', [])[0].get('message', {}).get('content', '')
+            output_content += chunk
+            sys.stdout.flush()
+        
+        # Debug输出：显示接收到的内容
+        logging.debug(f"接收到的内容长度: {len(output_content)} 字符")
+        logging.debug(f"接收到的内容: {output_content}")
+        logging.info("模型响应完成")
+        
+        return output_content
                 
-        except Exception as e:
-            error_msg = str(e).lower()
-            if 'ssl' in error_msg or 'connection' in error_msg or 'timeout' in error_msg:
-                logging.warning(f"Round {round_count + 1} 网络错误，尝试重试: {e}")
-                if round_count < max_rounds - 1:  # 如果不是最后一轮，继续重试
-                    time.sleep(2)  # 等待2秒后重试
-                    continue
-                else:
-                    logging.error(f"在 {max_rounds} 轮后仍然遇到网络错误: {e}")
-                    break
-            else:
-                logging.error(f"API调用错误: {e}")
-                break
-
-        if previous_output:
-            # 获取上一次输出的最后100个字符
-            overlap_content = previous_output[-100:]
-            # 在当前输出的前500字符中查找重叠部分
-            start_index = output_content[:500].find(overlap_content)
-            if start_index != -1:
-                # 如果找到，去除重叠部分
-                output_content = output_content[start_index + len(overlap_content):]
-                logging.debug(f"Round {round_count + 1} 去除重叠内容后长度: {len(output_content)} 字符")
-
-        # 更新完整响应
-        full_response += output_content
-        previous_output = output_content
-
-        # 检查输出是否以结束标志'```'结尾
-        if output_content.endswith('```'):
-            logging.info("响应完成!")
-            is_complete = True
+    except Exception as e:
+        error_msg = str(e).lower()
+        if 'ssl' in error_msg or 'connection' in error_msg or 'timeout' in error_msg:
+            logging.error(f"网络错误: {e}")
         else:
-            # 截断最后100字符后加入messages，防止重复
-            truncated_output = output_content[:-100] if len(output_content) > 100 else output_content
-            messages.append({
-                'role': Role.ASSISTANT,
-                'content': truncated_output
-            })
-            # 提示模型继续输出，不要重复内容
-            continue_prompt = '接着上次停下的地方继续输出，不要重复之前的内容，不要重复sender和needpriv等内容，不要在开头重复一遍```json {"time": },{"message": [{"type": ,"data": {，不要在开头重复任何格式内容，直接接着上次结束的那个字继续,但是如果json已经到达末尾，请用\n```结束输出'
-            messages.append({'role': Role.USER, 'content': continue_prompt})
-            
-            # Debug输出：显示继续提示
-            logging.debug(f"Round {round_count + 1} 添加继续提示: {continue_prompt}")
-        round_count += 1
+            logging.error(f"API调用错误: {e}")
+        raise
 
-    if not is_complete:
-        logging.warning(f"在 {max_rounds} 轮后仍未完成响应")
+
+@retry_on_exception(max_retries=2, exceptions=(Exception,))
+def judge_privacy_and_safety(grouped_messages, config):
+    """
+    对分好组的消息进行隐私和安全判断
+    使用"规则优先 + LLM 兜底 + 冲突仲裁"策略
+    """
+    if not grouped_messages:
+        logging.error(f"缺少必要参数: grouped_messages 为空或None, 类型: {type(grouped_messages)}, 长度: {len(grouped_messages) if isinstance(grouped_messages, (list, dict)) else 'N/A'}")
+        return "false", "true"  # 默认值：不需要匿名，安全
     
-    # Debug输出：显示最终完整响应
-    logging.debug(f"文本模型最终完整响应长度: {len(full_response)} 字符")
-    logging.debug(f"文本模型最终完整响应: {full_response}")
+    if not config:
+        logging.error(f"缺少必要参数: config 为空或None, 类型: {type(config)}")
+        return "false", "true"  # 默认值：不需要匿名，安全
     
-    return full_response
+    logging.info("开始进行隐私和安全判断...")
+    
+    # === 第一步：本地规则优先判断 needpriv ===
+    rule_result, evidence = rule_needpriv_vote(grouped_messages)
+    
+    needpriv_reason = ""
+    if rule_result is True:
+        needpriv = "true"
+        needpriv_reason = "local-rule: positive signal"
+        if evidence.get("positive"):
+            hit = evidence["positive"][0]  # 取最近的命中
+            needpriv_reason += f" | hit: '{hit['pattern']}' in '{hit['text'][:50]}...'"
+        logging.info(f"规则判定：需要匿名 - {needpriv_reason}")
+        
+    elif rule_result is False:
+        needpriv = "false"
+        needpriv_reason = "local-rule: negative signal"
+        if evidence.get("negative"):
+            hit = evidence["negative"][0]  # 取最近的命中
+            needpriv_reason += f" | hit: '{hit['pattern']}' in '{hit['text'][:50]}...'"
+        logging.info(f"规则判定：不需要匿名 - {needpriv_reason}")
+        
+    else:
+        # === 不确定或仅弱倾向 -> 调用 LLM 兜底 ===
+        logging.info("规则未能明确判定，调用LLM兜底...")
+        all_text_content = extract_all_text_content(grouped_messages)
+        llm_result = llm_needpriv_fallback(all_text_content, config)
+        
+        needpriv = llm_result.get("needpriv", "false")
+        needpriv_reason = f"llm-fallback: {llm_result.get('reason', '')}, conf={llm_result.get('confidence', 0)}"
+        
+        # === 图片隐私弱信号加权 ===
+        if evidence.get("image_hits") and llm_result.get("confidence", 0) < 0.6:
+            needpriv = "true"
+            needpriv_reason += f" | boosted-by-image-privacy-signal (hits: {len(evidence['image_hits'])})"
+            logging.info(f"LLM低置信度({llm_result.get('confidence', 0)})，由图片隐私信号提升为匿名")
+        
+        logging.info(f"LLM兜底判定：needpriv={needpriv} - {needpriv_reason}")
+    
+    # === 第二步：安全性判断（safemsg）===
+    # 使用LLM进行文本安全检查
+    safemsg = "true"  # 默认安全
+    safemsg_reason = "default-safe"
+    
+    # 提取所有文本内容
+    all_text_content = extract_all_text_content(grouped_messages)
+    
+    if all_text_content:
+        logging.info("开始LLM文本安全检查...")
+        safety_result = llm_text_safety_check(all_text_content, config)
+        
+        if not safety_result.get("safe", True):
+            safemsg = "false"
+            safemsg_reason = f"LLM判定不安全: {safety_result.get('reason', '')}, 严重程度: {safety_result.get('severity', 'unknown')}"
+            logging.warning(f"LLM判定文本内容不安全: {safety_result}")
+        else:
+            safemsg_reason = f"LLM判定安全: {safety_result.get('reason', '')}"
+            logging.info(f"LLM判定文本内容安全: {safety_result.get('reason', '')}")
+    else:
+        safemsg_reason = "无文本内容，默认安全"
+        logging.debug("无文本内容可检查，保持默认安全状态")
+    
+    # 记录判定依据（可选：用于调试和审计）
+    judgment_log = {
+        "needpriv": needpriv,
+        "needpriv_reason": needpriv_reason,
+        "safemsg": safemsg,
+        "safemsg_reason": safemsg_reason,
+        "evidence": {
+            "positive_hits": len(evidence.get("positive", [])),
+            "negative_hits": len(evidence.get("negative", [])),
+            "image_privacy_hits": len(evidence.get("image_hits", []))
+        }
+    }
+    
+    logging.debug(f"判定详情: {json.dumps(judgment_log, ensure_ascii=False, indent=2)}")
+    logging.info(f"最终判定结果: needpriv={needpriv}, safemsg={safemsg}")
+    
+    return needpriv, safemsg
 
 
 @retry_on_exception(max_retries=3, exceptions=(sqlite3.Error,))
@@ -1301,13 +2055,7 @@ def save_to_sqlite(output_data, tag):
 
 def main():
     # 配置日志输出
-    logging.basicConfig(
-        level=logging.INFO,  # 改为DEBUG级别以显示debug输出
-        format='LMWork:%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),
-        ]
-    )
+    logging.basicConfig(**get_logging_config())
 
     try:
         # 验证命令行参数
@@ -1326,15 +2074,25 @@ def main():
         
         dashscope.api_key = config.get('apikey')
         
+        logging.info("读取config完成")
         # 读取输入数据
         try:
             data = json.load(sys.stdin)
+            logging.debug(data)
         except json.JSONDecodeError as e:
             logging.error(f"输入JSON解析错误: {e}")
             sys.exit(1)
         
+        
+
         # === 第一步：先处理图片（压缩、安全检查、描述生成） ===
         logging.info("第一步：开始处理图片（压缩、安全检查、描述生成）...")
+        
+        # 检查data的类型，如果是列表则转换为字典格式
+        if isinstance(data, list):
+            data = {"messages": data}
+            logging.debug("检测到输入数据是列表格式，已转换为字典格式")
+        
         process_images_comprehensive(tag, config, data)
         
         # === 第二步：重新读取处理后的数据（只在有图片处理的情况下） ===
@@ -1439,6 +2197,7 @@ def main():
         logging.info(f"原始数据中包含 {original_forward_count} 个forward消息")
         
         lm_messages, origin_messages = make_lm_sanitized_and_original(data)
+        logging.debug(f"make_lm_sanitized_and_original 返回: lm_messages 长度={len(lm_messages)}, origin_messages 长度={len(origin_messages)}")
 
         # 调试：检查forward消息是否被保留
         forward_count = 0
@@ -1451,73 +2210,23 @@ def main():
         
         logging.info(f"处理后的消息中包含 {forward_count} 个forward消息")
 
-        lm_input = {
-            "notregular": data.get("notregular"),
-            "messages": lm_messages
-        }
-
-        input_content = json.dumps(lm_input, ensure_ascii=False, indent=4)
+        # 使用新的简化格式
+        simplified_input = simplify_for_llm(lm_messages)
+        
+        input_content = json.dumps(simplified_input, ensure_ascii=False, separators=(',', ':'))
         timenow = time.time()
 
         logging.info(f"输入内容长度: {len(input_content)} 字符")
         
         # 构造prompt，详细说明分组和输出要求
-        prompt = f"""当前时间 {timenow}
-    以下内容是一组按时间顺序排列的校园墙投稿聊天记录：
+        prompt = MAIN_GROUPING_PROMPT_TEMPLATE.format(
+            timenow=timenow,
+            input_content=input_content
+        )
 
-    {input_content}
-
-    请根据以下标准，提取出这些消息中属于**最后一组投稿**的信息：
-
-    ### 分组标准
-    - 通常以关键词"在吗"、"投稿"、"墙"等开始，但这些关键词可能出现在中途或根本不出现。
-    - 属于同一组投稿的消息，时间间隔一般较近（通常小于 600 秒），但也存在例外。
-    - 投稿内容可能包含文本、图片（image）、视频（video）、文件（file）、戳一戳（poke）、合并转发的聊天记录（forward）等多种类型。
-    - 大多数情况下该记录只包含一组投稿，这种情况下认为所有消息都在组中，偶尔可能有多组，需要你自己判断。
-    - 信息只可能包含多个完整的投稿，户可能出现半个投稿+一个投稿的情况，如果真的出现了，说明你判断错误，前面那个"半个投稿"，是后面投稿的一部分。
-
-    ### 你需要给出的判断
-
-    - `needpriv`（是否需要匿名）  
-    - 如果信息中明确表达"匿名"意图或使用谐音字（如："匿"、"腻"、"拟"、"逆"、"🐎"、"🐴"、"马" 等），则为 `true`。  
-    - 当信息仅包含单个含义模糊的字或 emoji 时，也应考虑匿名的可能性。  
-    - 否则为 `false`。
-    - 如果用户明确说了不匿(也可能是不腻，不码，不马之类的谐音内容)，那么一定为`false`
-
-    - `safemsg`（投稿是否安全）  
-    - 投稿若包含攻击性言论、辱骂内容、敏感政治信息，应判定为 `false`。  
-    - 否则为 `true`。
-
-    - `isover`（投稿是否完整）  
-    - 若投稿者明确表示"发完了"、"没了"、"完毕"等；或投稿语义完整且最后一条消息距离当前时间较远，则为 `true`。  
-    - 若存在"没发完"之类的未结束迹象，或最后消息距当前时间较近且不明确，则为 `false`。
-
-    - `notregular`（投稿是否异常）  
-    - 若投稿者明确表示"不合常规"或你主观判断此内容异常，则为 `true`。  
-    - 否则为 `false`。
-
-    ### 输出格式
-
-    严格按照下面的 JSON 格式输出，仅填写最后一组投稿的 `message_id`，不要输出任何额外的文字或说明：
-
-    ```json
-    {{
-    "needpriv": "true" 或 "false",
-    "safemsg": "true" 或 "false",
-    "isover": "true" 或 "false",
-    "notregular": "true" 或 "false",
-    "messages": [
-        "message_id1",
-        "message_id2",
-        ...
-    ]
-    }}
-    ```
-    """
-
-        # 使用流式传输获取模型响应
-        logging.info("第二步：开始调用大模型API...")
-        final_response = fetch_response_in_parts(prompt, config)
+        # 使用简单的单轮调用获取模型响应
+        logging.info("第二步：开始调用大模型API进行分组...")
+        final_response = fetch_response_simple(prompt, config)
         
         if not final_response:
             logging.error("未获得有效的模型响应")
@@ -1530,18 +2239,55 @@ def main():
         try:
             # 去除markdown格式并加载JSON内容
             cleaned_response = final_response.strip('```json\n').strip('\n```')
+            logging.debug(f"清理后的响应内容: {cleaned_response[:500]}...")
             final_response_json = json.loads(cleaned_response)
+            logging.debug(f"解析后的JSON结构: {json.dumps(final_response_json, ensure_ascii=False, indent=2)}")
             
             # 以原始消息为基准恢复 + 按规则裁剪（保留 hide_from_LM_only）
+            logging.debug(f"origin_messages 长度: {len(origin_messages)}")
+            if origin_messages:
+                logging.debug(f"origin_messages 第一个元素: {json.dumps(origin_messages[0], ensure_ascii=False)[:200]}...")
+            logging.debug(f"final_response_json.get('messages', []) 长度: {len(final_response_json.get('messages', []))}")
+            logging.debug(f"final_response_json.get('messages', []) 内容: {final_response_json.get('messages', [])}")
+            
             origin_lookup = {msg["message_id"]: msg for msg in origin_messages}
+            logging.debug(f"origin_lookup 键数量: {len(origin_lookup)}")
+            if origin_lookup:
+                logging.debug(f"origin_lookup 的键: {list(origin_lookup.keys())[:5]}")
+            
             final_list = []
             for mid in final_response_json.get("messages", []):
-                if mid in origin_lookup:
-                    final_list.append(finalize_item_for_output(origin_lookup[mid]))
-                else:
-                    logging.warning(f"未找到消息ID: {mid}")
+                # 转换消息ID为整数类型，以匹配origin_lookup的键
+                try:
+                    mid_int = int(mid) if isinstance(mid, str) else mid
+                    if mid_int in origin_lookup:
+                        final_list.append(finalize_item_for_output(origin_lookup[mid_int]))
+                    else:
+                        logging.warning(f"未找到消息ID: {mid} (转换后: {mid_int})")
+                except (ValueError, TypeError) as e:
+                    logging.warning(f"无法转换消息ID {mid} 为整数: {e}")
             
+            logging.debug(f"final_list 长度: {len(final_list)}")
             final_response_json["messages"] = final_list
+            
+            # === 第三步：对分好组的消息再次调用模型判断 needpriv 和 safemsg ===
+            logging.info("第三步：开始调用大模型判断 needpriv 和 safemsg...")
+            logging.debug(f"调用 judge_privacy_and_safety 前，final_list 长度: {len(final_list)}")
+            logging.debug(f"调用 judge_privacy_and_safety 前，config 类型: {type(config)}")
+            if final_list:
+                logging.debug(f"final_list 第一个元素: {json.dumps(final_list[0], ensure_ascii=False)[:200]}...")
+            
+            # 如果 final_list 为空，尝试使用原始消息
+            messages_for_judgment = final_list
+            if not final_list and origin_messages:
+                logging.warning("final_list 为空，使用 origin_messages 进行判断")
+                messages_for_judgment = origin_messages
+            
+            needpriv, safemsg = judge_privacy_and_safety(messages_for_judgment, config)
+            
+            # 将判断结果添加到最终输出中
+            final_response_json["needpriv"] = needpriv
+            final_response_json["safemsg"] = safemsg
 
             output_data = json.dumps(final_response_json, ensure_ascii=False, indent=4)
             
@@ -1560,9 +2306,9 @@ def main():
             
             # 保存错误内容到文件
             try:
-                with open(output_file_path_error, 'w', encoding='utf-8') as errorfile:
+                with open(OUTPUT_FILE_PATH_ERROR, 'w', encoding='utf-8') as errorfile:
                     errorfile.write(final_response)
-                logging.info(f"错误的JSON已保存到: {output_file_path_error}")
+                logging.info(f"错误的JSON已保存到: {OUTPUT_FILE_PATH_ERROR}")
             except Exception as save_error:
                 logging.error(f"保存错误文件失败: {save_error}")
             
@@ -1577,5 +2323,175 @@ def main():
         sys.exit(1)
 
 
+def test_privacy_rules():
+    """测试隐私判定规则的准确性"""
+    test_cases = [
+        # 最简单的基础测试用例
+        {"messages": [{"message": [{"type": "text", "data": {"text": "匿名"}}]}], "expected": "true", "desc": "匿名（最基础）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "不匿"}}]}], "expected": "false", "desc": "不匿（简写）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "不腻"}}]}], "expected": "false", "desc": "不腻（谐音否定）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "匿"}}]}], "expected": "true", "desc": "匿（单字）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "腻"}}]}], "expected": "true", "desc": "腻（谐音单字）"},
+        
+        # 更多基础单字和简写测试
+        {"messages": [{"message": [{"type": "text", "data": {"text": "拟"}}]}], "expected": "true", "desc": "拟（谐音单字）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "逆"}}]}], "expected": "true", "desc": "逆（谐音单字）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "尼"}}]}], "expected": "true", "desc": "尼（谐音单字）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "不拟"}}]}], "expected": "false", "desc": "不拟（谐音否定）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "不逆"}}]}], "expected": "false", "desc": "不逆（谐音否定）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "不尼"}}]}], "expected": "false", "desc": "不尼（谐音否定）"},
+        
+        # 明确要匿名的案例
+        {"messages": [{"message": [{"type": "text", "data": {"text": "求打马发一下"}}]}], "expected": "true", "desc": "求打马"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "帮我匿名一下"}}]}], "expected": "true", "desc": "帮我匿名"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "别显示我的名字"}}]}], "expected": "true", "desc": "别显示名字"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "不要实名"}}]}], "expected": "true", "desc": "不要实名"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "代发"}}]}], "expected": "true", "desc": "代发"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "腻一下"}}]}], "expected": "true", "desc": "腻一下（谐音）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "🙈"}}]}], "expected": "true", "desc": "emoji表情"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "打马赛克"}}]}], "expected": "true", "desc": "打马赛克"},
+        
+        # 明确不匿名的案例
+        {"messages": [{"message": [{"type": "text", "data": {"text": "不匿名"}}]}], "expected": "false", "desc": "不匿名（完整）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "不匿名，直接发"}}]}], "expected": "false", "desc": "不匿名直接发"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "实名发布"}}]}], "expected": "false", "desc": "实名发布"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "可以挂我ID"}}]}], "expected": "false", "desc": "可以挂我ID"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "署名发布"}}]}], "expected": "false", "desc": "署名发布"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "不用打马"}}]}], "expected": "false", "desc": "不用打马"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "公开发布"}}]}], "expected": "false", "desc": "公开发布"},
+        
+        # 谐音变体测试
+        {"messages": [{"message": [{"type": "text", "data": {"text": "拟一下"}}]}], "expected": "true", "desc": "拟一下（谐音）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "逆名"}}]}], "expected": "true", "desc": "逆名（谐音）"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "尼一下"}}]}], "expected": "true", "desc": "尼一下（谐音）"},
+        
+        # 冲突和优先级测试
+        {"messages": [{"message": [{"type": "text", "data": {"text": "匿一下"}}, {"type": "text", "data": {"text": "算了不匿名"}}]}], "expected": "false", "desc": "冲突-最近优先"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "不匿名"}}, {"type": "text", "data": {"text": "还是匿一下吧"}}]}], "expected": "true", "desc": "冲突-最近优先2"},
+        {"messages": [{"message": [{"type": "text", "data": {"text": "匿"}}, {"type": "text", "data": {"text": "不腻"}}]}], "expected": "false", "desc": "匿vs不腻-最近优先"},
+        
+        # 图片隐私信号测试
+        {"messages": [{"message": [{"type": "image", "describe": "这是一张包含学号和姓名的学生证照片"}]}], "expected": "none", "desc": "图片隐私信号-需LLM"},
+        
+        # 安全内容测试（这些不会在单元测试中调用LLM，只验证文本提取）
+        {"messages": [{"message": [{"type": "text", "data": {"text": "今天天气很好"}}]}], "expected": "none", "desc": "普通文本提取测试"},
+    ]
+    
+    print("=== 开始测试隐私判定规则 ===")
+    passed = 0
+    total = len(test_cases)
+    
+    for i, case in enumerate(test_cases, 1):
+        try:
+            result, evidence = rule_needpriv_vote(case["messages"])
+            
+            if case["expected"] == "none":
+                # 期望交由LLM处理
+                success = result is None
+            else:
+                # 期望明确结果
+                expected_bool = case["expected"] == "true"
+                success = result == expected_bool
+            
+            status = "✓ PASS" if success else "✗ FAIL"
+            print(f"{i:2d}. {status} | {case['desc']:<20} | 期望: {case['expected']:<5} | 实际: {result}")
+            
+            if success:
+                passed += 1
+            else:
+                print(f"    证据: {evidence}")
+                
+        except Exception as e:
+            print(f"{i:2d}. ✗ ERROR | {case['desc']:<20} | 异常: {e}")
+    
+    print(f"\n=== 测试结果: {passed}/{total} 通过 ===")
+    return passed == total
+
+
+def test_text_extraction():
+    """测试文本内容提取功能"""
+    print("=== 开始测试文本内容提取功能 ===")
+    
+    test_cases = [
+        {
+            "messages": [{"message": [{"type": "text", "data": {"text": "这是一条普通文本"}}]}],
+            "expected_contains": ["这是一条普通文本"],
+            "desc": "简单文本提取"
+        },
+        {
+            "messages": [{"message": [
+                {"type": "text", "data": {"text": "文本1"}},
+                {"type": "image", "describe": "图片描述内容"},
+                {"type": "text", "data": {"text": "文本2"}}
+            ]}],
+            "expected_contains": ["文本1", "[图片描述: 图片描述内容]", "文本2"],
+            "desc": "混合内容提取"
+        },
+        {
+            "messages": [{"message": [{"type": "file", "data": {"name": "test.pdf"}}]}],
+            "expected_contains": ["[文件: test.pdf]"],
+            "desc": "文件名提取"
+        }
+    ]
+    
+    passed = 0
+    total = len(test_cases)
+    
+    for i, case in enumerate(test_cases, 1):
+        try:
+            result = extract_all_text_content(case["messages"])
+            
+            # 检查是否包含期望的内容
+            success = True
+            for expected in case["expected_contains"]:
+                if expected not in result:
+                    success = False
+                    break
+            
+            status = "✓ PASS" if success else "✗ FAIL"
+            print(f"{i:2d}. {status} | {case['desc']:<20}")
+            if not success:
+                print(f"    期望包含: {case['expected_contains']}")
+                print(f"    实际结果: '{result}'")
+            
+            if success:
+                passed += 1
+                
+        except Exception as e:
+            print(f"{i:2d}. ✗ ERROR | {case['desc']:<20} | 异常: {e}")
+    
+    print(f"\n=== 文本提取测试结果: {passed}/{total} 通过 ===")
+    return passed == total
+
+
 if __name__ == '__main__':
-    main()
+    # 检查是否是测试模式
+    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+        # 为测试模式也配置日志
+        logging.basicConfig(**get_logging_config())
+        logging.info("开始运行测试...")
+        
+        # 运行隐私规则测试
+        logging.info("开始运行隐私规则测试...")
+        privacy_result = test_privacy_rules()
+        logging.info("隐私规则测试完成")
+        
+        print()  # 空行分隔
+        
+        # 运行文本提取测试
+        logging.info("开始运行文本提取测试...")
+        extraction_result = test_text_extraction()
+        logging.info("文本提取测试完成")
+        
+        # 总结测试结果
+        print(f"\n=== 总体测试结果 ===")
+        print(f"隐私规则测试: {'通过' if privacy_result else '失败'}")
+        print(f"文本提取测试: {'通过' if extraction_result else '失败'}")
+        print(f"全部测试: {'✅ 全部通过' if privacy_result and extraction_result else '❌ 存在失败'}")
+        
+    elif len(sys.argv) > 1 and sys.argv[1] == "--test-text":
+        # 仅运行文本提取测试
+        logging.basicConfig(**get_logging_config())
+        test_text_extraction()
+    else:
+        main()

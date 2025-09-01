@@ -207,7 +207,7 @@ else
 
     # 安装所需的包
     echo "正在安装所需的 Python 包..."
-    pip install dashscope re101 bs4 httpx uvicorn fastapi pydantic requests pillow -i https://pypi.tuna.tsinghua.edu.cn/simple
+    pip install dashscope re101 bs4 httpx uvicorn fastapi pydantic requests regex pillow -i https://pypi.tuna.tsinghua.edu.cn/simple
     if [ $? -ne 0 ]; then
         echo "安装 Python 包失败."
         exit 1
