@@ -120,7 +120,8 @@ vision_model=qwen-vl-max-latest
 vision_pixel_limit=12000000
 vision_size_limit_mb=9.5
 at_unprived_sender=true
-friend_request_window_sec="300"'>> "oqqwall.config"
+friend_request_window_sec="300"
+force_chromium_no-sandbox="false"'>> "oqqwall.config"
     echo "已创建文件: oqqwall.config"
     echo "请参考wiki填写配置文件后再启动"
     exit 0
@@ -175,6 +176,7 @@ check_variable "vision_model" "qwen-vl-max-latest"
 check_variable "vision_pixel_limit" "12000000"
 check_variable "vision_size_limit_mb" "9.5"
 check_variable "friend_request_window_sec" "300"
+check_variable "force_chromium_no-sandbox" "false"
 
 
 # 尝试激活现有的虚拟环境
@@ -228,7 +230,8 @@ text_model=qwen-plus-latest
 vision_model=qwen-vl-max-latest
 vision_pixel_limit=12000000
 vision_size_limit_mb=9.5
-at_unprived_sender=true' >> "oqqwall.config"
+at_unprived_sender=true
+force_chromium_no-sandbox=false' >> "oqqwall.config"
     echo "已创建文件: oqqwall.config"
     echo "请参考wiki填写配置文件后再启动"
     exit 0
@@ -334,6 +337,7 @@ text_model=$(grep 'text_model' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 vision_model=$(grep 'vision_model' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 vision_pixel_limit=$(grep 'vision_pixel_limit' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 vision_size_limit_mb=$(grep 'vision_size_limit_mb' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+force_chromium_no_sandbox=$(grep 'force_chromium_no-sandbox' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 
 
 DIR="./getmsgserv/rawpost/"

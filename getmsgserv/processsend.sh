@@ -241,7 +241,9 @@ EOF
         resp=$(curl -s -F "file=@${img}" "$API_URL")
         # 有些接口返回数组，有些返回字符串；统一兼容
         content=$(echo "$resp" | jq -r '
-            .data.contents? //
+            .d
+            
+            ta.contents? //
             empty | (if type=="array" then join("\n") else . end)')
 
         # 若成功识别

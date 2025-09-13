@@ -11,6 +11,7 @@ flag=$2
 receiver=$(sqlite3 'cache/OQQWall.db' "SELECT receiver FROM preprocess WHERE tag = '$tag';")
 senderid=$(sqlite3 'cache/OQQWall.db' "SELECT senderid FROM preprocess WHERE tag = '$tag';")
 waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+force_chromium_no_sandbox=$(grep 'force_chromium_no-sandbox' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 if [[ $flag == nowaittime || $flag == randeronly ]]; then waittime=0; fi
 json_file="./AcountGroupcfg.json"
 group_info=$(jq -r --arg receiver "$receiver" '
@@ -131,6 +132,12 @@ COMMON_ARGS=(
     --allow-file-access-from-files 
         --print-to-pdf="$PDF_OUT"
     )
+
+# 根据配置决定是否添加 --no-sandbox 参数
+if [[ "$force_chromium_no_sandbox" == "true" ]]; then
+    COMMON_ARGS+=(--no-sandbox)
+    echo "Chromium 将使用 --no-sandbox 模式运行"
+fi
 
 # ---- 3. 执行 --------------------------------------------------------------
 "$CHROME_BIN" "${COMMON_ARGS[@]}" "$HTML_IN"
