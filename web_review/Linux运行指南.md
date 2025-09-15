@@ -1,19 +1,33 @@
-# OQQWall 网页端审核系统 - Linux 运行指南
+# OQQWall 网页审核面板 - Linux 部署指南
 
-## 🐧 Linux 系统运行步骤
+## 📋 系统概述
+
+OQQWall 网页审核面板是一个基于 Python 的现代化 Web 界面，用于管理校园墙投稿内容的审核流程。本指南将帮助您在 Linux 系统上部署和运行该系统。
+
+## 🚀 快速开始
+
+### 系统要求
+
+- **操作系统**: Linux (Ubuntu 18.04+, CentOS 7+, Debian 9+)
+- **Python**: 3.7 或更高版本
+- **内存**: 最少 512MB RAM
+- **磁盘**: 最少 100MB 可用空间
+- **网络**: 需要访问数据库和文件系统
 
 ### 1. 环境准备
 
 ```bash
-# 确保在项目根目录
+# 进入项目根目录
 cd /path/to/OQQWall
 
-# 检查 Python 版本（需要 Python 3.7+）
+# 检查 Python 版本
 python3 --version
+# 输出应显示 Python 3.7 或更高版本
 
-# 检查文件权限
-ls -la web_review.py
-chmod +x web_review.py
+# 检查项目结构
+ls -la web_review/
+ls -la cache/
+ls -la getmsgserv/processsend.sh
 ```
 
 ### 2. 依赖检查
@@ -26,17 +40,30 @@ ls -la getmsgserv/processsend.sh
 # 如果目录不存在，创建它们
 mkdir -p cache/prepost
 mkdir -p cache/picture
+
+# 检查数据库文件
+ls -la cache/OQQWall.db
+
+# 检查配置文件
+ls -la oqqwall.config
 ```
 
 ### 3. 基本运行
 
-#### 方法一：直接运行
+#### 方法一：直接运行（推荐用于测试）
+
 ```bash
-# 使用默认端口 8090
+# 进入 web_review 目录
+cd web_review/
+
+# 使用默认设置启动（端口 8090，监听所有接口）
 python3 web_review.py
 
 # 指定端口运行
 python3 web_review.py --port 8090
+
+# 仅本地访问
+python3 web_review.py --host 127.0.0.1 --port 8090
 
 # 后台运行
 nohup python3 web_review.py --port 8090 > web_review.log 2>&1 &
@@ -48,18 +75,20 @@ ps aux | grep web_review.py
 kill <进程ID>
 ```
 
-#### 方法二：使用演示脚本
-```bash
-# 给脚本执行权限
-chmod +x demo_web_review.py
+#### 方法二：使用启动脚本
 
-# 运行演示脚本
-python3 demo_web_review.py
+```bash
+# 给启动脚本执行权限
+chmod +x start_web_review.sh
+
+# 运行启动脚本
+./start_web_review.sh
 ```
 
-### 4. 系统服务运行（推荐）
+### 4. 系统服务运行（推荐用于生产环境）
 
 #### 创建 systemd 服务文件
+
 ```bash
 # 创建服务文件
 sudo nano /etc/systemd/system/oqqwall-web-review.service
@@ -68,16 +97,29 @@ sudo nano /etc/systemd/system/oqqwall-web-review.service
 服务文件内容：
 ```ini
 [Unit]
-Description=OQQWall Web Review System
+Description=OQQWall Web Review Panel
+Documentation=https://github.com/gfhdhytghd/OQQWall
 After=network.target
+Wants=network.target
 
 [Service]
 Type=simple
 User=your_username
-WorkingDirectory=/path/to/OQQWall
-ExecStart=/usr/bin/python3 /path/to/OQQWall/web_review.py --port 8090
+Group=your_group
+WorkingDirectory=/path/to/OQQWall/web_review
+ExecStart=/usr/bin/python3 /path/to/OQQWall/web_review/web_review.py --host 0.0.0.0 --port 8090
 Restart=always
 RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=oqqwall-web-review
+
+# 安全设置
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/path/to/OQQWall/cache
 
 [Install]
 WantedBy=multi-user.target
