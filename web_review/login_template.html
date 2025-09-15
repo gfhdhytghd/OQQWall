@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OQQWall 审核登录</title>
+  <style>
+    :root {
+      --primary: #6750A4;
+      --surface: #F7F2FA;
+      --card: #FFFFFF;
+      --text: #1C1B1F;
+      --muted: #49454F;
+      --error: #B3261E;
+      --shadow: 0 2px 12px rgba(0,0,0,.08);
+    }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "PingFang SC", "Microsoft Yahei", sans-serif;
+      background: var(--surface);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      width: min(92vw, 380px);
+      padding: 24px;
+    }
+    h1 { margin: 0 0 12px; font-size: 20px; font-weight: 700; }
+    p.sub { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+    .row { display: grid; gap: 6px; margin-bottom: 12px; }
+    label { font-size: 13px; color: var(--muted); }
+    input[type="text"], input[type="password"] {
+      padding: 10px 12px; border: 1px solid #d0cde1; border-radius: 12px; font-size: 15px;
+    }
+    .btn {
+      width: 100%; padding: 10px 14px; border: none; border-radius: 999px;
+      background: var(--primary); color: #fff; font-weight: 700; cursor: pointer;
+    }
+    .msg { color: var(--error); font-size: 13px; margin-bottom: 8px; }
+    .foot { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .foot code { background: #f2eefc; padding: 2px 6px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <form class="card" method="post" action="/login">
+    <h1>OQQWall 审核登录</h1>
+    <p class="sub">请登录后继续，权限按账户组隔离</p>
+    {msg}
+    <div class="row">
+      <label for="username">用户名</label>
+      <input id="username" name="username" type="text" required autocomplete="username" />
+    </div>
+    <div class="row">
+      <label for="password">密码</label>
+      <input id="password" name="password" type="password" required autocomplete="current-password" />
+    </div>
+    <button class="btn" type="submit">登录</button>
+    <div class="foot">
+      管理员账号在 <code>AcountGroupcfg.json</code> 中各账户组的 <code>admins</code> 配置，
+      支持明文或 <code>sha256:&lt;hex&gt;</code>。
+    </div>
+  </form>
+</body>
+</html>
+

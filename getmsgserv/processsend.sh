@@ -87,7 +87,7 @@ check_quick_reply_conflict() {
     local json_file="$3"
     
     # 定义所有审核指令
-    local audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "评论" "回复" "展示" "拉黑")
+    local audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "扩列" "查" "查成分" "评论" "回复" "展示" "拉黑")
     
     # 检查是否与审核指令冲突
     for audit_cmd in "${audit_commands[@]}"; do
@@ -225,7 +225,7 @@ EOF
     重渲染)
         getmsgserv/preprocess.sh $object randeronly
         ;;
-    扩列审查)
+    扩列审查|扩列|查|查成分)
         response=$(curl -s "http://127.0.0.1:$port/get_stranger_info?user_id=$senderid")
         # 使用 jq 提取 qqLevel
         qqLevel=$(echo "$response" | jq '.data.qqLevel')

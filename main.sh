@@ -86,6 +86,10 @@ elif [[ $1 == -rf ]]; then
   pgrep -f "python3 getmsgserv/serv.py" | xargs kill -15
   pgrep -f "python3 SendQzone/qzone-serv-pipe.py" | xargs kill -15
   pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" | xargs kill -15
+  # 关闭网页审核服务
+  if pgrep -f "python3 web_review/web_review.py" > /dev/null; then
+    pgrep -f "python3 web_review/web_review.py" | xargs kill -15
+  fi
 elif [[ $1 == -h ]]; then
 echo "Without any flag-->start OQQWall
 -r    Subsystem restart
@@ -177,6 +181,8 @@ check_variable "vision_pixel_limit" "12000000"
 check_variable "vision_size_limit_mb" "9.5"
 check_variable "friend_request_window_sec" "300"
 check_variable "force_chromium_no-sandbox" "false"
+check_variable "use_web_review" "true"
+check_variable "web_review_port" "10923"
 
 
 # 尝试激活现有的虚拟环境
@@ -338,6 +344,8 @@ vision_model=$(grep 'vision_model' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 vision_pixel_limit=$(grep 'vision_pixel_limit' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 vision_size_limit_mb=$(grep 'vision_size_limit_mb' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 force_chromium_no_sandbox=$(grep 'force_chromium_no-sandbox' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+use_web_review=$(grep 'use_web_review' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+web_review_port=$(grep 'web_review_port' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 
 
 DIR="./getmsgserv/rawpost/"
@@ -660,6 +668,19 @@ then
 else
     ./Sendcontrol/sendcontrol.sh &
     echo "sendcontrol.sh started"
+fi
+
+# 启动网页审核（可选）
+if [[ "$use_web_review" == "true" ]]; then
+  if pgrep -f "python3 web_review/web_review.py" > /dev/null; then
+    echo "web_review.py is already running"
+  else
+    echo "starting web_review on port $web_review_port"
+    (cd web_review && PORT="$web_review_port" HOST="0.0.0.0" nohup python3 web_review.py --host 0.0.0.0 --port "$web_review_port" > web_review.log 2>&1 &)
+    echo "web_review started at port $web_review_port"
+  fi
+else
+  echo "use_web_review != true，跳过启动网页审核服务。"
 fi
 
 

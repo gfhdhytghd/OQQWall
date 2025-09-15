@@ -254,6 +254,31 @@ case $command in
     重渲染)
         getmsgserv/preprocess.sh $object randeronly
         ;;
+    扩列审查|扩列|查|查成分)
+        response=$(curl -s "http://127.0.0.1:$port/get_stranger_info?user_id=$senderid")
+        # 使用 jq 提取 qqLevel
+        qqLevel=$(echo "$response" | jq '.data.qqLevel')
+        qzoneopenstatus=$(check_qzone_open "$senderid")
+        # 草料二维码
+        src_dir="./cache/picture/$object"
+        API_URL="https://api.2dcode.biz/v1/read-qr-code"
+
+        scan_result=""
+        for img in "$src_dir"/*.{jpg,jpeg,png}; do
+            resp=$(curl -s -F "file=@${img}" "$API_URL")
+            content=$(echo "$resp" | jq -r '.data.contents? // empty | (if type=="array" then join("\n") else . end)')
+            if [[ -n $content ]]; then
+                scan_result+="$img: $content"$'\n'
+            fi
+        done
+        scan_result=${scan_result%$'\n'}
+        [[ -z $scan_result ]] && scan_result="没有找到二维码"
+        sendmsggroup "用户的QQ等级为: $qqLevel
+对方空间对主账号$qzoneopenstatus
+二维码扫描结果：$scan_result"
+        getandsendcard "$senderid"
+        sendmsggroup "内部编号$object, 请发送指令"
+        ;;
     评论)
         json_data=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
         #need_priv=$(echo $json_data|jq -r '.needpriv')

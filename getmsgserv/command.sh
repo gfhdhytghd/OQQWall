@@ -348,7 +348,7 @@ $group_pending"
                             fi
                             
                             # 检查是否与审核指令冲突
-                            audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "评论" "回复" "展示" "拉黑")
+                            audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "扩列" "查" "查成分" "评论" "回复" "展示" "拉黑")
                             for audit_cmd in "${audit_commands[@]}"; do
                                 if [[ "$cmd_name" == "$audit_cmd" ]]; then
                                     sendmsggroup "错误：快捷回复指令 '$cmd_name' 与审核指令冲突，请使用其他指令名"

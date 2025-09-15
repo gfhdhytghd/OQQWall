@@ -66,14 +66,14 @@ OQQWall 网页审核面板是一个现代化的 Web 界面，专为 OQQWall 校�
 # 进入 web_review 目录
 cd web_review/
 
-# 基本启动（默认端口 8090，监听所有接口）
+# 基本启动（默认端口 10923，监听所有接口）
 python3 web_review.py
 
 # 指定端口启动
-python3 web_review.py --port 8090
+python3 web_review.py --port 10923
 
 # 仅本地访问
-python3 web_review.py --host 127.0.0.1 --port 8090
+python3 web_review.py --host 127.0.0.1 --port 10923
 
 # 查看帮助信息
 python3 web_review.py --help
@@ -82,8 +82,8 @@ python3 web_review.py --help
 ### 访问界面
 
 启动成功后，在浏览器中访问：
-- **本地访问**: `http://localhost:8090`
-- **外部访问**: `http://YOUR_SERVER_IP:8090`
+- **本地访问**: `http://localhost:10923`
+- **外部访问**: `http://YOUR_SERVER_IP:10923`
 
 ## 📖 使用指南
 
@@ -156,7 +156,7 @@ python3 web_review.py --help
 在 `oqqwall.config` 文件中设置：
 
 ```ini
-web_review_port=8090
+web_review_port=10923
 ```
 
 ### 依赖要求
@@ -172,7 +172,7 @@ web_review_port=8090
 1. **端口被占用**
    ```bash
    # 使用其他端口
-   python3 web_review.py --port 8091
+   python3 web_review.py --port 10924
    ```
 
 2. **图片无法显示**
@@ -216,5 +216,4 @@ web_review_port=8090
 ## 许可证
 
 与 OQQWall 主项目保持一致。
-
 

@@ -48,7 +48,7 @@
         /* 2. 卡片与布局优化 */
         .items-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
             gap: 24px;
         }
 
@@ -124,6 +124,7 @@
             border-radius: 12px;
             border-left: 4px solid var(--color-primary-container);
             word-wrap: break-word;
+            overflow-wrap: anywhere;
         }
         
         /* 5. 增大图片尺寸 */
@@ -135,7 +136,7 @@
         }
 
         .item-images img {
-            width: 120px;  /* 尺寸从 80px 增大到 120px */
+            width: 120px;  /* 桌面尺寸 */
             height: 120px;
             object-fit: cover;
             border-radius: 12px;
@@ -252,6 +253,18 @@
             box-shadow: var(--shadow-1);
         }
         
+        .global-controls {
+            background: var(--color-surface-container-lowest);
+            border-radius: 16px;
+            padding: 16px;
+            margin: 16px 0 24px 0;
+            box-shadow: var(--shadow-1);
+        }
+        .global-controls h2 { font-size: 18px; margin-bottom: 12px; font-weight: 600; }
+        .global-row { display:flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .select { padding: 10px 12px; border:1px solid var(--color-outline); border-radius: 12px; }
+        .num-input { width: 160px; padding: 10px 12px; border:1px solid var(--color-outline); border-radius: 12px; }
+        
         .filter-row {
             display: flex;
             gap: 16px;
@@ -318,10 +331,36 @@
             border-radius: 10px;
         }
 
+        /* 7. 移动端优化 */
+        @media (max-width: 768px) {
+            .container { padding: 12px; }
+            h1 { font-size: 24px; }
+            .items-grid { grid-template-columns: 1fr; gap: 16px; }
+            .item-card { width: 100%; max-width: 100%; overflow: hidden; }
+            .item-content { padding: 14px; }
+            .item-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+            .item-tag { font-size: 20px; }
+            .item-comment { font-size: 15px; padding: 12px; }
+            /* 改为网格布局，自动换行，避免超宽 */
+            .item-images { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; overflow-x: visible; }
+            .item-images img { width: 100%; height: auto; aspect-ratio: 1 / 1; }
+            /* 操作按钮 3 列布局 */
+            .item-actions { padding: 12px; gap: 8px; display: grid; grid-template-columns: repeat(3, 1fr); }
+            .item-actions .btn { width: 100%; padding: 10px 12px; font-size: 15px; }
+            .btn.btn-info[href^="/detail"] { flex: 1 1 100%; order: -1; }
+            .filters { padding: 16px; }
+            .filter-row { gap: 10px; }
+            .filter-input { font-size: 15px; padding: 10px 14px; }
+            .stats { grid-template-columns: repeat(3, 1fr); gap: 10px; }
+            .stat-number { font-size: 24px; }
+            .select, .num-input { max-width: 100%; }
+        }
+
     </style>
 </head>
 <body>
     <div class="container">
+        {userbar}
         <div class="header">
             <h1>OQQWall 审核面板</h1>
             <p>管理校园墙投稿内容，确保内容质量和社区规范</p>
@@ -350,6 +389,23 @@
                 </div>
                 <button type="submit" class="btn btn-primary" style="background-color: var(--color-primary); color: white;">🔍 筛选</button>
                 <a href="/" class="btn btn-secondary" style="background-color: var(--color-surface-container-high);">🔄 重置</a>
+            </form>
+        </div>
+
+        <div class="global-controls">
+            <h2>全局操作（对接 command.sh）</h2>
+            <form method="post" action="/api/cmd" class="global-row" id="globalCmdForm">
+                <select class="select" name="self_id" aria-label="选择账号">
+                    {group_options}
+                </select>
+                <button class="btn" name="object" value="待处理">📋 待处理</button>
+                <button class="btn" name="object" value="发送暂存区">📨 发送暂存区</button>
+                <button class="btn" name="object" value="删除暂存区">🧹 删除暂存区</button>
+                <button class="btn" name="object" value="删除待处理">🗑️ 删除待处理</button>
+                <input class="num-input" type="number" name="numb" placeholder="设定编号">
+                <button class="btn" name="object" value="设定编号"># 设定编号</button>
+                <button class="btn btn-info" name="object" value="自动重新登录">🔁 自动重新登录</button>
+                <button class="btn btn-info" name="object" value="手动重新登录">🔑 手动重新登录</button>
             </form>
         </div>
         
@@ -433,6 +489,15 @@
         document.addEventListener('DOMContentLoaded', () => {
             updateStagingArea();
             setInterval(updateStagingArea, 15000);
+            // 全局危险动作确认
+            const form = document.getElementById('globalCmdForm');
+            form.addEventListener('click', (e) => {
+                if (e.target.name === 'object' && ['删除暂存区','删除待处理'].includes(e.target.value)) {
+                    if (!confirm('确定执行“' + e.target.value + '”吗？该操作不可撤销。')) {
+                        e.preventDefault();
+                    }
+                }
+            });
         });
     </script>
 </body>
