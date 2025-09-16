@@ -1424,7 +1424,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             </div> 
             <i-right class=\"l-right\"> 
               <div class=\"l-actions\">  
-                <a href=\"{detail_url}\" class=\"btn btn-info\" target=\"_blank\">📄 详情</a> 
+                <a href=\"{detail_url}\" class=\"btn btn-info\">📄 详情</a> 
                 <button type=\"button\" class=\"btn btn-success act\" data-cmd=\"是\">✅ 通过</button> 
                 <button type=\"button\" class=\"btn btn-danger act\" data-cmd=\"删\">🗑️ 删除</button> 
               </div> 
