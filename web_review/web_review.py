@@ -35,6 +35,9 @@ import html
 import secrets
 import hashlib
 from http import cookies
+import base64
+import re
+import queue
 
 # ============================================================================
 # 配置和路径设置
@@ -73,7 +76,7 @@ except FileNotFoundError:
     LOGIN_HTML_TEMPLATE = """
 <!doctype html>
 <html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>登录</title>
-<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,\"PingFang SC\",\"Microsoft Yahei\",sans-serif;background:#F7F2FA;margin:0;display:flex;align-items:center;justify-content:center;height:100vh} .card{background:#fff;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,.08);padding:24px;min-width:320px;max-width:360px;width:90%} h1{font-size:20px;margin:.2rem 0 1rem} .row{display:flex;flex-direction:column;gap:6px;margin-bottom:10px} input{padding:10px 12px;border:1px solid #ccc;border-radius:10px} .btn{width:100%;padding:10px 12px;border:none;border-radius:999px;background:#6750A4;color:#fff;font-weight:600;cursor:pointer} .msg{color:#B3261E;margin-bottom:8px;font-size:13px}</style>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,\"PingFang SC\",\"Microsoft Yahei\",sans-serif;background:#F7F2FA;margin:0;display:flex;align-items:center;justify-content:center;height:100vh} .card{background:#fff;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,.08);padding:24px;min-width:320px;max-width:560px;width:75%} h1{font-size:20px;margin:.2rem 0 1rem} .row{display:flex;flex-direction:column;gap:6px;margin-bottom:10px} input{padding:10px 12px;border:1px solid #ccc;border-radius:10px} .btn{width:100%;padding:10px 12px;border:none;border-radius:999px;background:#6750A4;color:#fff;font-weight:600;cursor:pointer} .msg{color:#B3261E;margin-bottom:8px;font-size:13px}</style>
 </head><body>
 <form class=\"card\" method=\"post\" action=\"/login\"> 
   <h1>OQQWall 审核登录</h1>
@@ -86,7 +89,7 @@ except FileNotFoundError:
 """
 
 # ============================================================================
-# 数据库和配置函数
+# 数据库和配置函数 + 事件广播
 # ============================================================================
 
 def load_config():
@@ -112,6 +115,20 @@ def load_config():
 
 # 简易会话存储：token -> {username, group}
 SESSION_STORE: dict[str, dict] = {}
+
+# 服务器推送（SSE）
+EVENT_CLIENTS: list[tuple[str, queue.Queue]] = []  # (group, queue)
+EVENT_LOCK = threading.Lock()
+
+def broadcast_event(event: dict, target_group: str | None = None):
+    """向所有事件队列广播一个事件（可按组过滤）。"""
+    with EVENT_LOCK:
+        for grp, q in list(EVENT_CLIENTS):
+            if (target_group is None) or (grp == target_group):
+                try:
+                    q.put_nowait(event)
+                except Exception:
+                    pass
 
 def load_admins():
     """从 AcountGroupcfg.json 读取管理员账号。
@@ -179,9 +196,42 @@ def db_query(sql, params=()):
     finally:
         con.close()
 
+def db_exec(sql, params=()):
+    """执行写操作（INSERT/UPDATE/DELETE）。"""
+    if not DB_PATH.exists():
+        return 0
+    con = sqlite3.connect(str(DB_PATH))
+    try:
+        cur = con.execute(sql, params)
+        con.commit()
+        return cur.rowcount
+    finally:
+        con.close()
+
 # ============================================================================
 # 数据处理函数
 # ============================================================================
+
+def get_all_staged_tags() -> set:
+    """合并所有组的暂存区 tag，用于从待审核列表中过滤。"""
+    staged = set()
+    try:
+        with open(ROOT_DIR / 'AcountGroupcfg.json', 'r', encoding='utf-8') as f:
+            account_groups = json.load(f)
+        for group in (account_groups or {}).keys():
+            try:
+                rows = db_query(f"SELECT tag FROM sendstorge_{group}")
+            except Exception as e:
+                print(f"[web-review] 读取 sendstorge_{group} 失败: {e}")
+                rows = []
+            for r in rows:
+                t = str(r.get('tag') or '').strip()
+                if t:
+                    staged.add(t)
+    except Exception as e:
+        print(f"[web-review] 读取暂存区标签失败(外层): {e}")
+    return staged
+
 
 def list_pending(search: str | None = None, group_filter: str | None = None):
     """
@@ -198,11 +248,18 @@ def list_pending(search: str | None = None, group_filter: str | None = None):
     if not PREPOST_DIR.exists():
         return []
     
+    # 获取所有暂存标签，避免重复展示
+    staged_tags = get_all_staged_tags()
+
     for p in PREPOST_DIR.iterdir():
         if not p.is_dir() or not p.name.isdigit():
             continue
             
         tag = p.name
+
+        # 如果已经在暂存区中，则跳过
+        if tag in staged_tags:
+            continue
         
         # 从数据库获取基本信息
         row = db_query(
@@ -291,7 +348,11 @@ def list_staged(group_filter: str | None = None):
         return {}
     
     for group in group_names:
-        staged_tags = db_query(f"SELECT tag FROM sendstorge_{group}")
+        try:
+            staged_tags = db_query(f"SELECT tag FROM sendstorge_{group}")
+        except Exception as e:
+            print(f"[web-review] 读取 sendstorge_{group} 失败: {e}")
+            staged_tags = []
         if not staged_tags:
             continue
             
@@ -302,11 +363,25 @@ def list_staged(group_filter: str | None = None):
                 continue
                 
             item_details = db_query(
-                "SELECT tag, senderid, nickname FROM preprocess WHERE tag = ?", 
+                "SELECT tag, senderid, nickname FROM preprocess WHERE tag = ?",
                 (tag,)
             )
             if item_details:
-                group_items.append(item_details[0])
+                item = dict(item_details[0])
+                # 补充缩略图（最多3张），来源优先 prepost，其次 picture
+                thumbs = []
+                src_dir = 'prepost'
+                p = PREPOST_DIR / str(tag)
+                if p.exists():
+                    thumbs = [f.name for f in sorted(p.iterdir()) if f.is_file()][:3]
+                if not thumbs:
+                    alt = PICTURE_DIR / str(tag)
+                    if alt.exists():
+                        src_dir = 'picture'
+                        thumbs = [f.name for f in sorted(alt.iterdir()) if f.is_file()][:3]
+                item['thumbs'] = thumbs
+                item['img_source_dir'] = src_dir
+                group_items.append(item)
                 
         if group_items:
             if (not group_filter) or (group == group_filter):
@@ -365,7 +440,7 @@ def get_image_mime_type(file_path):
 # 命令执行函数
 # ============================================================================
 
-def run_audit_command(tag: str, cmd: str, flag: str | None = None, background: bool = False):
+def run_audit_command(tag: str, cmd: str, flag: str | None = None, background: bool = False, web_user: str | None = None):
     """
     执行审核相关的 shell 命令
     
@@ -384,7 +459,11 @@ def run_audit_command(tag: str, cmd: str, flag: str | None = None, background: b
     
     # 安全地转义参数
     safe_joined = ' '.join(arg.replace("'", "'\\''") for arg in args)
-    cmdline = ['bash', '-lc', f"./getmsgserv/processsend.sh '{safe_joined}'"]
+    env_prefix = "WEB_REVIEW=1"
+    if web_user:
+        safe_user = web_user.replace("'", "'\\''")
+        env_prefix += f" WEB_REVIEW_USER='{safe_user}'"
+    cmdline = ['bash', '-lc', f"{env_prefix} ./getmsgserv/processsend.sh '{safe_joined}'"]
 
     # 记录执行日志
     preview = safe_joined if len(safe_joined) < 200 else (safe_joined[:200] + ' …')
@@ -469,6 +548,106 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
                 print(f"[web-review] API 错误: {e}")
                 self.send_error(500, "Internal Server Error")
             return
+
+        # SSE 事件流
+        if parsed_path.path == '/events':
+            user = self._get_user()
+            if not user:
+                self.send_error(401, 'Unauthorized')
+                return
+            self.send_response(200)
+            self.send_header('Content-type', 'text/event-stream; charset=utf-8')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.end_headers()
+            q = queue.Queue()
+            with EVENT_LOCK:
+                EVENT_CLIENTS.append((user['group'], q))
+            try:
+                # 初始握手
+                init = json.dumps({"type":"hello","group":user['group']}, ensure_ascii=False)
+                self.wfile.write(f"data: {init}\n\n".encode('utf-8'))
+                self.wfile.flush()
+                # 循环推送
+                while True:
+                    try:
+                        ev = q.get(timeout=15)
+                        payload = json.dumps(ev, ensure_ascii=False)
+                        self.wfile.write(f"data: {payload}\n\n".encode('utf-8'))
+                        self.wfile.flush()
+                    except queue.Empty:
+                        # keepalive
+                        self.wfile.write(b": keepalive\n\n")
+                        self.wfile.flush()
+            except Exception:
+                pass
+            finally:
+                with EVENT_LOCK:
+                    try:
+                        EVENT_CLIENTS.remove((user['group'], q))
+                    except ValueError:
+                        pass
+            return
+
+        # API 端点：获取当前待审标签列表（按组过滤）
+        if parsed_path.path == '/api/pending_tags':
+            user = self._get_user()
+            if not user:
+                self.send_error(401, 'Unauthorized')
+                return
+            try:
+                items = list_pending(search=None, group_filter=user['group'])
+                tags = [str(i['tag']) for i in items]
+                body = json.dumps({"tags": tags}, ensure_ascii=False).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                print(f"[web-review] API 错误: {e}")
+                self.send_error(500, 'Internal Server Error')
+            return
+
+        # API 端点：获取单个卡片HTML（用于无刷新插入）
+        if parsed_path.path == '/api/card':
+            user = self._get_user()
+            if not user:
+                self.send_error(401, 'Unauthorized')
+                return
+            qs = urllib.parse.parse_qs(parsed_path.query)
+            tag = (qs.get('tag') or [''])[0]
+            if not tag.isdigit():
+                self.send_error(400, 'Bad Request')
+                return
+            # 查找待审核项目（已过滤暂存）
+            items = list_pending(search=None, group_filter=user['group'])
+            item = next((i for i in items if i.get('tag') == tag), None)
+            if not item:
+                self.send_error(404, 'Not Found')
+                return
+            html_card = self._generate_item_card(item)
+            body = json.dumps({"tag": tag, "html": html_card}, ensure_ascii=False).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
+        # API 端点：待审核元信息（用于无刷新提示）
+        if parsed_path.path == '/api/pending_meta':
+            try:
+                items = list_pending(search=None, group_filter=user['group'])
+                total = len(items)
+                max_tag = max([int(i['tag']) for i in items], default=0)
+                body = json.dumps({"count": total, "max_tag": max_tag}, ensure_ascii=False).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                print(f"[web-review] API 错误: {e}")
+                self.send_error(500, "Internal Server Error")
+            return
         
         # 图片文件服务
         if parsed_path.path.startswith(('/cache/prepost/', '/cache/picture/')):
@@ -510,6 +689,10 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         # 详情页
         if parsed_path.path == '/detail':
             self.render_detail_page(parsed_path, user)
+            return
+        # 详情页HTML渲染预览
+        if parsed_path.path == '/detail_html':
+            self.render_detail_html(parsed_path, user)
             return
         
         # 默认：渲染审核页面
@@ -554,37 +737,78 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
                 return
             object_str = params.get('object', [''])[0]
             self_id = params.get('self_id', [''])[0]
-            numb = params.get('numb', [''])[0]
+            # 共享输入：number 用于设定编号和调出
+            numb = params.get('numb', [''])[0] or params.get('number', [''])[0]
             senderid = params.get('senderid', [''])[0]
+            replay_tag = params.get('replay_tag', [''])[0] or params.get('number', [''])[0]
 
             if object_str == '设定编号' and numb:
                 object_str = f"设定编号 {numb}"
             elif object_str == '取消拉黑' and senderid:
                 object_str = f"取消拉黑 {senderid}"
+            elif object_str == '调出' and replay_tag:
+                object_str = f"调出 {replay_tag}"
 
-            # 强制 self_id 属于当前组
-            if not self_id:
-                # fallback 使用当前组主账号
-                for g in list_groups():
-                    if g['key'] == user['group']:
-                        self_id = g['mainqqid']
-                        break
-            else:
-                # 验证所选账号属于当前组
-                ok = False
-                for g in list_groups():
-                    if g['key'] == user['group']:
-                        if self_id == g['mainqqid'] or self_id in g['minorqqids']:
-                            ok = True
-                        break
-                if not ok:
-                    self.send_error(403, 'Forbidden: invalid self_id for this group')
-                    return
+            # 强制以主账号发送
+            for g in list_groups():
+                if g['key'] == user['group']:
+                    self_id = g['mainqqid']
+                    break
 
-            self._run_command_sh(object_str, self_id)
+            rc, out = self._run_command_sh(object_str, self_id, web_user=user.get('username'))
+            notice = urllib.parse.quote(f"已执行全局操作: {object_str}")
             self.send_response(303)
-            self.send_header('Location', '/')
+            self.send_header('Location', f"/?notice={notice}")
             self.end_headers()
+            return
+        elif path == '/api/action':
+            # 单卡片操作（AJAX）
+            user = self._get_user()
+            if not user:
+                self.send_error(401, 'Unauthorized')
+                return
+            tag = params.get('tag', [''])[0]
+            cmd = params.get('cmd', [''])[0]
+            flag = params.get('flag', [''])[0]
+            if not tag or not cmd:
+                self.send_error(400, 'Bad Request')
+                return
+            # 组权限校验
+            row = db_query("SELECT ACgroup FROM preprocess WHERE tag = ?", (tag,))
+            if not row or str(row[0].get('ACgroup')) != str(user['group']):
+                self.send_error(403, 'Forbidden')
+                return
+            rc, out = run_audit_command(tag, cmd, flag, web_user=user.get('username'))
+            # 推送 toast 事件
+            level = 'success' if rc == 0 else 'error'
+            broadcast_event({"type":"toast","level":level,"text":f"已执行: #{tag} 指令 {cmd}"}, target_group=user['group'])
+            body = json.dumps({"ok": rc == 0}).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        elif path == '/api/staged_undo':
+            # 撤销暂存：从 sendstorge_{group} 删除后调出
+            user = self._get_user()
+            if not user:
+                self.send_error(401, 'Unauthorized')
+                return
+            tag = params.get('tag', [''])[0]
+            if not tag or not tag.isdigit():
+                self.send_error(400, 'Bad Request')
+                return
+            group = user['group']
+            # 删除行
+            affected = db_exec(f"DELETE FROM sendstorge_{group} WHERE tag = ?", (tag,))
+            # 触发调出
+            self._run_command_sh(f"调出 {tag}", self_id=self._get_group_mainqqid(group), web_user=user.get('username'))
+            # 通知前端可插入新卡片
+            broadcast_event({"type":"undo","tag":tag}, target_group=group)
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(json.dumps({"ok": True, "deleted": affected}).encode('utf-8'))
             return
         else:
             # 审核操作 -> processsend.sh
@@ -605,7 +829,11 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
                     self.send_error(403, 'Forbidden')
                     return
                 print(f"[web-review] 执行审核操作: tag={tag}, cmd={cmd}, flag={flag}")
-                run_audit_command(tag, cmd, flag)
+                rc, out = run_audit_command(tag, cmd, flag, web_user=user.get('username'))
+                # 在重定向地址上追加提示
+                sep = '&' if ('?' in redirect_to) else '?'
+                notice = urllib.parse.quote(f"已执行: #{tag} 指令 {cmd}")
+                redirect_to = f"{redirect_to}{sep}notice={notice}"
             self.send_response(303)
             self.send_header('Location', redirect_to)
             self.end_headers()
@@ -620,6 +848,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         """
         query_params = urllib.parse.parse_qs(parsed_path.query)
         search_term = query_params.get('search', [''])[0]
+        notice_msg = query_params.get('notice', [''])[0]
         
         # 设置响应头
         self.send_response(200)
@@ -658,7 +887,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         
         # 渲染最终页面（安全转义模板中的花括号，避免与 CSS 冲突）
         template_safe = INDEX_HTML_TEMPLATE.replace('{', '{{').replace('}', '}}')
-        for key in ['total_count', 'anonymous_count', 'with_images_count', 'search', 'rows', 'group_options', 'userbar']:
+        for key in ['total_count', 'anonymous_count', 'with_images_count', 'search', 'rows', 'group_options', 'userbar', 'notice_html', 'initial_max_tag']:
             template_safe = template_safe.replace('{{' + key + '}}', '{' + key + '}')
 
         # 账户组选项
@@ -676,7 +905,11 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
                 group_options_html += f'<option value="{ms}">{k} - 次要账号{i+1}({ms})</option>'
 
         userbar = f"<div style='text-align:right;color:#49454F;margin-bottom:8px'>组: {html.escape(user['group'])} | 用户: {html.escape(user['username'])} | <a href='/logout'>退出</a></div>"
+        notice_html = ''
+        if notice_msg:
+            notice_html = f"<div style='margin:8px 0;padding:10px 12px;border-radius:10px;background:#EADDFF;color:#21005D'>{html.escape(urllib.parse.unquote(notice_msg))}</div>"
 
+        initial_max_tag = max([int(i['tag']) for i in items], default=0)
         page_content = template_safe.format(
             total_count=total_count,
             anonymous_count=anonymous_count,
@@ -684,7 +917,9 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             search=html.escape(search_term),
             rows=rows_html,
             group_options=group_options_html,
-            userbar=userbar
+            userbar=userbar,
+            notice_html=notice_html,
+            initial_max_tag=str(initial_max_tag)
         )
         
         self.wfile.write(page_content.encode('utf-8'))
@@ -716,10 +951,13 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         # 转义用户输入
         safe_nickname = html.escape(item.get('nickname') or '未知')
         safe_senderid = html.escape(str(item.get('senderid') or '未知'))
-        safe_comment = html.escape(item.get('comment') or '').replace('\n', '<br>')
+        _comment_raw = item.get('comment') or ''
+        safe_comment = html.escape(_comment_raw).replace('\n', '<br>')
+        _has_comment = True if _comment_raw.strip() else False
         
         # 生成卡片 HTML
         detail_url = f"/detail?tag={urlquote(item['tag'])}"
+        _comment_block = (f"<div class=\"item-comment\">{safe_comment}</div>" if _has_comment else "<div class=\"item-sep\"></div>")
         card_html = f"""
         <div class="item-card">
             <form method="post" action="/">
@@ -738,7 +976,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
                         </div>
                         <div class="item-badges">{badges_html}</div>
                     </div>
-                    <div class="item-comment">{safe_comment}</div>
+                    {_comment_block}
                     <div class="item-images">{images_html}</div>
                     <div class="comment-form">
                         <textarea name="flag" placeholder="输入评论或拒绝/拉黑原因 (可选)"></textarea>
@@ -764,12 +1002,25 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         
         return card_html
 
-    def _run_command_sh(self, object_str: str, self_id: str):
+    def _get_group_mainqqid(self, group_key: str) -> str | None:
+        try:
+            with open(ROOT_DIR / 'AcountGroupcfg.json', 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if group_key in data:
+                return str(data[group_key].get('mainqqid') or '')
+        except Exception:
+            pass
+        return None
+
+    def _run_command_sh(self, object_str: str, self_id: str, web_user: str | None = None):
         if not object_str:
             return 1, 'empty'
         obj_safe = object_str.replace("'", "'\\''")
         id_safe = (self_id or '').replace("'", "'\\''")
-        cmdline = ['bash', '-lc', f"./getmsgserv/command.sh '{obj_safe}' '{id_safe}'"]
+        env_prefix = "WEB_REVIEW=1"
+        if web_user:
+            env_prefix += f" WEB_REVIEW_USER='{web_user.replace("'", "'\\''")}'"
+        cmdline = ['bash', '-lc', f"{env_prefix} ./getmsgserv/command.sh '{obj_safe}' '{id_safe}'"]
         print(f"[web-review] command.sh -> {object_str} (self_id={self_id})")
         proc = subprocess.run(cmdline, cwd=str(ROOT_DIR), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if proc.stdout:
@@ -810,6 +1061,26 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
 </head><body>
 <h1>稿件详情 #{tag}</h1>
 <p><a href=\"/\">← 返回列表</a></p>
+<form method=\"post\" action=\"/\" style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0\"> 
+<input type=\"hidden\" name=\"tag\" value=\"{tag}\"> 
+<input type=\"hidden\" name=\"redirect\" value=\"/detail?tag={tag}\"> 
+<!-- 行1：拉黑 | 输入 | 评论 -->
+<button name=\"cmd\" value=\"拉黑\">拉黑</button>
+<input type=\"text\" name=\"flag\" placeholder=\"评论或拒绝/拉黑原因(可选)\" style=\"padding:8px; border:1px solid #ddd; border-radius:8px\"> 
+<button name=\"cmd\" value=\"评论\">评论</button>
+<!-- 行2：重渲染 | 展示 | 查成分 -->
+<button name=\"cmd\" value=\"重渲染\">重渲染</button>
+<button name=\"cmd\" value=\"展示\">展示</button>
+<button name=\"cmd\" value=\"查\">查成分</button>
+<!-- 行3：刷新 | 拒绝 | 否 -->
+<button name=\"cmd\" value=\"刷新\">刷新</button>
+<button name=\"cmd\" value=\"拒\">拒绝</button>
+<button name=\"cmd\" value=\"否\">否</button>
+<!-- 行4：删除 | 立即 | 通过 -->
+<button name=\"cmd\" value=\"删\">删除</button>
+<button name=\"cmd\" value=\"立即\">立即</button>
+<button name=\"cmd\" value=\"是\">通过</button>
+</form>
 <h3>投稿信息</h3>
 <ul>
 <li>投稿人: {nickname} ({senderid})</li>
@@ -819,26 +1090,17 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
 </ul>
 <h3>内容</h3>
 <div>{comment_html}</div>
+<h3>渲染预览</h3>
+<iframe src=\"/detail_html?tag={tag}\" style=\"width:100%;height:420px;border:1px solid #e5e5ef;border-radius:12px;background:#fff\"></iframe>
 <h3>图片</h3>
-<div>{images_html}</div>
+<details open>
+<summary style=\"cursor:pointer;user-select:none\">图片（{image_count}）</summary>
+<div style=\"margin-top:8px\">{images_html}</div>
+</details>
 <h3>AfterLM</h3>
+<details><summary style=\"cursor:pointer;user-select:none\">展开/收起</summary>
 <pre>{afterlm_pretty}</pre>
-<form method=\"post\" action=\"/\" style=\"margin-top:16px;display:flex;gap:8px;flex-wrap:wrap\"> 
-<input type=\"hidden\" name=\"tag\" value=\"{tag}\"> 
-<input type=\"hidden\" name=\"redirect\" value=\"/detail?tag={tag}\"> 
-<input type=\"text\" name=\"flag\" placeholder=\"评论或拒绝/拉黑原因(可选)\" style=\"flex:1;min-width:220px;padding:8px\"> 
-<button name=\"cmd\" value=\"是\">通过</button>
-<button name=\"cmd\" value=\"否\">否</button>
-<button name=\"cmd\" value=\"立即\">立即</button>
-<button name=\"cmd\" value=\"拒\">拒绝</button>
-<button name=\"cmd\" value=\"删\">删除</button>
-<button name=\"cmd\" value=\"拉黑\">拉黑</button>
-<button name=\"cmd\" value=\"评论\">评论</button>
-<button name=\"cmd\" value=\"刷新\">刷新</button>
-<button name=\"cmd\" value=\"重渲染\">重渲染</button>
-<button name=\"cmd\" value=\"展示\">展示</button>
-<button name=\"cmd\" value=\"查\">查成分</button>
-</form>
+</details>
 </body></html>
 """
 
@@ -857,6 +1119,11 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
         page = template
+        # 顶部提示（可选）
+        notice_msg = (urllib.parse.parse_qs(parsed_path.query).get('notice') or [''])[0]
+        banner = ''
+        if notice_msg:
+            banner = f"<div style='margin:8px 0;padding:10px 12px;border-radius:10px;background:#EADDFF;color:#21005D'>{html.escape(urllib.parse.unquote(notice_msg))}</div>"
         # 安全替换占位符
         replacements = {
             '{tag}': item['tag'],
@@ -870,6 +1137,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             '{images_html}': images_html,
             '{afterlm_pretty}': afterlm_pretty,
             '{image_count}': str(item.get('image_count') or 0),
+            '{notice_html}': banner,
         }
         for k, v in replacements.items():
             page = page.replace(k, v)
@@ -881,6 +1149,72 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             if r.get('tag') == tag:
                 return r
         return None
+
+    def render_detail_html(self, parsed_path, user):
+        query = urllib.parse.parse_qs(parsed_path.query)
+        tag = (query.get('tag') or [''])[0]
+        if not tag.isdigit():
+            self.send_error(400, 'Bad Request')
+            return
+        # 权限校验
+        row = db_query("SELECT ACgroup FROM preprocess WHERE tag = ?", (tag,))
+        if not row or str(row[0].get('ACgroup')) != str(user['group']):
+            self.send_error(403, 'Forbidden')
+            return
+        # 运行渲染脚本
+        try:
+            cmd = [
+                'bash','-lc',
+                f"getmsgserv/HTMLwork/gotohtml.sh {tag} > /dev/shm/OQQWall/oqqwallhtmlcache.html"
+            ]
+            subprocess.run(cmd, cwd=str(ROOT_DIR), stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20)
+        except Exception as e:
+            print(f"[web-review] 渲染预览失败: {e}")
+        # 读取渲染结果
+        html_path = Path('/dev/shm/OQQWall/oqqwallhtmlcache.html')
+        if not html_path.exists():
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html; charset=utf-8')
+            self.end_headers()
+            self.wfile.write("<p style='color:#B3261E'>无法生成渲染预览</p>".encode('utf-8'))
+            return
+        content = html_path.read_text(encoding='utf-8', errors='ignore')
+        # 内嵌 file:// 图片为 data URI（仅限项目目录内文件）
+        def repl_img(m):
+            url = m.group(1)
+            if not url.startswith('file://'):
+                return m.group(0)
+            file_path = url[7:]
+            try:
+                p = Path(file_path).resolve()
+                root = ROOT_DIR.resolve()
+                if not str(p).startswith(str(root)):
+                    return m.group(0)
+                if not p.is_file():
+                    return m.group(0)
+                data = p.read_bytes()
+                # mime by suffix
+                ext = p.suffix.lower()
+                mime = 'image/png'
+                if ext in ('.jpg', '.jpeg'):
+                    mime = 'image/jpeg'
+                elif ext == '.gif':
+                    mime = 'image/gif'
+                elif ext == '.webp':
+                    mime = 'image/webp'
+                elif ext == '.bmp':
+                    mime = 'image/bmp'
+                b64 = base64.b64encode(data).decode('ascii')
+                return f"src=\"data:{mime};base64,{b64}\""
+            except Exception as e:
+                print(f"[web-review] 内嵌图片失败: {e}")
+                return m.group(0)
+        # 替换 <img src="file://...">
+        content = re.sub(r'src=\"(file://[^\"]+)\"', repl_img, content)
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(content.encode('utf-8', errors='ignore'))
 
     # 登录/注销与用户获取
     def _render_login(self, msg_html: str = ""):
@@ -914,6 +1248,11 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
 # ============================================================================
 
 class ReuseAddrTCPServer(socketserver.TCPServer):
+    pass
+
+class ThreadingReuseAddrServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
+    # 确保工作线程为守护线程，避免 Ctrl+C 后被非守护线程阻塞退出
+    daemon_threads = True
     allow_reuse_address = True
     def server_bind(self):
         try:
@@ -937,7 +1276,7 @@ def run_server(host='0.0.0.0', port=10923):
         port (int): 监听端口
     """
     try:
-        server_cls = ReuseAddrTCPServer
+        server_cls = ThreadingReuseAddrServer
         with server_cls((host, port), ReviewServer) as httpd:
             print("=" * 50)
             print("🚀 OQQWall 审核面板已启动")
@@ -950,10 +1289,60 @@ def run_server(host='0.0.0.0', port=10923):
             print("按 Ctrl+C 停止服务器")
             print("=" * 50)
             
+            # 后台监测新投稿（每5秒），用于即时提示
+            def poll_new():
+                # 记录每个组的上一次待审核集合与最大 tag
+                last_max = {}
+                last_pending: dict[str, set] = {}
+                while True:
+                    try:
+                        with EVENT_LOCK:
+                            groups = list(set(g for g,_ in EVENT_CLIENTS))
+                        # 若暂无订阅者则休眠
+                        if not groups:
+                            time.sleep(5)
+                            continue
+                        for grp in groups:
+                            items = list_pending(search=None, group_filter=grp)
+                            tags_now = {str(i['tag']) for i in items}
+                            max_tag = max([int(i['tag']) for i in items], default=0)
+
+                            # 新增项目提示（沿用原有 max_tag 逻辑）
+                            if last_max.get(grp, 0) and max_tag > last_max.get(grp, 0):
+                                broadcast_event({"type":"new_pending","max_tag":max_tag}, target_group=grp)
+                            last_max[grp] = max_tag
+
+                            # 处理掉的项目：上次有，这次没了
+                            prev = last_pending.get(grp, set())
+                            removed = prev - tags_now
+                            if removed:
+                                for t in removed:
+                                    try:
+                                        broadcast_event({"type":"processed", "tag": t}, target_group=grp)
+                                    except Exception:
+                                        pass
+                            last_pending[grp] = tags_now
+                        time.sleep(5)
+                    except Exception:
+                        time.sleep(5)
+
+            t = threading.Thread(target=poll_new, daemon=True)
+            t.start()
             try:
                 httpd.serve_forever()
             except KeyboardInterrupt:
+                # 优雅关闭：停止事件循环并关闭监听套接字
                 print("\n🛑 服务器已停止")
+                try:
+                    httpd.shutdown()
+                except Exception:
+                    pass
+                try:
+                    httpd.server_close()
+                except Exception:
+                    pass
+                # 立即退出主进程，避免需要再次 Ctrl+C
+                sys.exit(0)
     except OSError as e:
         if 'Address already in use' in str(e) or getattr(e, 'errno', None) in (98, 48):
             print("❌ 端口被占用 (可能处于 TIME_WAIT)。")

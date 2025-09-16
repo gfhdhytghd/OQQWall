@@ -7,6 +7,21 @@ log_and_continue() {
     echo "processsend 错误已记录: $errmsg"
 }
 
+# 统一群提示：网页来源时添加前缀；某些“请发送指令”提示在网页场景下抑制
+sendmsggroup_ctx() {
+    if [[ "$WEB_REVIEW" == "1" ]]; then
+        sendmsggroup "[网页审核] $*"
+    else
+        sendmsggroup "$*"
+    fi
+}
+
+sendmsggroup_prompt() {
+    if [[ "$WEB_REVIEW" != "1" ]]; then
+        sendmsggroup "$*"
+    fi
+}
+
 postqzone(){
     #传给sendcontrol
     echo "开始传递给sendcontrol"
@@ -22,7 +37,7 @@ postqzone(){
     if echo "$post_statue"  | grep -q "success"; then
         goingtosendid=("${goingtosendid[@]/$1}")
         sendmsgpriv $senderid "#$numfinal 投稿已存入暂存区,你现在可以继续投稿(系统自动发送，请勿回复)"
-        sendmsggroup "#$numfinal 投稿已存入暂存区"
+        sendmsggroup_ctx "#$numfinal 投稿已存入暂存区"
 
     elif echo "$post_statue"  | grep -q "failed"; then
         log_and_continue "空间发送调度服务发生错误"
@@ -119,7 +134,9 @@ fi
 groupid=$(echo "$group_info" | jq -r '.value.mangroupid')
 mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
 mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
-sendmsggroup 已收到指令
+if [[ "$WEB_REVIEW" != "1" ]]; then
+    sendmsggroup 已收到指令
+fi
 minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
 minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
 port=""
@@ -154,6 +171,23 @@ for qqid in "${minorqqids[@]}"; do
 done
 touch ./cache/numb/"$groupname"_numfinal.txt
 numfinal=$(cat ./cache/numb/"$groupname"_numfinal.txt)
+
+# 如果来自网页审核：发送一条摘要并抑制后续群提示
+if [[ "$WEB_REVIEW" == "1" ]]; then
+    user_display=${WEB_REVIEW_USER:-网页用户}
+    if [[ "$command" == "是" ]]; then
+        summary_msg="$user_display使用网页审核通过了#$object"
+    else
+        summary_msg="$user_display使用网页审核执行了$command"
+    fi
+    # 直接调用底层群发接口
+    encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$summary_msg")
+    curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
+    # 覆盖 sendmsggroup 以抑制其它提示
+    sendmsggroup() { :; }
+    sendmsggroup_ctx() { :; }
+    sendmsggroup_prompt() { :; }
+fi
 
 case $command in
     是)
@@ -209,7 +243,7 @@ case $command in
 INSERT OR IGNORE INTO blocklist (senderid, ACgroup, receiver, reason)
 VALUES ('$senderid', '$groupname', '$receiver', '$reason');
 EOF
-        sendmsggroup 已拉黑$senderid
+        sendmsggroup_ctx 已拉黑$senderid
         rm -rf cache/prepost/$object
         ;;
     匿)
@@ -272,7 +306,7 @@ EOF
         # fi
         if [ -n "$flag" ]; then
             timeout 10s sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET comment='$flag' WHERE tag = '$object';"
-            sendmsggroup "已储存评论内容：\n $flag"
+            sendmsggroup_ctx "已储存评论内容：\n $flag"
             sendmsggroup "内部编号$object, 请发送指令"
         else
             # if [[ "$need_priv" == "false" ]]; then
@@ -281,7 +315,7 @@ EOF
             #     message="#$numfinal"
             # fi
             timeout 10s sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET comment='' WHERE tag = '$object';"
-            sendmsggroup "没有找到评论内容，评论已清空"
+            sendmsggroup_ctx "没有找到评论内容，评论已清空"
             sendmsggroup "内部编号$object, 请发送指令"
         fi
         ;;
@@ -298,7 +332,7 @@ EOF
         if [[ -n "$quick_reply_content" && "$quick_reply_content" != "null" ]]; then
             # 发送快捷回复
             sendmsgpriv $senderid "$quick_reply_content"
-            sendmsggroup "已发送快捷回复：$quick_reply_content"
+            sendmsggroup_ctx "已发送快捷回复：$quick_reply_content"
             sendmsggroup "内部编号$object, 请发送指令"
         else
             sendmsggroup "没有此指令,请查看说明,发送 @本账号 帮助 以查看帮助"

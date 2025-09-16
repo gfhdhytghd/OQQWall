@@ -9,6 +9,15 @@ log_and_continue() {
     sendmsggroup "$errmsg"
 }
 
+# 网页来源加前缀
+sendmsggroup_ctx() {
+    if [[ "$WEB_REVIEW" == "1" ]]; then
+        sendmsggroup "[网页审核] $*"
+    else
+        sendmsggroup "$*"
+    fi
+}
+
 file_to_watch="./getmsgserv/all/priv_post.json"
 command_file="./qqBot/command/commands.txt"
 litegettag=$(grep 'use_lite_tag_generator' oqqwall.config | cut -d'=' -f2 | tr -d '"')
@@ -41,6 +50,17 @@ groupid=$(echo "$group_info" | jq -r '.value.mangroupid')
 mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
 mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
 
+# 网页审核：发送一条摘要并抑制其它群提示
+if [[ "$WEB_REVIEW" == "1" ]]; then
+  user_display=${WEB_REVIEW_USER:-网页用户}
+  summary_msg="$user_display使用网页审核执行了$object"
+  encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$summary_msg")
+  curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
+  # 覆盖群发函数，抑制后续消息
+  sendmsggroup() { :; }
+  sendmsggroup_ctx() { :; }
+fi
+
 case $object in
     [0-9]*)
         if [[ "$self_id" == "$mainqqid" ]]; then
@@ -51,14 +71,14 @@ case $object in
                 if [[ "$groupnameoftag" == "$groupname" ]];then
                     ./getmsgserv/processsend.sh "$object $command $flag"
                 else
-                    sendmsggroup '权限错误，无法对非本账号组的帖子进行操作，发送 @本账号 帮助 以查看帮助'
+                    sendmsggroup_ctx '权限错误，无法对非本账号组的帖子进行操作，发送 @本账号 帮助 以查看帮助'
                 fi
             else
                 echo "error: $object 不存在对应的文件夹"
-                sendmsggroup '没有可执行的对象,请检查,发送 @本账号 帮助 以查看帮助'
+                sendmsggroup_ctx '没有可执行的对象,请检查,发送 @本账号 帮助 以查看帮助'
             fi
         else
-            sendmsggroup 请尝试@主账号执行此指令
+            sendmsggroup_ctx 请尝试@主账号执行此指令
         fi
         ;;
     "手动重新登录")
@@ -66,15 +86,15 @@ case $object in
         ;;
     "自动重新登录")
         renewqzoneloginauto $self_id
-        sendmsggroup 自动登录QQ空间尝试完毕
+        sendmsggroup_ctx 自动登录QQ空间尝试完毕
         ;;
     "设定编号")
         if [[ $command =~ ^[0-9]+$ ]]; then
             echo $command > ./cache/numb/"$groupname"_numfinal.txt
-            sendmsggroup 外部编号已设定为$command
+            sendmsggroup_ctx 外部编号已设定为$command
         else
             echo "Error: arg is not a pure number."
-            sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
+            sendmsggroup_ctx "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
         fi
         ;;
      "调出")
@@ -88,14 +108,14 @@ case $object in
                 if [[ $command -le $max_tag ]];then
                     ./getmsgserv/preprocess.sh "$command" randeronly
                 else
-                    sendmsggroup "当前编号不在数据库中"
+                    sendmsggroup_ctx "当前编号不在数据库中"
                 fi
             else
                 echo "Error: arg is not a pure number."
-                sendmsggroup "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
+                sendmsggroup_ctx "编号必须为纯数字，发送 @本账号 帮助 以获取帮助"
             fi
         else
-            sendmsggroup '权限错误，无法对非本账号组的帖子进行操作，发送 @本账号 帮助 以查看帮助'
+            sendmsggroup_ctx '权限错误，无法对非本账号组的帖子进行操作，发送 @本账号 帮助 以查看帮助'
             exit 1
         fi
         ;;
@@ -146,9 +166,9 @@ case $object in
                 fi
             done
             if [[ -z "$group_pending" ]]; then
-                sendmsggroup "本组没有待处理项目"
+                sendmsggroup_ctx "本组没有待处理项目"
             else
-                sendmsggroup "本组待处理项目:
+                sendmsggroup_ctx "本组待处理项目:
 $group_pending"
             fi
         fi
@@ -207,13 +227,13 @@ $group_pending"
 
         # 删除 sender 表中未被占用的 senderid
         sqlite3 ./cache/OQQWall.db "DELETE FROM sender $not_in_clause;"
-        sendmsggroup 已清空待处理列表
+        sendmsggroup_ctx 已清空待处理列表
         ;;
     "删除暂存区")
         #获取sendstorge中最小的tag
         min_num=$(sqlite3 ./cache/OQQWall.db "SELECT MIN(num) FROM sendstorge_$groupname;")
         if [[ -z "$min_num" || "$min_num" == "NULL" ]]; then
-            sendmsggroup "暂存区没有数据"
+            sendmsggroup_ctx "暂存区没有数据"
         else
             #获取全部tag
             all_tags=$(sqlite3 ./cache/OQQWall.db "SELECT tag FROM sendstorge_$groupname;")
@@ -228,7 +248,7 @@ $group_pending"
             sqlite3 ./cache/OQQWall.db "DELETE FROM sendstorge_$groupname;"
             #回滚numfinal为min_tag
             echo $min_num > ./cache/numb/"$groupname"_numfinal.txt
-            sendmsggroup "已清空暂存区数据，当前外部编号为#$min_num"
+            sendmsggroup_ctx "已清空暂存区数据，当前外部编号为#$min_num"
         fi
         ;;
     "发送暂存区")
@@ -238,7 +258,7 @@ $group_pending"
 
         if echo "$post_statue"  | grep -q "success"; then
             goingtosendid=("${goingtosendid[@]/$1}")
-            sendmsggroup "投稿已发送"
+            sendmsggroup_ctx "投稿已发送"
 
         elif echo "$post_statue"  | grep -q "failed"; then
             log_and_continue "空间发送调度服务发生错误"
@@ -299,28 +319,28 @@ $group_pending"
         printf -v syschecklist '%s==== 自检完成 ====' "$syschecklist"
 
         # 7. 调用已存在的发送函数，注意这里不修改 sendmsggroup 的定义
-        sendmsggroup "$syschecklist"
+        sendmsggroup_ctx "$syschecklist"
         ;;
     "取消拉黑")
         if [[ -z "$command" ]]; then
-            sendmsggroup "请提供要取消拉黑的 senderid"
+            sendmsggroup_ctx "请提供要取消拉黑的 senderid"
             exit 1
         fi
         sqlite3 'cache/OQQWall.db' "DELETE FROM blocklist WHERE senderid = '$command' AND ACgroup = '$groupname';"
         sqlite3 'cache/OQQWall.db' "DELETE FROM sender WHERE senderid = '$command' AND ACgroup = '$groupname';"
-        sendmsggroup "已取消拉黑 senderid: $command"
+        sendmsggroup_ctx "已取消拉黑 senderid: $command"
         ;;
     "列出拉黑")
         blocklist=$(sqlite3 'cache/OQQWall.db' "SELECT senderid, reason FROM blocklist WHERE ACgroup = '$groupname';")
         if [[ -z "$blocklist" ]]; then
-            sendmsggroup "当前账户组没有被拉黑的账号"
+            sendmsggroup_ctx "当前账户组没有被拉黑的账号"
         else
             msg="被拉黑账号列表："
             while IFS='|' read -r senderid reason; do
                 msg+="
 账号: $senderid，理由: $reason"
             done <<< "$blocklist"
-            sendmsggroup "$msg"
+            sendmsggroup_ctx "$msg"
         fi
         ;;
     "快捷回复")
@@ -532,10 +552,10 @@ $group_pending"
 快捷回复指令：
 使用预设的快捷回复模板向投稿人发送消息
 用法：@本帐号 内部编号 快捷指令名'
-        sendmsggroup "$help"
+        sendmsggroup_ctx "$help"
         ;;
     *)
         echo "error: 无效的指令"
-        sendmsggroup '指令无效,请检查,发送 @本账号 帮助 以查看帮助'
+        sendmsggroup_ctx '指令无效,请检查,发送 @本账号 帮助 以查看帮助'
         ;;
 esac

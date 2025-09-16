@@ -5,50 +5,88 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>稿件详情 #{tag}</title>
   <style>
-    :root {
-      --color-primary:#6750A4; --color-primary-container:#EADDFF; --color-on-primary-container:#21005D;
-      --color-surface:#F7F2FA; --color-surface-0:#FFFFFF; --color-outline:#CAC4D0; --color-text:#1C1B1F; --color-text-sub:#49454F;
-    }
+    :root { --color-primary:#6750A4; --color-primary-container:#EADDFF; --color-on-primary-container:#21005D; --color-surface:#F7F2FA; --color-surface-0:#FFFFFF; --color-outline:#CAC4D0; --color-text:#1C1B1F; --color-text-sub:#49454F; }
     * { box-sizing: border-box; }
-    body { margin:0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "PingFang SC", "Microsoft Yahei", sans-serif; background: var(--color-surface); color: var(--color-text); }
-    .wrap { max-width: 980px; margin: 0 auto; padding: 16px; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Microsoft Yahei",sans-serif; background: var(--color-surface); color: var(--color-text); }
+    /* 限制整页宽度不超过高度的 180%（即 180vh），并在大屏下留出边距 */
+    .wrap { max-width: min(180vh, 96vw); margin:0 auto; padding:16px; }
     .topbar { display:flex; align-items:center; gap:12px; margin-bottom: 12px; }
     .back { text-decoration:none; color:#fff; background:#17a2b8; padding:8px 12px; border-radius:999px; }
     .card { background: var(--color-surface-0); border:1px solid var(--color-outline); border-radius: 16px; box-shadow:0 1px 3px rgba(0,0,0,.05); margin-bottom: 16px; overflow:hidden; }
-    .card .hd { padding: 14px 16px; border-bottom: 1px solid var(--color-outline); display:flex; justify-content: space-between; align-items: center; }
-    .card .bd { padding: 16px; }
-    .title { margin:0; font-size: 18px; font-weight: 600; }
-    .meta { color: var(--color-text-sub); font-size: 14px; }
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
-    .grid .cell { background: var(--color-surface); border-radius: 12px; padding: 12px; }
-    .content { background: var(--color-surface); border-left:4px solid var(--color-primary-container); border-radius: 12px; padding: 12px; word-break: break-word; }
-    .images { display:flex; gap:10px; overflow-x:auto; padding-bottom: 2px; }
-    .images img { height: 220px; max-width: 100%; object-fit: cover; border-radius: 12px; border:2px solid var(--color-outline); flex: 0 0 auto; cursor: pointer; }
-    .code { background:#0f172a; color:#e5e7eb; padding:12px; border-radius: 12px; overflow:auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size: 12px; }
-    .actions { display:flex; flex-wrap:wrap; gap:10px; }
+    .card .hd { padding:14px 16px; border-bottom:1px solid var(--color-outline); display:flex; justify-content:space-between; align-items:center; }
+    .card .bd { padding:16px; }
+    .title { margin:0; font-size:18px; font-weight:600; }
+    .meta { color: var(--color-text-sub); font-size:14px; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .grid .cell { background: var(--color-surface); border-radius:12px; padding:12px; }
+    .content { background: var(--color-surface); border-left:4px solid var(--color-primary-container); border-radius:12px; padding:12px; word-break: break-word; }
+    .images { display:flex; gap:10px; overflow-x:auto; padding-bottom:2px; }
+    .images img { height:220px; max-width:100%; object-fit:cover; border-radius:12px; border:2px solid var(--color-outline); flex:0 0 auto; cursor:pointer; }
+    .code { background:#0f172a; color:#e5e7eb; padding:12px; border-radius:12px; overflow:auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:12px; }
+    .actions { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; }
     .btn { padding:10px 14px; border:none; border-radius:999px; cursor:pointer; font-weight:600; }
     .btn-info { background:#17a2b8; color:#fff; }
     .btn-ok { background:#28a745; color:#fff; }
     .btn-warn { background:#ffc107; color:#212529; }
     .btn-danger { background:#dc3545; color:#fff; }
-    .flag { flex:1 1 220px; min-width: 220px; padding: 10px 12px; border:1px solid var(--color-outline); border-radius: 12px; }
-    @media (max-width: 768px) {
-      .wrap { padding: 12px; }
-      .grid { grid-template-columns: 1fr; }
-      .images img { height: 180px; }
-      .btn { flex: 1 1 48%; }
-    }
+    .flag { width:100%; padding:10px 12px; border:1px solid var(--color-outline); border-radius:12px; }
+    /* Desktop two-panel layout with independent scroll: 左 400px，右侧自适应 */
+    .detail-grid { display:grid; grid-template-columns: 400px minmax(0, 1fr); gap:16px; align-items:start; }
+    .detail-grid .col { max-height: calc(100vh - 120px); overflow:auto; }
+    @media (max-width: 768px) { .detail-grid { grid-template-columns: 1fr; } .detail-grid .col { max-height: none; overflow: visible; } }
   </style>
   <script>
-    document.addEventListener('click', e => {
-      if (e.target.tagName === 'IMG' && e.target.closest('.images')) {
-        const modal = document.createElement('div');
-        modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;z-index:1000;cursor:zoom-out;';
-        const img = e.target.cloneNode();
-        img.style.cssText = 'max-width:94vw;max-height:94vh;object-fit:contain;border-radius:8px;';
-        modal.appendChild(img);
-        modal.onclick = () => modal.remove();
-        document.body.appendChild(modal);
+    // 轻量级图片浏览器（与列表页一致）
+    (function(){
+      let modal=null, imgEl=null, leftBtn=null, rightBtn=null, currentIdx=0, list=[];
+      function close(){ if(modal){ modal.remove(); modal=null; list=[]; document.removeEventListener('keydown', onKey);} }
+      function render(){ if(!imgEl) return; imgEl.src=list[currentIdx]; }
+      function createButtons(){
+        const isMobile = window.matchMedia('(max-width: 768px)').matches;
+        if (isMobile){
+          leftBtn = document.createElement('button'); rightBtn = document.createElement('button');
+          leftBtn.textContent='‹'; rightBtn.textContent='›';
+          [leftBtn,rightBtn].forEach(b=>{ b.style.cssText='position:absolute;bottom:12px;background:#21005D;opacity:.9;color:#fff;border:none;border-radius:999px;padding:10px 14px;font-size:18px;pointer-events:auto;'});
+          leftBtn.style.left='12px'; rightBtn.style.right='12px';
+          leftBtn.onclick=(e)=>{ e.stopPropagation(); currentIdx=(currentIdx-1+list.length)%list.length; render(); };
+          rightBtn.onclick=(e)=>{ e.stopPropagation(); currentIdx=(currentIdx+1)%list.length; render(); };
+          modal.appendChild(leftBtn); modal.appendChild(rightBtn);
+        }
+      }
+      function onKey(e){ if(!modal) return; if(e.key==='Escape'){ close(); } if(e.key==='ArrowLeft'){ currentIdx=(currentIdx-1+list.length)%list.length; render(); } if(e.key==='ArrowRight'){ currentIdx=(currentIdx+1)%list.length; render(); } }
+      function open(startUrl, urls){ list=urls.slice(); currentIdx=list.indexOf(startUrl); if(currentIdx<0) currentIdx=0; modal=document.createElement('div'); modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;z-index:2147483646;cursor:zoom-out;'; imgEl=document.createElement('img'); imgEl.style.cssText='max-width:94vw;max-height:94vh;object-fit:contain;border-radius:8px;'; modal.appendChild(imgEl); createButtons(); document.body.appendChild(modal); render(); modal.onclick=close; document.addEventListener('keydown', onKey); }
+      document.addEventListener('click', (e)=>{ if (e.target.tagName==='IMG' && e.target.closest('.images')){ const imgs=Array.from(e.target.closest('.images').querySelectorAll('img')).map(x=>x.src); open(e.target.src, imgs); } });
+    })();
+    // 拦截操作按钮，AJAX 提交并置为已处理
+    document.addEventListener('click', async (e) => {
+      const btn = e.target.closest('button[name="cmd"]');
+      if (!btn) return;
+      const form = btn.closest('form');
+      if (!form) return;
+      e.preventDefault();
+      const tag = form.querySelector('input[name="tag"]').value;
+      const flag = form.querySelector('input[name="flag"], textarea[name="flag"]').value || '';
+      const cmd = btn.value;
+      try{
+        const r = await fetch('/api/action', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: new URLSearchParams({tag, cmd, flag})});
+        if(r.ok){
+          if (cmd === '评论'){
+            const inp = form.querySelector('input[name="flag"], textarea[name="flag"]');
+            if (inp) inp.value = '';
+          } else {
+            const actions = form;
+            actions.innerHTML = '<div class="btn" style="background:#D4EDDA;color:#155724;width:100%;text-align:center">✅ 已处理</div>';
+          }
+        }else{
+          alert('操作失败：' + r.status);
+        }
+      }catch(err){ alert('操作失败：'+err); }
+    });
+    // 防止表单默认提交刷新
+    document.addEventListener('submit', (e) => {
+      const form = e.target;
+      if (form && form.querySelector('input[name="tag"]')) {
+        e.preventDefault();
       }
     });
   </script>
@@ -58,55 +96,74 @@
 </head>
 <body>
   <div class="wrap">
+    {notice_html}
     <div class="topbar">
       <a class="back" href="/">← 返回列表</a>
       <h1 class="title" style="margin:0">稿件详情 #{tag}</h1>
     </div>
-
-    <div class="card">
-      <div class="hd"><h2 class="title">基本信息</h2></div>
-      <div class="bd grid">
-        <div class="cell"><div class="meta">投稿人</div><div>{nickname}（{senderid}）</div></div>
-        <div class="cell"><div class="meta">时间</div><div>{submit_time}</div></div>
-        <div class="cell"><div class="meta">目标群</div><div>{ACgroup} / {receiver}</div></div>
-        <div class="cell"><div class="meta">匿名</div><div>{is_anonymous}</div></div>
+    <div class="detail-grid">
+      <div class="col left">
+        <div class="card">
+          <div class="hd"><h2 class="title">渲染预览</h2></div>
+          <div class="bd">
+            <iframe src="/detail_html?tag={tag}" style="width:100%;height:70vh;border:1px solid #e5e5ef;border-radius:12px;background:#fff"></iframe>
+            <div style="margin-top:8px;font-size:12px;color:#49454F">如无法显示，请<a href="/detail_html?tag={tag}" target="_blank">点击在新窗口打开</a></div>
+          </div>
+        </div>
       </div>
-    </div>
-
-    <div class="card">
-      <div class="hd"><h2 class="title">内容</h2></div>
-      <div class="bd"><div class="content">{comment_html}</div></div>
-    </div>
-
-    <div class="card">
-      <div class="hd"><h2 class="title">图片（{image_count}）</h2></div>
-      <div class="bd"><div class="images">{images_html}</div></div>
-    </div>
-
-    <div class="card">
-      <div class="hd"><h2 class="title">AfterLM 分析</h2></div>
-      <div class="bd"><pre class="code">{afterlm_pretty}</pre></div>
-    </div>
-
-    <div class="card">
-      <div class="hd"><h2 class="title">操作</h2></div>
-      <div class="bd">
-        <form method="post" action="/" class="actions">
-          <input type="hidden" name="tag" value="{tag}">
-          <input type="hidden" name="redirect" value="/detail?tag={tag}">
-          <input class="flag" type="text" name="flag" placeholder="评论或拒绝/拉黑原因（可选）">
-          <button class="btn btn-ok" name="cmd" value="是">✅ 通过</button>
-          <button class="btn" name="cmd" value="否">🙅 否</button>
-          <button class="btn btn-info" name="cmd" value="立即">🚀 立即</button>
-          <button class="btn btn-warn" name="cmd" value="拒">⚠️ 拒绝</button>
-          <button class="btn btn-danger" name="cmd" value="删">❌ 删除</button>
-          <button class="btn btn-danger" name="cmd" value="拉黑">🚫 拉黑</button>
-          <button class="btn" name="cmd" value="评论">💬 评论</button>
-          <button class="btn" name="cmd" value="刷新">🔄 刷新</button>
-          <button class="btn" name="cmd" value="重渲染">🎨 重渲染</button>
-          <button class="btn" name="cmd" value="展示">🖼️ 展示</button>
-          <button class="btn btn-info" name="cmd" value="查">ℹ️ 查成分</button>
-        </form>
+      <div class="col right">
+        <div class="card">
+          <div class="hd"><h2 class="title">操作</h2></div>
+          <div class="bd">
+            <form method="post" action="/" class="actions">
+              <input type="hidden" name="tag" value="{tag}">
+              <input type="hidden" name="redirect" value="/detail?tag={tag}">
+              <button class="btn btn-danger" name="cmd" value="拉黑">🚫 拉黑</button>
+              <input class="flag" type="text" name="flag" placeholder="评论或拒绝/拉黑原因（可选）">
+              <button class="btn" name="cmd" value="评论">💬 评论</button>
+              <button class="btn" name="cmd" value="重渲染">🎨 重渲染</button>
+              <button class="btn" name="cmd" value="展示">🖼️ 展示</button>
+              <button class="btn btn-info" name="cmd" value="查">ℹ️ 查成分</button>
+              <button class="btn" name="cmd" value="刷新">🔄 刷新</button>
+              <button class="btn btn-warn" name="cmd" value="拒">⚠️ 拒绝</button>
+              <button class="btn" name="cmd" value="否">🙅 否</button>
+              <button class="btn btn-danger" name="cmd" value="删">❌ 删除</button>
+              <button class="btn btn-info" name="cmd" value="立即">🚀 立即</button>
+              <button class="btn btn-ok" name="cmd" value="是">✅ 通过</button>
+            </form>
+          </div>
+        </div>
+        <div class="card">
+          <div class="hd"><h2 class="title">基本信息</h2></div>
+          <div class="bd grid">
+            <div class="cell"><div class="meta">投稿人</div><div>{nickname}（{senderid}）</div></div>
+            <div class="cell"><div class="meta">时间</div><div>{submit_time}</div></div>
+            <div class="cell"><div class="meta">目标群</div><div>{ACgroup} / {receiver}</div></div>
+            <div class="cell"><div class="meta">匿名</div><div>{is_anonymous}</div></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="hd"><h2 class="title">内容</h2></div>
+          <div class="bd"><div class="content">{comment_html}</div></div>
+        </div>
+        <div class="card">
+          <div class="hd"><h2 class="title">图片</h2></div>
+          <div class="bd">
+            <details open>
+              <summary style="cursor:pointer;user-select:none">图片（{image_count}）</summary>
+              <div class="images" style="margin-top:8px">{images_html}</div>
+            </details>
+          </div>
+        </div>
+        <div class="card">
+          <div class="hd"><h2 class="title">AfterLM 分析</h2></div>
+          <div class="bd">
+            <details>
+              <summary style="cursor:pointer;user-select:none">展开/收起</summary>
+              <pre class="code" style="margin-top:8px">{afterlm_pretty}</pre>
+            </details>
+          </div>
+        </div>
       </div>
     </div>
   </div>
