@@ -68,6 +68,109 @@ except FileNotFoundError:
     <p>请确保模板文件与 web_review.py 在同一目录下。</p>
     """
 
+# 列表页模板（内置默认，可外置 list_template.html 覆盖）
+try:
+    with open(SCRIPT_DIR / 'list_template.html', 'r', encoding='utf-8') as f:
+        LIST_HTML_TEMPLATE = f.read()
+except FileNotFoundError:
+    LIST_HTML_TEMPLATE = """
+    <!doctype html><meta charset='utf-8'><title>列表视图</title>
+    <style>
+      :root{--outline:#CAC4D0}
+      body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"PingFang SC","Microsoft Yahei",sans-serif;background:#F7F2FA;margin:0;padding:12px;color:#1C1B1F}
+      .items-list{display:block}
+      .l-card{position:relative;background:#fff;border-radius:16px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin:10px 0;transition:transform .2s ease, box-shadow .2s ease}
+      .l-card:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(0,0,0,.12)}
+      .l-form{display:grid;grid-template-columns:1fr 320px;gap:8px;align-items:start;padding:12px;position:relative}
+      .l-wrap, .l-warp{display:flex;gap:16px;align-items:flex-start}
+      .l-left, i-left{display:grid;grid-template-rows:auto auto;gap:8px}
+      .l-top{display:flex;gap:10px;align-items:center}
+      .l-select{display:none;align-items:center;justify-content:center;width:22px;height:22px;border:2px solid var(--outline);border-radius:6px;user-select:none;overflow:hidden;font-size:0;line-height:0}
+      body.batch-on .l-select{display:inline-flex}
+      .l-select input{appearance:none;width:0;height:0;margin:0}
+      .l-select.checked{border-color:#28a745;background:#28a745}
+      .l-select.checked::after{content:'✓';color:#fff;font-size:12px;line-height:12px;text-align:center}
+      .l-tag{color:#6750A4;font-weight:700}
+      .l-comment{color:#1C1B1F;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42vw}
+      .l-meta{color:#49454F;font-size:13px;display:grid;gap:2px}
+      .l-images, i-image{display:flex;flex-wrap:nowrap;overflow:hidden;gap:6px;align-items:center;height:80px}
+      .l-images img, i-image img{flex:0 0 80px;width:80px;height:80px;border-radius:8px;border:1px solid var(--outline);object-fit:cover}
+      .l-right, i-right{display:flex;flex-direction:column;min-height:80px;position:relative}
+      .l-badges, badge{position:absolute;top:8px;right:8px;display:flex;gap:8px}
+      .badge{padding:4px 10px;border-radius:16px;font-size:12px;font-weight:600}
+      .badge-anonymous{background:#F8D7DA;color:#721C24}
+      .badge-images{background:#D4EDDA;color:#155724}
+      .l-actions{margin-top:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+      .l-status{margin-top:auto;padding:10px 12px;border:1px solid var(--outline);border-radius:999px;text-align:center;color:#155724;background:rgba(212,237,218,.5)}
+      .l-card.processed{opacity:.82}
+      .btn{height:41px;padding:0 12px;border:none;border-radius:999px;background:rgba(202,196,208,.35);box-shadow:inset 0 0 0 2px var(--outline);color:#000;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:transform .2s ease, box-shadow .2s ease}
+      .btn:hover{transform:translateY(-2px);box-shadow:0 1px 2px rgba(0,0,0,.2), inset 0 0 0 2px var(--outline)}
+      .btn-success{background:rgba(40,167,69,.35);box-shadow:inset 0 0 0 2px #28a745;color:#000}
+      .btn-danger{background:rgba(220,53,69,.35);box-shadow:inset 0 0 0 2px #dc3545;color:#000}
+      .btn-info{background:rgba(23,162,184,.35);box-shadow:inset 0 0 0 2px #17a2b8;color:#000}
+      /* 批量工具条 */
+      .batch-bar{position:sticky;top:0;z-index:12000;display:grid;grid-template-columns:1fr;gap:8px;align-items:center;background:#fff;border:1px solid var(--outline);border-radius:12px;padding:8px 10px;margin-bottom:8px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+      .batch-row1{display:flex;align-items:center;gap:12px}
+      .batch-bar .count{color:#49454F}
+      .batch-actions{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+      @media (max-width: 900px){ .l-form{grid-template-columns:1fr 200px} }
+      @media (max-width: 720px){ .l-form{grid-template-columns:1fr} .l-actions{margin-top:8px} }
+    </style>
+    <div class='batch-bar'>
+      <div class='batch-row1'>
+        <label class='batch-toggle'><input id='batchSwitch' type='checkbox'> 批量模式</label>
+        <span class='count' id='selCount'>已选 0</span>
+      </div>
+      <div class='batch-actions'>
+        <button class='btn btn-success' id='batchApprove'>✅ 通过</button>
+        <button class='btn btn-danger' id='batchDelete'>🗑️ 删除</button>
+        <button class='btn' id='batchMore'>⋯ 其他</button>
+        <button class='btn' id='selectAll'>全选</button>
+        <button class='btn' id='invertSel'>反选</button>
+      </div>
+    </div>
+    <div class='items-list'>{rows}</div>
+    <script>
+      // SSE: 列表实时插入
+      (function(){
+        try{
+          const es = new EventSource('/events');
+          function currentMax(){ let m=0; document.querySelectorAll('.l-card input[name="tag"]').forEach(i=>{const v=parseInt(i.value,10); if(!isNaN(v)) m=Math.max(m,v);}); return m; }
+          async function insertTag(tag){ try{ const r=await fetch('/api/list_card?tag='+encodeURIComponent(String(tag))); if(!r.ok) return; const j=await r.json(); const wrap=document.createElement('div'); wrap.innerHTML=j.html; const card=wrap.firstElementChild; if(!card) return; const list=document.querySelector('.items-list'); if(!list) return; list.insertAdjacentElement('afterbegin', card); }catch(_){}}
+          es.onmessage=(ev)=>{ try{ const data=JSON.parse(ev.data); if (data.type==='new_pending'){ const curMax=currentMax(); fetch('/api/pending_tags').then(r=>r.json()).then(async (j)=>{ const tags=(j.tags||[]).map(t=>parseInt(t,10)).filter(n=>!isNaN(n)); const newOnes=tags.filter(n=>n>curMax).sort((a,b)=>a-b); for(const t of newOnes){ await insertTag(t);} }); } else if (data.type==='undo'){ const t=parseInt(data.tag,10); if(!isNaN(t)) insertTag(t); } }catch(_){ } };
+        }catch(_){ }
+      })();
+
+      // 批量模式
+      (function(){
+        const bodyEl=document.body, selCount=document.getElementById('selCount');
+        function boxes(){ return Array.from(document.querySelectorAll('.l-card input.sel')); }
+        function update(){ const n=boxes().filter(x=>x.checked).length; selCount.textContent='已选 '+n; const dis=n===0; ['batchApprove','batchDelete','batchMore'].forEach(id=>{ const b=document.getElementById(id); if(b) b.disabled=dis; }); }
+        document.getElementById('batchSwitch')?.addEventListener('change', (e)=>{ if(e.target.checked) bodyEl.classList.add('batch-on'); else { bodyEl.classList.remove('batch-on'); boxes().forEach(cb=>cb.checked=false); document.querySelectorAll('.l-select').forEach(l=>l.classList.remove('checked')); update(); } });
+        document.getElementById('selectAll')?.addEventListener('click', (e)=>{ e.preventDefault(); boxes().forEach(cb=>{cb.checked=true; cb.closest('.l-select')?.classList.add('checked');}); update(); });
+        document.getElementById('invertSel')?.addEventListener('click', (e)=>{ e.preventDefault(); boxes().forEach(cb=>{cb.checked=!cb.checked; cb.closest('.l-select')?.classList.toggle('checked', cb.checked);}); update(); });
+        document.addEventListener('click', (e)=>{ const lab=e.target.closest('.l-select'); if(lab){ e.preventDefault(); const cb=lab.querySelector('input.sel'); cb.checked=!cb.checked; lab.classList.toggle('checked', cb.checked); update(); } });
+        document.addEventListener('change', (e)=>{ if (e.target.matches('input.sel')){ e.target.closest('.l-select')?.classList.toggle('checked', e.target.checked); update(); } });
+        async function doBatch(cmd){ const tags=boxes().filter(cb=>cb.checked).map(cb=>cb.value); if(!tags.length) return; const form=new URLSearchParams(); tags.forEach(t=>form.append('tags',t)); form.set('cmd',cmd); form.set('flag',''); const r=await fetch('/api/batch', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:form.toString()}); if(r.ok){ location.reload(); } }
+        document.getElementById('batchApprove')?.addEventListener('click', (e)=>{ e.preventDefault(); doBatch('是'); });
+        document.getElementById('batchDelete')?.addEventListener('click', (e)=>{ e.preventDefault(); doBatch('删'); });
+        // 简单“其他”菜单（纵向列表）
+        const moreBtn=document.getElementById('batchMore'); let menu=null; function closeMenu(){ if(menu){ menu.remove(); menu=null; }}
+        function openMenu(anchor){ closeMenu(); menu=document.createElement('div'); menu.style.cssText='position:fixed;z-index:20000;background:#fff;border:1px solid var(--outline);border-radius:12px;box-shadow:0 6px 18px rgba(0,0,0,.12);overflow:hidden;min-width:160px'; const opts=['评论','拒','拉黑','刷新','立即']; opts.forEach((k,i)=>{ const b=document.createElement('button'); b.className='btn'; b.textContent=k; b.style.cssText='display:block;width:100%;border-radius:0;height:36px;background:#fff;box-shadow:none;border-bottom:1px solid var(--outline)'; if(i===opts.length-1) b.style.borderBottom='none'; b.onclick=(ev)=>{ ev.preventDefault(); doBatch(k); closeMenu(); }; menu.appendChild(b); }); const r=anchor.getBoundingClientRect(); const w=200; let left=Math.max(8, Math.min(window.innerWidth-w-8, r.left)); if (r.right > window.innerWidth-100) left=Math.max(8, r.right-w); menu.style.left=left+'px'; menu.style.top=(r.bottom+6)+'px'; document.body.appendChild(menu); setTimeout(()=>{ const onDoc=(e)=>{ const m=menu; if(!m){ document.removeEventListener('click', onDoc); return;} if(!m.contains(e.target) && e.target!==anchor){ document.removeEventListener('click', onDoc); closeMenu(); } }; document.addEventListener('click', onDoc, { passive:true }); }); }
+        moreBtn?.addEventListener('click', (e)=>{ e.preventDefault(); openMenu(moreBtn); });
+      })();
+
+      // 单卡片三键：详情/通过/删除（AJAX）
+      document.addEventListener('click', async (e)=>{
+        const btn=e.target.closest('.act'); if(!btn) return; e.preventDefault();
+        const form=btn.closest('form'); if(!form) return; const tag=(form.querySelector('input[name="tag"]')||{}).value; const cmd=btn.getAttribute('data-cmd');
+        try{ const body=new URLSearchParams({tag,cmd,flag:''}); const r=await fetch('/api/action',{method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body}); if(!r.ok){ alert('操作失败: '+r.status); return; }
+          const card=btn.closest('.l-card'); if(cmd==='删'){ card && card.remove(); } else { card && card.classList.add('processed'); const act=card && card.querySelector('.l-actions'); if (act) act.outerHTML='<div class="l-status">已处理</div>'; }
+        }catch(err){ alert('网络错误: '+err); }
+      });
+    </script>
+    """
+
 # 登录页模板（可选外置）
 try:
     with open(SCRIPT_DIR / 'login_template.html', 'r', encoding='utf-8') as f:
@@ -633,6 +736,35 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        # 列表视图页（iframe 或独立）
+        if parsed_path.path == '/list':
+            self.render_list_page(parsed_path, user)
+            return
+
+        # 列表卡片 HTML（用于 SSE 插入）
+        if parsed_path.path == '/api/list_card':
+            user = self._get_user()
+            if not user:
+                self.send_error(401, 'Unauthorized')
+                return
+            qs = urllib.parse.parse_qs(parsed_path.query)
+            tag = (qs.get('tag') or [''])[0]
+            if not tag.isdigit():
+                self.send_error(400, 'Bad Request')
+                return
+            items = list_pending(search=None, group_filter=user['group'])
+            item = next((i for i in items if i.get('tag') == tag), None)
+            if not item:
+                self.send_error(404, 'Not Found')
+                return
+            html_card = self._generate_list_card(item)
+            body = json.dumps({"tag": tag, "html": html_card}, ensure_ascii=False).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         # API 端点：待审核元信息（用于无刷新提示）
         if parsed_path.path == '/api/pending_meta':
             try:
@@ -760,6 +892,41 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             self.send_response(303)
             self.send_header('Location', f"/?notice={notice}")
             self.end_headers()
+            return
+        elif path == '/api/batch':
+            # 批量执行同一命令
+            user = self._get_user()
+            if not user:
+                self.send_error(401, 'Unauthorized')
+                return
+            raw_tags = params.get('tags', [])
+            if len(raw_tags) == 1 and ',' in raw_tags[0]:
+                tags = [t.strip() for t in raw_tags[0].split(',') if t.strip()]
+            else:
+                tags = [t for t in raw_tags if t]
+            cmd = (params.get('cmd') or [''])[0]
+            flag = (params.get('flag') or [''])[0]
+            if not tags or not cmd:
+                self.send_error(400, 'Bad Request')
+                return
+            ok = fail = 0
+            for tag in tags:
+                # 组校验
+                row = db_query("SELECT ACgroup FROM preprocess WHERE tag = ?", (tag,))
+                if not row or str(row[0].get('ACgroup')) != str(user['group']):
+                    fail += 1
+                    continue
+                rc, _ = run_audit_command(tag, cmd, flag, web_user=user.get('username'))
+                if rc == 0: ok += 1
+                else: fail += 1
+            total = ok + fail
+            level = 'success' if fail == 0 else ('warning' if ok > 0 else 'error')
+            broadcast_event({"type":"toast","level":level,"text":f"批量执行 {total} 项: 成功 {ok}, 失败 {fail}"}, target_group=user['group'])
+            body = json.dumps({"ok": True, "done": ok, "failed": fail}).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(body)
             return
         elif path == '/api/action':
             # 单卡片操作（AJAX）
@@ -1144,6 +1311,69 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         for k, v in replacements.items():
             page = page.replace(k, v)
         self.wfile.write(page.encode('utf-8'))
+
+    def render_list_page(self, parsed_path, user):
+        """渲染列表视图页面（供 iframe 使用）。"""
+        query_params = urllib.parse.parse_qs(parsed_path.query)
+        search_term = query_params.get('search', [''])[0]
+        items = list_pending(search=search_term, group_filter=user['group'])
+        rows_html = ''.join(self._generate_list_card(i) for i in items)
+        html_out = LIST_HTML_TEMPLATE.replace('{rows}', rows_html)
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(html_out.encode('utf-8'))
+
+    def _generate_list_card(self, item: dict) -> str:
+        """列表模式卡片：左文字+图，右三键（详情/通过/删除）。"""
+        # 图片缩略图
+        images_html = ""
+        if item.get('has_images'):
+            cnt = 0
+            for img in item.get('images') or []:
+                if cnt >= 6:
+                    break
+                img_path = urlquote(f"/cache/{item['img_source_dir']}/{item['tag']}/{img}")
+                images_html += f'<img src="{img_path}" alt="图片" loading="lazy">'
+                cnt += 1
+        # 徽章
+        badges_html = ""
+        if item.get('is_anonymous'):
+            badges_html += '<span class="badge badge-anonymous">匿名</span>'
+        if item.get('has_images'):
+            badges_html += f'<span class="badge badge-images">{int(item.get("image_count") or 0)} 图</span>'
+        # 文本
+        tag = html.escape(item.get('tag') or '?')
+        comment = html.escape((item.get('comment') or '').replace('\n',' ').strip())
+        if len(comment) > 120:
+            comment = comment[:120] + '…'
+        nickname = html.escape(item.get('nickname') or '未知')
+        senderid = html.escape(str(item.get('senderid') or ''))
+        submit_time = html.escape(item.get('submit_time') or '')
+        detail_url = f"/detail?tag={urlquote(item['tag'])}"
+
+        return f"""
+        <div class=\"l-card\"> 
+          <form method=\"post\" action=\"/\" class=\"l-form\"> 
+            <input type=\"hidden\" name=\"tag\" value=\"{tag}\"> 
+            <div class=\"l-wrap\"> 
+              <i-left class=\"l-left\"> 
+                <div class=\"l-top\"><label class=\"l-select\"><input type=\"checkbox\" class=\"sel\" value=\"{tag}\"></label><span class=\"l-tag\">#{tag}</span><span class=\"l-comment\">{comment or '[仅图片投稿]'} </span></div> 
+                <div class=\"l-meta\"><div>投稿人：{nickname}{(' ('+senderid+')') if senderid else ''}</div><div>时间：{submit_time}</div></div> 
+              </i-left> 
+              <i-image class=\"l-images\">{images_html}</i-image> 
+            </div> 
+            <i-right class=\"l-right\"> 
+              <div class=\"l-actions\">  
+                <a href=\"{detail_url}\" class=\"btn btn-info\" target=\"_blank\">📄 详情</a> 
+                <button type=\"button\" class=\"btn btn-success act\" data-cmd=\"是\">✅ 通过</button> 
+                <button type=\"button\" class=\"btn btn-danger act\" data-cmd=\"删\">🗑️ 删除</button> 
+              </div> 
+            </i-right> 
+            <badge class=\"l-badges\">{badges_html}</badge> 
+          </form> 
+        </div> 
+        """
 
     def _get_item(self, tag: str):
         rows = list_pending()

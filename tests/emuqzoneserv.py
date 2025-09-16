@@ -65,38 +65,64 @@ class QzoneEmulator:
                         self._serve_data()
                     else:
                         # 明确返回 404（避免 SimpleHTTPRequestHandler 去找磁盘文件）
-                        self.send_response(404)
-                        self.send_header('Content-Type', 'text/plain; charset=utf-8')
-                        self.end_headers()
-                        self.wfile.write(b'Not Found')
+                        body = b'Not Found'
+                        try:
+                            self.send_response(404)
+                            self.send_header('Content-Type', 'text/plain; charset=utf-8')
+                            self.send_header('Content-Length', str(len(body)))
+                            self.end_headers()
+                            self.wfile.write(body)
+                        except (BrokenPipeError, ConnectionResetError):
+                            # 客户端断开，安静退出
+                            self.close_connection = True
+                            return
+                except (BrokenPipeError, ConnectionResetError):
+                    # 客户端在我们写入时断开连接，避免噪音日志
+                    logger.info("Client disconnected during GET write")
+                    self.close_connection = True
+                    return
                 except Exception as e:
-                    logger.exception("Handler error")
+                    # 只有在连接仍然存在时尝试返回 500
+                    logger.error(f"Handler error: {e}")
                     body = json.dumps({"error": str(e)}).encode('utf-8')
-                    self.send_response(500)
-                    self.send_header('Content-Type', 'application/json; charset=utf-8')
-                    self.send_header('Content-Length', str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
+                    try:
+                        self.send_response(500)
+                        self.send_header('Content-Type', 'application/json; charset=utf-8')
+                        self.send_header('Content-Length', str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body)
+                    except (BrokenPipeError, ConnectionResetError):
+                        self.close_connection = True
+                        return
 
             def _serve_main_page(self):
                 html_content = self._generate_html().encode('utf-8')
-                self.send_response(200)
-                self.send_header('Content-Type', 'text/html; charset=utf-8')
-                self.send_header('Content-Length', str(len(html_content)))
-                self.end_headers()
-                self.wfile.write(html_content)
+                try:
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'text/html; charset=utf-8')
+                    self.send_header('Content-Length', str(len(html_content)))
+                    self.end_headers()
+                    self.wfile.write(html_content)
+                except (BrokenPipeError, ConnectionResetError):
+                    self.close_connection = True
+                    return
 
             def _serve_data(self):
                 # ✅ 这里改成 server.emulator
                 with self.server.emulator.web_lock:
                     data = self.server.emulator.web_data.copy()
                 body = json.dumps(data, ensure_ascii=False).encode('utf-8')
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json; charset=utf-8')
-                self.send_header('Access-Control-Allow-Origin', '*')
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+                try:
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json; charset=utf-8')
+                    self.send_header('Access-Control-Allow-Origin', '*')
+                    self.send_header('Content-Length', str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                except (BrokenPipeError, ConnectionResetError):
+                    # 轮询刷新时页面关闭很常见，静默处理
+                    self.close_connection = True
+                    return
 
             def _generate_html(self):
                 return f"""<!DOCTYPE html>
