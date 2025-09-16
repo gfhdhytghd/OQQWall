@@ -46,24 +46,24 @@
         }
 
         /* 2. 卡片与布局优化 */
-        /* Masonry-style 瀑布流布局（小红书风格） */
+        /* Masonry：CSS Grid + JS 量测（更稳） */
         .items-grid {
-            /* 使用多列布局代替网格，避免同一行不同高度造成的空白 */
-            column-width: 360px;   /* 每列的理想宽度，浏览器会自动适配列数 */
-            column-gap: 24px;      /* 列间距 */
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+            grid-auto-rows: auto;   /* 首帧用真实高度，量测后切换为 1px 单位行高 */
+            grid-auto-flow: dense;
+            column-gap: 24px;
+            row-gap: 0;             /* 行间距由卡片 margin-bottom 提供，消除量化误差 */
         }
 
         .item-card {
             background: var(--color-surface-container-lowest);
             border-radius: 16px;
             box-shadow: var(--shadow-2);
-            display: inline-block;   /* 关键：列布局中每个卡片作为独立块 */
-            width: 100%;             /* 占满列宽 */
-            break-inside: avoid;     /* 避免卡片被拆分到多列 */
-            margin: 0 0 24px;        /* 行间距由外边距提供 */
-            /* 卡片内部仍然使用 flex 布局 */
-            display: inline-flex;
+            display: flex;
             flex-direction: column;
+            width: 100%;
+            margin: 0 0 24px;        /* 垂直间距 */
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
         .item-card.processed { opacity: 0.8; }
@@ -291,7 +291,11 @@
             .global-row .row-1, .global-row .row-2 { display: contents; }
         }
         .select { padding: 10px 12px; border:1px solid var(--color-outline); border-radius: 12px; }
-        .num-input { width: 100%; padding: 10px 12px; border:1px solid var(--color-outline); border-radius: 12px; }
+        .num-input { width: 100%; padding: 10px 16px; border:1px solid var(--color-outline); border-radius: 999px; background: #fff; }
+        /* 美化 number 输入的加减按钮 */
+        .num-input::-webkit-outer-spin-button,
+        .num-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+        .num-input { -moz-appearance: textfield; }
         
         .filter-row {
             display: flex;
@@ -470,6 +474,65 @@
     </div>
     
     <script>
+        // ======= Masonry（Grid 横向优先填充，稳健版） =======
+        (function(){
+            function getGrid(){ return document.querySelector('.items-grid'); }
+            function rowMetrics(grid){
+                const cs = window.getComputedStyle(grid);
+                const rowGap = 0; // 行间距固定为0，由卡片margin提供
+                let rowH = parseFloat(cs.gridAutoRows);
+                if (!rowH || isNaN(rowH)) rowH = 1; // 使用1px单元减少量化误差
+                return { rowGap, rowH };
+            }
+            function measure(card){
+                const grid = getGrid(); if (!grid || !card) return;
+                const { rowGap, rowH } = rowMetrics(grid);
+                const target = card.querySelector('form') || card;
+                const h0 = Math.ceil(target.scrollHeight || target.getBoundingClientRect().height);
+                const mb = parseFloat(getComputedStyle(card).marginBottom || '0') || 0;
+                const h = h0 + mb;
+                const span = Math.max(1, Math.ceil(h / rowH));
+                card.style.gridRowEnd = 'span ' + span;
+            }
+            function layoutAll(){
+                const grid = getGrid(); if (!grid) return;
+                // 首帧使用 auto 行高渲染真实高度，避免细条
+                grid.style.gridAutoRows = 'auto';
+                requestAnimationFrame(()=>{
+                    grid.querySelectorAll('.item-card').forEach(measure);
+                    grid.style.gridAutoRows = '1px';
+                });
+            }
+            function onImgLoad(e){
+                const img = e.target; if (!img || img.tagName !== 'IMG') return;
+                const card = img.closest('.item-card'); if (!card) return;
+                measure(card);
+            }
+            const mo = new MutationObserver((records)=>{
+                for (const r of records){
+                    r.addedNodes && r.addedNodes.forEach(node=>{
+                        if (node && node.nodeType===1){
+                            if (node.classList.contains('item-card')) requestAnimationFrame(()=>measure(node));
+                            node.querySelectorAll && node.querySelectorAll('.item-card').forEach(el=>requestAnimationFrame(()=>measure(el)));
+                        }
+                    });
+                }
+            });
+            let ro;
+            try { ro = new ResizeObserver((entries)=>{ for (const e of entries){ if (e.target) measure(e.target); } }); } catch(_){ }
+            window.addEventListener('load', ()=>{
+                const grid = getGrid();
+                if (grid){
+                    mo.observe(grid, { childList: true, subtree: true });
+                    grid.querySelectorAll('.item-card').forEach(el=> ro && ro.observe(el));
+                }
+                layoutAll();
+                if (document.fonts && document.fonts.ready) document.fonts.ready.then(layoutAll);
+            });
+            window.addEventListener('resize', ()=>{ clearTimeout(window.__mz_r); window.__mz_r = setTimeout(layoutAll, 150); });
+            document.addEventListener('load', onImgLoad, true);
+            window._masonry = { measure, layoutAll };
+        })();
         // ======= 轻量级图片浏览器（支持左右键和移动端按钮） =======
         (function(){
             let modal=null, imgEl=null, leftBtn=null, rightBtn=null, currentIdx=0, list=[];
