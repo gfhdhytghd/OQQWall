@@ -68,87 +68,6 @@ except FileNotFoundError:
     <p>请确保模板文件与 web_review.py 在同一目录下。</p>
     """
 
-# 列表页模板
-try:
-    with open(SCRIPT_DIR / 'list_template.html', 'r', encoding='utf-8') as f:
-        LIST_HTML_TEMPLATE = f.read()
-except FileNotFoundError:
-    LIST_HTML_TEMPLATE = """
-    <!doctype html><meta charset='utf-8'><title>列表视图</title>
-    <style>
-      :root{--outline:#CAC4D0}
-      body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"PingFang SC","Microsoft Yahei",sans-serif;background:#F7F2FA;margin:0;padding:12px;color:#1C1B1F}
-      .items-list{display:block}
-      .l-card{position:relative;background:#fff;border-radius:16px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin:10px 0;transition:transform .2s ease, box-shadow .2s ease}
-      .l-card.open{z-index:10000}
-      .l-card:hover{transform:translateY(-4px);box-shadow:0 6px 18px rgba(0,0,0,.12)}
-      /* 两列：左侧主区(含文字与图片) + 右侧固定操作区 */
-      .l-form{display:grid;grid-template-columns:1fr 340px;gap:8px;align-items:start;padding:12px;position:relative}
-      .l-main{display:grid;grid-template-columns:auto auto;gap:16px;align-items:start;width: fit-content;}
-      .l-left{display:grid;grid-template-rows:auto auto;gap:8px}
-      .l-top{display:flex;gap:10px;align-items:center}
-      .l-tag{color:#6750A4;font-weight:700}
-      .l-comment{color:#1C1B1F;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42vw}
-      .l-meta{color:#49454F;font-size:13px;display:grid;gap:2px}
-      /* 图片单行，不换行；容器溢出则隐藏，达到“省略”效果 */
-      .l-images{display:flex;flex-wrap:nowrap;overflow:hidden;gap:6px;align-items:center;height:80px}
-      .l-images img{flex:0 0 80px;width:80px;height:80px;border-radius:8px;border:1px solid var(--outline);object-fit:cover}
-      .l-right{display:flex;flex-direction:column;min-height:80px;position:relative}
-      .hidden{display:none}
-      .l-badges{position:absolute;top:8px;right:8px;display:flex;gap:8px}
-      .badge{padding:4px 10px;border-radius:16px;font-size:12px;font-weight:600}
-      .badge-anonymous{background:#F8D7DA;color:#721C24}
-      .badge-images{background:#D4EDDA;color:#155724}
-      .l-actions{margin-top:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-      .l-more-panel{position:absolute;right:0;top:calc(100% + 6px);background:#fff;border:1px solid var(--outline);border-radius:14px;padding:10px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;box-shadow:0 6px 18px rgba(0,0,0,.12);z-index:4000}
-      .l-more-panel input[type="text"]{box-sizing:border-box;min-width:0}
-      .l-more-panel .btn{min-width:0}
-      .l-more-panel.hidden{display:none !important}
-      .btn{height:41px;padding:0 12px;border:none;border-radius:999px;background:rgba(202,196,208,.35);box-shadow:inset 0 0 0 2px var(--outline);color:#000;text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:transform .2s ease, box-shadow .2s ease}
-      .btn:hover{transform:translateY(-2px);box-shadow:0 1px 2px rgba(0,0,0,.2), inset 0 0 0 2px var(--outline)}
-      .btn-success{background:rgba(40,167,69,.35);box-shadow:inset 0 0 0 2px #28a745;color:#000}
-      .btn-warning{background:rgba(255,193,7,.35);box-shadow:inset 0  0 0 2px #ffc107;color:#000}
-      .btn-info{background:rgba(23,162,184,.35);box-shadow:inset 0 0 0 2px #17a2b8;color:#000}
-      @media (max-width: 900px){ .l-form{grid-template-columns:1fr 180px} }
-      @media (max-width: 720px){ .l-form{grid-template-columns: 1fr; } .l-main{grid-template-columns:1fr} .l-right{min-height:auto} .l-actions{margin-top:8px} }
-    </style>
-    <div class='items-list'>{rows}</div>
-    <script>
-      // 其他下拉面板交互
-      document.addEventListener('click', function(e){
-        const btn = e.target.closest('.l-more-btn');
-        if (btn){
-          const rightCol = btn.closest('.l-right');
-          const panel = rightCol && rightCol.querySelector('.l-more-panel');
-          const cardEl = btn.closest('.l-card');
-          if (!panel || !cardEl) return;
-          // 关闭其它
-          document.querySelectorAll('.l-more-panel').forEach(p=>{
-            if (p!==panel){
-              p.classList.add('hidden');
-              const c = p.closest('.l-card');
-              if (c) c.classList.remove('open');
-            }
-          });
-          // 切换当前
-          const nowHidden = panel.classList.toggle('hidden');
-          if (nowHidden){
-            cardEl.classList.remove('open');
-          } else {
-            cardEl.classList.add('open');
-          }
-          e.stopPropagation();
-          return;
-        }
-        // 点击空白关闭
-        if (!e.target.closest('.l-more-panel')){
-          document.querySelectorAll('.l-more-panel').forEach(p=> p.classList.add('hidden'));
-          document.querySelectorAll('.l-card.open').forEach(c=> c.classList.remove('open'));
-        }
-      });
-    </script>
-    """
-
 # 登录页模板（可选外置）
 try:
     with open(SCRIPT_DIR / 'login_template.html', 'r', encoding='utf-8') as f:
@@ -771,10 +690,6 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         if parsed_path.path == '/detail':
             self.render_detail_page(parsed_path, user)
             return
-        # 列表视图页（iframe 嵌入）
-        if parsed_path.path == '/list':
-            self.render_list_page(parsed_path, user)
-            return
         # 详情页HTML渲染预览
         if parsed_path.path == '/detail_html':
             self.render_detail_html(parsed_path, user)
@@ -1010,90 +925,6 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         )
         
         self.wfile.write(page_content.encode('utf-8'))
-
-    def render_list_page(self, parsed_path, user):
-        """渲染列表视图页面（供 iframe 使用）。"""
-        query_params = urllib.parse.parse_qs(parsed_path.query)
-        search_term = query_params.get('search', [''])[0]
-        # 筛选同主页面一致
-        items = list_pending(search=search_term, group_filter=user['group'])
-        rows_html = ''.join(self._generate_list_card(i) for i in items)
-        html_out = LIST_HTML_TEMPLATE.replace('{rows}', rows_html)
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html; charset=utf-8')
-        self.end_headers()
-        self.wfile.write(html_out.encode('utf-8'))
-
-    def _generate_list_card(self, item: dict) -> str:
-        """专用于列表模式的卡片，三分栏布局。
-        左：标签+评论（单行省略） / 投稿人 / 时间
-        中：图片缩略图网格
-        右：右上角徽章，右下角操作区（三键等分）
-        """
-        # 图片缩略图
-        images_html = ""
-        if item.get('has_images'):
-            cnt = 0
-            for img in item.get('images') or []:
-                if cnt >= 6:
-                    break
-                img_path = urlquote(f"/cache/{item['img_source_dir']}/{item['tag']}/{img}")
-                images_html += f'<img src="{img_path}" alt="图片" loading="lazy">'
-                cnt += 1
-
-        # 徽章
-        badges_html = ""
-        if item.get('is_anonymous'):
-            badges_html += '<span class="badge badge-anonymous">匿名</span>'
-        if item.get('has_images'):
-            badges_html += f'<span class="badge badge-images">{int(item.get("image_count") or 0)} 图</span>'
-
-        # 文本
-        tag = html.escape(item.get('tag') or '?')
-        comment = html.escape((item.get('comment') or '').replace('\n',' ').strip())
-        if len(comment) > 120:
-            comment = comment[:120] + '…'
-        nickname = html.escape(item.get('nickname') or '未知')
-        senderid = html.escape(str(item.get('senderid') or ''))
-        submit_time = html.escape(item.get('submit_time') or '')
-        detail_url = f"/detail?tag={urlquote(item['tag'])}"
-
-        return f"""
-        <div class=\"l-card\">
-          <form method=\"post\" action=\"/\" class=\"l-form\">
-            <input type=\"hidden\" name=\"tag\" value=\"{tag}\"> 
-            <input type=\"hidden\" name=\"redirect\" value=\"/?view=list\">
-            <div class=\"l-main\">
-              <div class=\"l-left\"> 
-                <div class=\"l-top\"><span class=\"l-tag\">#{tag}</span><span class=\"l-comment\">{comment or '[仅图片投稿]'}<span></div>
-                <div class=\"l-meta\"><div>投稿人：{nickname}{(' ('+senderid+')') if senderid else ''}</div><div>时间：{submit_time}</div></div>
-              </div>
-              <div class=\"l-images\">{images_html}</div>
-            </div>
-            <div class=\"l-right\">
-              <div class=\"l-actions\"> 
-                <a href=\"{detail_url}\" class=\"btn btn-info\" target=\"_blank\">📄 详情</a>
-                <button type=\"submit\" name=\"cmd\" value=\"是\" class=\"btn btn-success\">✅ 通过</button>
-                <button type=\"button\" class=\"btn l-more-btn\">⋯ 其他</button>
-              </div>
-              <div class=\"l-more-panel hidden\"> 
-                <input type=\"text\" name=\"flag\" placeholder=\"评论或拒绝/拉黑原因（可选）\" style=\"grid-column:1 / span 2;width:100%;padding:8px 12px;border:1px solid var(--outline);border-radius:999px;\"> 
-                <button type=\"submit\" name=\"cmd\" value=\"评论\" class=\"btn\">💬 评论</button>
-                <button type=\"submit\" name=\"cmd\" value=\"拒\" class=\"btn btn-warning\">🚫 拒绝</button>
-                <button type=\"submit\" name=\"cmd\" value=\"否\" class=\"btn\">❎ 否</button>
-                <button type=\"submit\" name=\"cmd\" value=\"删\" class=\"btn btn-danger\">🗑️ 删除</button>
-                <button type=\"submit\" name=\"cmd\" value=\"拉黑\" class=\"btn btn-danger\">⛔ 拉黑</button>
-                <button type=\"submit\" name=\"cmd\" value=\"刷新\" class=\"btn\">🔄 刷新</button>
-                <button type=\"submit\" name=\"cmd\" value=\"立即\" class=\"btn btn-info\">⚡ 立即</button>
-                <button type=\"submit\" name=\"cmd\" value=\"重渲染\" class=\"btn\">♻️ 重渲染</button>
-                <button type=\"submit\" name=\"cmd\" value=\"展示\" class=\"btn\">👁️ 展示</button>
-                <button type=\"submit\" name=\"cmd\" value=\"查\" class=\"btn btn-info\">🔍 查成分</button>
-              </div>
-            </div>
-            <div class=\"l-badges\">{badges_html}</div>
-          </form>
-        </div>
-        """
     
     def _generate_item_card(self, item):
         """
