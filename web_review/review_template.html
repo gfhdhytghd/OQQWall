@@ -291,18 +291,20 @@
         .global-row .note { grid-column: 1 / -1; color: var(--color-on-surface-variant); }
         .global-row .row-1 { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
         .global-row .row-2 { display:grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
-        /* 统一全局操作区按钮高度，避免含 Emoji 的按钮更高 */
-        .global-controls .btn { height: 60px; padding: 0 18px; line-height: 1; border-radius: 999px; }
-        .global-controls .num-input { height: 60px; padding: 0 18px; line-height: 1; border-radius: 999px; }
+        /* 统一全局操作区按钮高度（桌面40px，移动端保持60px） */
+        .global-controls .btn { height: 40px; padding: 0 18px; line-height: 1; border-radius: 999px; }
+        .global-controls .num-input { height: 40px; padding: 0 18px; line-height: 1; border-radius: 999px; }
         /* 超大屏：合并为一行（9列） */
         @media (min-width: 1200px) {
             .global-row { grid-template-columns: repeat(9, auto); }
             .global-row .row-1, .global-row .row-2 { display: contents; }
         }
-        /* 移动端：3列布局 */
+        /* 移动端：3列布局（恢复按钮高度60px） */
         @media (max-width: 768px) {
             .global-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
             .global-row .row-1, .global-row .row-2 { display: contents; }
+            .global-controls .btn { height: 60px; }
+            .global-controls .num-input { height: 60px; }
         }
         .select { padding: 10px 12px; border:1px solid var(--color-outline); border-radius: 12px; }
         .num-input { width: 100%; padding: 10px 16px; border:1px solid var(--color-outline); border-radius: 999px; background: #fff; }
@@ -426,6 +428,9 @@
         <div class="header">
             <h1>OQQWall 审核面板</h1>
             <p>管理校园墙投稿内容，确保内容质量和社区规范</p>
+        </div>
+        <div style="display:flex;justify-content:flex-start;gap:8px;margin-bottom:8px">
+            <a href="/list" class="btn btn-info">📋 列表模式</a>
         </div>
         
         <div class="stats">

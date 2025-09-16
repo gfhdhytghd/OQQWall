@@ -116,6 +116,11 @@ except FileNotFoundError:
       @media (max-width: 900px){ .l-form{grid-template-columns:1fr 200px} }
       @media (max-width: 720px){ .l-form{grid-template-columns:1fr} .l-actions{margin-top:8px} }
     </style>
+    <div style="display:flex;justify-content:flex-start;gap:8px;margin-bottom:8px"><a href="/" class="btn">← 返回瀑布流</a></div>
+    <div class='staging-area' style="background:#ECE6F0;border-radius:16px;padding:16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+      <h2 style="margin:0 0 10px 0;color:#49454F;font-size:18px">暂存区预览</h2>
+      <div id='staging-grid' class='staging-grid' style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px"></div>
+    </div>
     <div class='batch-bar'>
       <div class='batch-row1'>
         <label class='batch-toggle'><input id='batchSwitch' type='checkbox'> 批量模式</label>
@@ -131,6 +136,46 @@ except FileNotFoundError:
     </div>
     <div class='items-list'>{rows}</div>
     <script>
+      // 暂存区：复用主页面的简化加载逻辑
+      (function(){
+        let tmr=null;
+        function schedule(){ if (tmr) return; tmr = setTimeout(()=>{ tmr=null; update(); }, 400); }
+        async function update(){
+          try{
+            const r = await fetch('/api/staged'); if(!r.ok) return; const data = await r.json();
+            const grid = document.getElementById('staging-grid'); if(!grid) return; grid.innerHTML='';
+            const groups = Object.keys(data||{});
+            if (!groups.length){ grid.innerHTML = '<div style="color:#49454F">暂无暂存内容</div>'; return; }
+            groups.forEach(groupName=>{
+              (data[groupName]||[]).forEach(item=>{
+                const div = document.createElement('div');
+                div.className='staged-item';
+                div.style.cssText='background:#fff;border-radius:12px;padding:10px;display:grid;grid-template-columns:64px 1fr auto;grid-template-rows:auto auto;gap:8px 10px;align-items:center;box-shadow:0 1px 4px rgba(0,0,0,.08)';
+                const thumbs = document.createElement('div'); thumbs.className='thumbs'; thumbs.style.cssText='display:flex;gap:6px';
+                (item.thumbs||[]).forEach(url=>{ const img=document.createElement('img'); img.src='/cache/'+item.img_source_dir+'/'+item.tag+'/'+url; img.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #CAC4D0'; thumbs.appendChild(img); });
+                const meta = document.createElement('div'); meta.className='meta'; meta.innerHTML = `<span class=\"tag\">#${item.tag}</span>`;
+                const info = document.createElement('div'); info.className='info'; info.style.cssText='color:#49454F'; info.textContent = `${item.nickname||'未知'}`;
+                const undoWrap = document.createElement('div'); undoWrap.className='undo'; const undoBtn=document.createElement('button'); undoBtn.className='btn'; undoBtn.textContent='↩ 撤销'; undoBtn.onclick=async(ev)=>{ ev.preventDefault(); try{ const rr=await fetch('/api/staged_undo',{method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:new URLSearchParams({tag:String(item.tag)})}); if(rr.ok) div.remove(); }catch(_){}}; undoWrap.appendChild(undoBtn);
+                // 布局到三列：缩略图(列1，跨两行) | 文本(列2) | 撤销(列3，跨两行)
+                thumbs.style.gridColumn = '1'; thumbs.style.gridRow = '1 / span 2';
+                meta.style.gridColumn = '2';
+                info.style.gridColumn = '2';
+                undoWrap.style.gridColumn = '3'; undoWrap.style.gridRow = '1 / span 2'; undoWrap.style.alignSelf = 'start';
+                div.appendChild(thumbs); div.appendChild(meta); div.appendChild(info); div.appendChild(undoWrap); grid.appendChild(div);
+              });
+            });
+          }catch(_){ }
+        }
+        // 首次与轮询
+        update(); setInterval(update, 15000);
+        // SSE 近实时刷新
+        try{
+          const es = new EventSource('/events');
+          es.onmessage = (ev)=>{ try{ const data = JSON.parse(ev.data||'{}');
+            if (data && (data.type==='undo' || data.type==='new_pending' || data.type==='processed' || data.type==='toast')) schedule();
+          }catch(_){ } };
+        }catch(_){ }
+      })();
       // SSE: 列表实时插入
       (function(){
         try{
@@ -757,7 +802,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             if not item:
                 self.send_error(404, 'Not Found')
                 return
-            html_card = self._generate_list_card(item)
+            html_card = self._generate_list_card(item, back_path='/list')
             body = json.dumps({"tag": tag, "html": html_card}, ensure_ascii=False).encode('utf-8')
             self.send_response(200)
             self.send_header('Content-type', 'application/json; charset=utf-8')
@@ -1204,6 +1249,8 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
     def render_detail_page(self, parsed_path, user):
         query_params = urllib.parse.parse_qs(parsed_path.query)
         tag = (query_params.get('tag') or [''])[0]
+        # 优先使用显式 back 路径，否则根据 from=list 退化
+        back_to = (query_params.get('back') or [''])[0] or ('/list' if ((query_params.get('from') or [''])[0] == 'list') else '/')
         if not tag or not tag.isdigit():
             self.send_error(400, "Bad Request: missing or invalid tag")
             return
@@ -1310,6 +1357,15 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         }
         for k, v in replacements.items():
             page = page.replace(k, v)
+        # 替换/注入返回链接为 back_to
+        try:
+            # 优先替换带 class="back" 的锚点
+            page = re.sub(r'(class=\"back\"[^>]*href=)\"[^\"]*\"', r'\1"' + back_to + '"', page, count=1)
+        except Exception:
+            pass
+        if 'class="back"' not in page:
+            # 若没有提供 back 链接，则在 <body> 后插入一个
+            page = page.replace('<body>', f'<body><div style="margin:8px 0;text-align:left"><a class="back" href="{back_to}">← 返回列表</a></div>', 1)
         self.wfile.write(page.encode('utf-8'))
 
     def render_list_page(self, parsed_path, user):
@@ -1317,14 +1373,15 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         query_params = urllib.parse.parse_qs(parsed_path.query)
         search_term = query_params.get('search', [''])[0]
         items = list_pending(search=search_term, group_filter=user['group'])
-        rows_html = ''.join(self._generate_list_card(i) for i in items)
+        back_path = '/list' + (('?' + urllib.parse.urlencode({'search': search_term})) if search_term else '')
+        rows_html = ''.join(self._generate_list_card(i, back_path=back_path) for i in items)
         html_out = LIST_HTML_TEMPLATE.replace('{rows}', rows_html)
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
         self.end_headers()
         self.wfile.write(html_out.encode('utf-8'))
 
-    def _generate_list_card(self, item: dict) -> str:
+    def _generate_list_card(self, item: dict, back_path: str | None = None) -> str:
         """列表模式卡片：左文字+图，右三键（详情/通过/删除）。"""
         # 图片缩略图
         images_html = ""
@@ -1350,7 +1407,9 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         nickname = html.escape(item.get('nickname') or '未知')
         senderid = html.escape(str(item.get('senderid') or ''))
         submit_time = html.escape(item.get('submit_time') or '')
-        detail_url = f"/detail?tag={urlquote(item['tag'])}"
+        # 详情链接携带返回路径，优先使用传入的 back_path
+        b = back_path or '/list'
+        detail_url = f"/detail?tag={urlquote(item['tag'])}&back={urlquote(b)}"
 
         return f"""
         <div class=\"l-card\"> 
