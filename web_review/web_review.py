@@ -887,7 +887,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         
         # 渲染最终页面（安全转义模板中的花括号，避免与 CSS 冲突）
         template_safe = INDEX_HTML_TEMPLATE.replace('{', '{{').replace('}', '}}')
-        for key in ['total_count', 'anonymous_count', 'with_images_count', 'search', 'rows', 'group_options', 'userbar', 'notice_html', 'initial_max_tag']:
+        for key in ['total_count', 'anonymous_count', 'with_images_count', 'search', 'rows', 'group_options', 'userbar', 'notice_html', 'initial_max_tag', 'main_self_id']:
             template_safe = template_safe.replace('{{' + key + '}}', '{' + key + '}')
 
         # 账户组选项
@@ -910,6 +910,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             notice_html = f"<div style='margin:8px 0;padding:10px 12px;border-radius:10px;background:#EADDFF;color:#21005D'>{html.escape(urllib.parse.unquote(notice_msg))}</div>"
 
         initial_max_tag = max([int(i['tag']) for i in items], default=0)
+        main_self_id = self._get_group_mainqqid(user['group']) or ''
         page_content = template_safe.format(
             total_count=total_count,
             anonymous_count=anonymous_count,
@@ -919,7 +920,8 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             group_options=group_options_html,
             userbar=userbar,
             notice_html=notice_html,
-            initial_max_tag=str(initial_max_tag)
+            initial_max_tag=str(initial_max_tag),
+            main_self_id=html.escape(main_self_id)
         )
         
         self.wfile.write(page_content.encode('utf-8'))

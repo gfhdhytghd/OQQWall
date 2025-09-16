@@ -25,15 +25,20 @@
     .code { background:#0f172a; color:#e5e7eb; padding:12px; border-radius:12px; overflow:auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; font-size:12px; }
     .actions { display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; }
     .btn { padding:10px 14px; border:none; border-radius:999px; cursor:pointer; font-weight:600; }
-    .btn-info { background:#17a2b8; color:#fff; }
-    .btn-ok { background:#28a745; color:#fff; }
-    .btn-warn { background:#ffc107; color:#212529; }
-    .btn-danger { background:#dc3545; color:#fff; }
+    /* 操作区按钮：半透明填充 + 2px 实心内边框 */
+    .actions .btn { background: rgba(202,196,208,.35); box-shadow: inset 0 0 0 2px #CAC4D0; color:#000; }
+    .actions .btn-info { background: rgba(23,162,184,.35); color:#000; box-shadow: inset 0 0 0 2px #17a2b8; }
+    .actions .btn-ok { background: rgba(40,167,69,.35); color:#000; box-shadow: inset 0 0 0 2px #28a745; }
+    .actions .btn-warn { background: rgba(255,193,7,.35); color:#000; box-shadow: inset 0 0 0 2px #ffc107; }
+    .actions .btn-danger { background: rgba(220,53,69,.35); color:#000; box-shadow: inset 0 0 0 2px #dc3545; }
     .flag { width:100%; padding:10px 16px; border:1px solid var(--color-outline); border-radius:999px; background:#fff; }
     /* Desktop two-panel layout with independent scroll: 左 400px，右侧自适应 */
     .detail-grid { display:grid; grid-template-columns: 400px minmax(0, 1fr); gap:16px; align-items:start; }
     .detail-grid .col { max-height: calc(100vh - 120px); overflow:auto; }
-    @media (max-width: 768px) { .detail-grid { grid-template-columns: 1fr; } .detail-grid .col { max-height: none; overflow: visible; } }
+    @media (max-width: 768px) {
+      .detail-grid { grid-template-columns: 1fr; }
+      .detail-grid .col { max-height: none; overflow: visible; }
+    }
   </style>
   <script>
     // 轻量级图片浏览器（与列表页一致）
@@ -90,6 +95,38 @@
       }
     });
   </script>
+  <script>
+    // 移动端：重排顺序 => 操作, 预览, 基本信息, 图片, 内容, AfterLM
+    (function(){
+      function reorder(){
+        if (!window.matchMedia('(max-width: 768px)').matches) return;
+        const grid = document.querySelector('.detail-grid');
+        if (!grid) return;
+        const left = grid.querySelector('.col.left');
+        const right = grid.querySelector('.col.right');
+        if (!left || !right) return;
+        const actions = right.querySelector('.card-actions');
+        const preview = left.querySelector('.card-preview');
+        const info = right.querySelector('.card-info');
+        const images = right.querySelector('.card-images');
+        const content = right.querySelector('.card-content');
+        const after = right.querySelector('.card-afterlm');
+        try{
+          if (actions) left.insertBefore(actions, left.firstChild || null);
+          if (preview) left.appendChild(preview);
+          // 右侧：info -> images -> content -> afterlm
+          if (info) right.appendChild(info);
+          if (images) right.appendChild(images);
+          if (content) right.appendChild(content);
+          if (after) right.appendChild(after);
+        }catch(_){ }
+      }
+      document.addEventListener('DOMContentLoaded', reorder);
+      // 预防极快的首次绘制：再排一次
+      requestAnimationFrame(reorder);
+      window.addEventListener('resize', ()=>{ clearTimeout(window.__detail_reorder); window.__detail_reorder = setTimeout(reorder, 150); });
+    })();
+  </script>
   <meta name="theme-color" content="#6750A4">
   <link rel="icon" href="data:,">
   <meta name="format-detection" content="telephone=no">
@@ -103,7 +140,7 @@
     </div>
     <div class="detail-grid">
       <div class="col left">
-        <div class="card">
+        <div class="card card-preview">
           <div class="hd"><h2 class="title">渲染预览</h2></div>
           <div class="bd">
             <iframe src="/detail_html?tag={tag}" style="width:100%;height:70vh;border:1px solid #e5e5ef;border-radius:12px;background:#fff"></iframe>
@@ -112,7 +149,7 @@
         </div>
       </div>
       <div class="col right">
-        <div class="card">
+        <div class="card card-actions">
           <div class="hd"><h2 class="title">操作</h2></div>
           <div class="bd">
             <form method="post" action="/" class="actions">
@@ -133,7 +170,7 @@
             </form>
           </div>
         </div>
-        <div class="card">
+        <div class="card card-info">
           <div class="hd"><h2 class="title">基本信息</h2></div>
           <div class="bd grid">
             <div class="cell"><div class="meta">投稿人</div><div>{nickname}（{senderid}）</div></div>
@@ -142,11 +179,11 @@
             <div class="cell"><div class="meta">匿名</div><div>{is_anonymous}</div></div>
           </div>
         </div>
-        <div class="card">
+        <div class="card card-content">
           <div class="hd"><h2 class="title">内容</h2></div>
           <div class="bd"><div class="content">{comment_html}</div></div>
         </div>
-        <div class="card">
+        <div class="card card-images">
           <div class="hd"><h2 class="title">图片</h2></div>
           <div class="bd">
             <details open>
@@ -155,7 +192,7 @@
             </details>
           </div>
         </div>
-        <div class="card">
+        <div class="card card-afterlm">
           <div class="hd"><h2 class="title">AfterLM 分析</h2></div>
           <div class="bd">
             <details>
