@@ -171,17 +171,8 @@ echo "$json_data" | jq -r '.messages[].message[] | select(.type == "image" and .
     next_file_index=$((next_file_index + 1))
 done
 } 200>/dev/shm/OQQWall/oqqwall.lock  # Lock the directory with a lock file
-cd $folder
-for file in *.*; do
-  # 检查文件是否存在
-  if [ -f "$file" ]; then
-    # 提取文件名（不包括后缀）
-    base_name="${file%.*}"
-    # 重命名文件，去除后缀名
-    mv "$file" "$base_name"
-  fi
-done
-cd -
+# 保留文件后缀，便于浏览器与前端按 MIME 正确识别与展示
+# 之前会去掉后缀，导致 review 页面扩展名缺失、识别困难
 
 LMjson=$(sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$tag';")
 need_priv=$(echo $LMjson | jq -r '.needpriv' )
@@ -209,6 +200,25 @@ folder_path="$(pwd)/cache/prepost/$tag"
 if [ ! -d "$folder_path" ]; then
   log_and_continue "文件夹 $folder_path 不存在"
 fi
+
+# 为无后缀的图片文件补充正确的扩展名（提升前端展示与 MIME 识别稳定性）
+for f in "$folder_path"/*; do
+  [ -f "$f" ] || continue
+  name="$(basename -- "$f")"
+  case "$name" in
+    *.*) continue ;;  # 已有后缀则跳过
+  esac
+  mime="$(file -b --mime-type "$f" 2>/dev/null || echo '')"
+  ext="jpg"
+  case "$mime" in
+    image/jpeg*) ext="jpg" ;;
+    image/png*)  ext="png" ;;
+    image/gif*)  ext="gif" ;;
+    image/webp*) ext="webp" ;;
+    image/bmp*)  ext="bmp" ;;
+  esac
+  mv -- "$f" "$f.$ext" 2>/dev/null || true
+done
 echo $MSGcache
 for file_path in $(find "$folder_path" -maxdepth 1 -type f | sort); do
     echo "添加文件: $file_path"

@@ -76,6 +76,10 @@ if [[ $1 == -r ]]; then
   if pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" > /dev/null; then
     pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" | xargs kill -15
   fi
+  # 重启网页审核服务（避免旧进程占用导致代码未更新）
+  if pgrep -f "python3 web_review/web_review.py" > /dev/null; then
+    pgrep -f "python3 web_review/web_review.py" | xargs kill -15
+  fi
 elif [[ $1 == -rf ]]; then
   echo "执行无检验的子系统强行重启..."
   if [[ "$manage_napcat_internal" == "true" ]]; then

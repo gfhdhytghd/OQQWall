@@ -818,40 +818,69 @@
     <body>
         <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}</script>
         <script>
-            // 后端注入的暂存区显示控制：若为 true 则完全隐藏暂存区
+            // 后端注入的配置变量
+            // - HIDE_STAGING: 若为 true 则完全隐藏暂存区
+            // - IMG_BASE: 图片直链前缀（例如 http://host:port/i 或者 /i）
             window.HIDE_STAGING = {hide_staging};
+            window.IMG_BASE = "{img_base}";
         </script>
         <script>
-            // PWA 安装按钮（跨浏览器显式入口）
+            // PWA 安装按钮（支持 HTTPS、localhost，以及 HTTP 下的手动添加引导）
             (function(){
                 let deferredPrompt = null;
-                const btn = document.getElementById('installBtn');
+                const ua = navigator.userAgent || '';
+                const isIOS = /iphone|ipad|ipod/i.test(ua);
+                const isAndroid = /android/i.test(ua);
+                const isSecure = (window.isSecureContext === true) || location.protocol === 'https:' || /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
                 function installed(){
                   return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (window.navigator.standalone === true);
                 }
-                function show(){ if(btn && !installed()) btn.style.display=''; }
-                function hide(){ if(btn) btn.style.display='none'; }
+                function btnEl(){ return document.getElementById('installBtn'); }
+                function show(){ const b=btnEl(); if(b && !installed()) b.style.display=''; }
+                function hide(){ const b=btnEl(); if(b) b.style.display='none'; }
+                function showHelpModal(){
+                  const modal=document.createElement('div');
+                  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:2147483647;';
+                  const box=document.createElement('div');
+                  box.style.cssText='background:#fff;max-width:520px;width:92vw;border-radius:12px;padding:16px;';
+                  const h=document.createElement('h3'); h.textContent='安装到主屏幕'; h.style.margin='0 0 8px 0';
+                  const p=document.createElement('div'); p.style.cssText='color:#49454F;line-height:1.6;font-size:14px';
+                  if (isIOS){
+                    p.innerHTML='在 Safari 中，点击底部“分享”按钮，然后选择“添加到主屏幕”。';
+                  } else if (isAndroid){
+                    p.innerHTML='在浏览器菜单中选择“添加到主屏幕”或“安装应用”。不同浏览器位置略有差异。';
+                  } else {
+                    p.innerHTML='请在浏览器菜单中查找“安装站点”或“添加到主屏幕”。若不可用，请在 HTTPS 或 localhost 环境访问以启用自动安装提示。';
+                  }
+                  const btn=document.createElement('button'); btn.className='btn'; btn.textContent='知道了'; btn.style.marginTop='12px'; btn.onclick=()=>modal.remove();
+                  box.appendChild(h); box.appendChild(p); box.appendChild(btn); modal.appendChild(box);
+                  modal.addEventListener('click', (e)=>{ if(e.target===modal) modal.remove(); });
+                  document.body.appendChild(modal);
+                }
+                // 捕获安装事件（仅安全上下文）
                 window.addEventListener('beforeinstallprompt', (e) => {
-                  e.preventDefault();
+                  try{ e.preventDefault(); }catch(_){ }
                   deferredPrompt = e; show();
                 });
-                btn && btn.addEventListener('click', async () => {
-                  try{
-                    if(!deferredPrompt) return;
-                    deferredPrompt.prompt();
-                    await deferredPrompt.userChoice;
-                  }catch(_){
-                  }finally{
-                    deferredPrompt = null; hide();
+                // 委托按钮点击（按钮可能在脚本后渲染）
+                document.addEventListener('click', async (ev) => {
+                  const b = ev.target && (ev.target.id === 'installBtn' ? ev.target : ev.target.closest && ev.target.closest('#installBtn'));
+                  if (!b) return;
+                  // 优先使用原生安装提示（仅安全上下文）
+                  if (deferredPrompt){
+                    try{ deferredPrompt.prompt(); await deferredPrompt.userChoice; }catch(_){ }
+                    finally{ deferredPrompt = null; hide(); }
+                    return;
                   }
+                  // 在 HTTP 或无提示时，给出各平台指引
+                  show(); // 确保按钮可见
+                  showHelpModal();
+                }, true);
+                // 首次加载：未安装则显示按钮（即便无 beforeinstallprompt，在 HTTP 下也提供手动指引）
+                window.addEventListener('load', () => {
+                  if (installed()) { hide(); return; }
+                  show();
                 });
-                // 已安装时隐藏按钮
-                if (installed()) hide();
-                // iOS 不触发 beforeinstallprompt：显示按钮提示用户通过“分享-添加到主屏幕”
-                try{
-                  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-                  if (isIOS && !installed()) show();
-                }catch(_){ }
             })();
         </script>
     <div class="container">
@@ -1422,7 +1451,8 @@
                             thumbs.forEach(fn => {
                                 const img = document.createElement('img');
                                 const dir = item.img_source_dir || 'prepost';
-                                img.src = `/cache/${dir}/${item.tag}/${fn}`;
+                                const base = (window.IMG_BASE || '/i').replace(/\/$/, '');
+                                img.src = `${base}/${dir}/${item.tag}/${fn}`;
                                 img.alt = `#${item.tag}`;
                                 img.loading = 'lazy';
                                 th.appendChild(img);

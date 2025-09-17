@@ -179,6 +179,7 @@ except FileNotFoundError:
     <!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
     <link rel=\"manifest\" href=\"/manifest.webmanifest\">\n    <meta name=\"theme-color\" content=\"#6750A4\">\n    <link rel=\"apple-touch-icon\" href=\"/static/icons/icon-192.png\">
     <title>列表视图</title>
+    <script>window.IMG_BASE = '{img_base}';</script>
     <style>
       :root{--outline:#CAC4D0}
       body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"PingFang SC","Microsoft Yahei",sans-serif;background:#F7F2FA;margin:0;padding:12px;color:#1C1B1F}
@@ -424,7 +425,7 @@ except FileNotFoundError:
                 div.className='staged-item';
                 div.style.cssText='background:#fff;border-radius:12px;padding:10px;display:grid;grid-template-columns:64px 1fr auto;grid-template-rows:auto auto;gap:8px 10px;align-items:center;box-shadow:0 1px 4px rgba(0,0,0,.08)';
                 const thumbs = document.createElement('div'); thumbs.className='thumbs'; thumbs.style.cssText='display:flex;gap:6px';
-                (item.thumbs||[]).forEach(url=>{ const img=document.createElement('img'); img.src='/cache/'+item.img_source_dir+'/'+item.tag+'/'+url; img.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #CAC4D0'; thumbs.appendChild(img); });
+                (item.thumbs||[]).forEach(url=>{ const img=document.createElement('img'); const base=(window.IMG_BASE||'/i').replace(/\/$/,''); img.src=base+'/'+item.img_source_dir+'/'+item.tag+'/'+url; img.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #CAC4D0'; thumbs.appendChild(img); });
                 const meta = document.createElement('div'); meta.className='meta'; meta.innerHTML = `<span class=\"tag\">#${item.tag}</span>`;
                 const info = document.createElement('div'); info.className='info'; info.style.cssText='color:#49454F';
                 { const name = item.nickname || ''; const sid = item.senderid || ''; info.textContent = (name || sid) ? `${name}${sid? ' ('+sid+')':''}` : '未知'; }
@@ -862,27 +863,33 @@ def get_image_mime_type(file_path):
         
     return 'application/octet-stream'
 
-def make_inline_img_src(img_source_dir: str, tag: str | int, filename: str, inline: bool = True) -> str:
-    """返回列表/详情页可用的图片 src。
-
-    - inline=True 时，优先将项目目录内的文件转为 data:URI，避免鉴权/缓存等因素导致首屏不显示。
-    - 若读取失败或不在项目目录内，则退回到 /cache 路由，由服务器按权限与 MIME 正确返回。
-    """
+def _static_img_base() -> str | None:
+    # 读取 oqqwall.config 中的静态图片直链基址，例如 http://127.0.0.1:10924/i
     try:
-        tag_str = str(tag)
-        rel = Path('cache') / img_source_dir / tag_str / filename
-        p = (ROOT_DIR / rel).resolve()
-        root = ROOT_DIR.resolve()
-        if inline and str(p).startswith(str(root)) and p.is_file():
-            data = p.read_bytes()
-            mime = get_image_mime_type(p)
-            b64 = base64.b64encode(data).decode('ascii')
-            return f"data:{mime};base64,{b64}"
-    except Exception as e:
-        print(f"[web-review] 构建内联图片失败: {e}")
-    # 回退为 /cache 路径（仍然可用）
+        with open(ROOT_DIR / 'oqqwall.config', 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if line.startswith('static_img_base='):
+                    return line.split('=', 1)[1].strip().strip('"') or None
+    except Exception:
+        pass
+    return None
+
+def make_img_url(img_source_dir: str, tag: str | int, filename: str) -> str:
+    """构造图片直链 URL。
+
+    优先使用配置的 static_img_base (/i 前缀的独立静态服务)，否则回退到本服务的 /cache 路由。
+    """
+    base = _static_img_base()
+    if base:
+        # Ensure no trailing slash duplication
+        base = base.rstrip('/')
+        return f"{base}/{img_source_dir}/{tag}/{filename}"
+    # fallback to local unified direct-link route under same server/port
     from urllib.parse import quote
-    return quote(f"/cache/{img_source_dir}/{tag}/{filename}")
+    return quote(f"/i/{img_source_dir}/{tag}/{filename}")
 
 # ============================================================================
 # 命令执行函数
@@ -1042,6 +1049,41 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             self.send_response(303)
             self.send_header('Location', '/login')
             self.end_headers()
+            return
+
+        # 直链图片服务：/i/prepost/<tag>/<file>, /i/picture/<tag>/<file>
+        if parsed_path.path.startswith(('/i/prepost/', '/i/picture/')):
+            parts = Path(parsed_path.path).parts
+            # expected: ('/', 'i', kind, tag, filename...)
+            if len(parts) < 5:
+                self.send_error(404, 'Not Found')
+                return
+            _, i_prefix, kind, tag, *rest = parts
+            if i_prefix != 'i' or kind not in ('prepost', 'picture') or not tag.isdigit() or not rest:
+                self.send_error(404, 'Not Found')
+                return
+            rel = Path('cache') / kind / tag / Path(*rest)
+            fs_path = (ROOT_DIR / rel).resolve()
+            # 越权检查
+            if not str(fs_path).startswith(str(ROOT_DIR.resolve())) or not fs_path.is_file():
+                self.send_error(404, 'Not Found')
+                return
+            # 组权限校验
+            row = db_query("SELECT ACgroup FROM preprocess WHERE tag = ?", (tag,))
+            if not row or str(row[0].get('ACgroup')) != str(user['group']):
+                self.send_error(403, "Forbidden")
+                return
+            try:
+                data = fs_path.read_bytes()
+                content_type = get_image_mime_type(fs_path)
+                self.send_response(200)
+                self.send_header('Content-type', content_type)
+                self.send_header('Content-Length', str(len(data)))
+                self.send_header('Cache-Control', 'private, max-age=86400')
+                self.end_headers()
+                self.wfile.write(data)
+            except IOError:
+                self.send_error(404, 'File Not Found')
             return
 
         # API 端点：获取暂存项目
@@ -1498,7 +1540,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         
         # 渲染最终页面（安全转义模板中的花括号，避免与 CSS 冲突）
         template_safe = INDEX_HTML_TEMPLATE.replace('{', '{{').replace('}', '}}')
-        for key in ['total_count', 'anonymous_count', 'with_images_count', 'search', 'rows', 'group_options', 'userbar', 'notice_html', 'initial_max_tag', 'main_self_id', 'hide_staging']:
+        for key in ['total_count', 'anonymous_count', 'with_images_count', 'search', 'rows', 'group_options', 'userbar', 'notice_html', 'initial_max_tag', 'main_self_id', 'hide_staging', 'img_base']:
             template_safe = template_safe.replace('{{' + key + '}}', '{' + key + '}')
 
         # 账户组选项
@@ -1534,6 +1576,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         except Exception as e:
             # 出错时按默认 1 处理，隐藏暂存区
             hide_staging = 'true'
+        img_base_val = (_static_img_base() or '/i')
         page_content = template_safe.format(
             total_count=total_count,
             anonymous_count=anonymous_count,
@@ -1545,7 +1588,8 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             notice_html=notice_html,
             initial_max_tag=str(initial_max_tag),
             main_self_id=html.escape(main_self_id),
-            hide_staging=hide_staging
+            hide_staging=hide_staging,
+            img_base=img_base_val
         )
         
         self.wfile.write(page_content.encode('utf-8'))
@@ -1560,13 +1604,12 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         Returns:
             str: 卡片 HTML
         """
-        # 生成图片 HTML（内联 data:URI，提升首屏稳定性；失败回退为 /cache 路径）
+        # 生成图片 HTML（直链：static_img_server 优先，其次 /cache 路由）
         images_html = ""
         if item['has_images']:
             for img in item['images']:
-                img_src = make_inline_img_src(item['img_source_dir'], item['tag'], img, inline=True)
-                fallback = f"/cache/{item['img_source_dir']}/{item['tag']}/{img}"
-                images_html += f'<img src="{img_src}" data-fallback="{html.escape(fallback)}" alt="投稿图片" loading="lazy">'
+                img_src = make_img_url(item['img_source_dir'], item['tag'], img)
+                images_html += f'<img src="{img_src}" alt="投稿图片" loading="lazy">'
         
         # 生成徽章 HTML
         badges_html = ""
@@ -1733,11 +1776,11 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
 <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}</script></body></html>
 """
 
-        # 构造图片 HTML（优先内联为 data:URI，避免首屏偶发加载失败）
+        # 构造图片 HTML（直链：static_img_server 优先，其次 /cache 路由）
         images_html = ""
         if item['has_images']:
             for img in item['images']:
-                img_src = make_inline_img_src(item['img_source_dir'], item['tag'], img, inline=True)
+                img_src = make_img_url(item['img_source_dir'], item['tag'], img)
                 images_html += f'<img src="{img_src}" alt="投稿图片" loading="lazy" style="max-width:100%;margin:6px 0">'
 
         comment_html = html.escape(item.get('comment') or '').replace('\n', '<br>')
@@ -1806,7 +1849,11 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
                 hide_staging = 'true'
         except Exception:
             hide_staging = 'true'
-        html_out = LIST_HTML_TEMPLATE.replace('{rows}', rows_html).replace('{hide_staging}', hide_staging)
+        img_base_val = (_static_img_base() or '/i')
+        html_out = (LIST_HTML_TEMPLATE
+                    .replace('{rows}', rows_html)
+                    .replace('{hide_staging}', hide_staging)
+                    .replace('{img_base}', img_base_val))
         self.send_response(200)
         tok = None
         try:
@@ -1821,16 +1868,15 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
 
     def _generate_list_card(self, item: dict, back_path: str | None = None) -> str:
         """列表模式卡片：左文字+图，右三键（详情/通过/删除）。"""
-        # 图片缩略图
+        # 图片缩略图（直链：static_img_server 优先，其次 /cache 路由）
         images_html = ""
         if item.get('has_images'):
             cnt = 0
             for img in item.get('images') or []:
                 if cnt >= 6:
                     break
-                img_src = make_inline_img_src(item['img_source_dir'], item['tag'], img, inline=True)
-                fallback = f"/cache/{item['img_source_dir']}/{item['tag']}/{img}"
-                images_html += f'<img src="{img_src}" data-fallback="{html.escape(fallback)}" alt="图片" loading="lazy">'
+                img_src = make_img_url(item['img_source_dir'], item['tag'], img)
+                images_html += f'<img src="{img_src}" alt="图片" loading="lazy">'
                 cnt += 1
         # 徽章
         badges_html = ""
