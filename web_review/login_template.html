@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#6750A4">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
   <title>OQQWall 审核登录</title>
   <style>
     :root {
@@ -49,6 +52,7 @@
   </style>
 </head>
 <body>
+  <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}</script>
   <form class="card" method="post" action="/login">
     <h1>OQQWall 审核登录</h1>
     <p class="sub">请登录后继续，权限按账户组隔离</p>

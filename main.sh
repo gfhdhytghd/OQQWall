@@ -126,7 +126,7 @@ vision_size_limit_mb=9.5
 at_unprived_sender=true
 friend_request_window_sec="300"
 force_chromium_no-sandbox="false"
-use_web_review=true
+use_web_review=false
 web_review_port=10923'>> "oqqwall.config"
     echo "已创建文件: oqqwall.config"
     echo "请参考wiki填写配置文件后再启动"
@@ -183,7 +183,7 @@ check_variable "vision_pixel_limit" "12000000"
 check_variable "vision_size_limit_mb" "9.5"
 check_variable "friend_request_window_sec" "300"
 check_variable "force_chromium_no-sandbox" "false"
-check_variable "use_web_review" "true"
+check_variable "use_web_review" "false"
 check_variable "web_review_port" "10923"
 
 
@@ -240,7 +240,7 @@ vision_pixel_limit=12000000
 vision_size_limit_mb=9.5
 at_unprived_sender=true
 force_chromium_no-sandbox=false
-use_web_review=true
+use_web_review=false
 web_review_port=10923' >> "oqqwall.config"
     echo "已创建文件: oqqwall.config"
     echo "请参考wiki填写配置文件后再启动"

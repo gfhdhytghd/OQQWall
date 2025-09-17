@@ -3,6 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#6750A4">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
   <title>稿件详情 #{tag}</title>
   <style>
     :root { --color-primary:#6750A4; --color-primary-container:#EADDFF; --color-on-primary-container:#21005D; --color-surface:#F7F2FA; --color-surface-0:#FFFFFF; --color-outline:#CAC4D0; --color-text:#1C1B1F; --color-text-sub:#49454F; }
@@ -49,6 +52,7 @@
       .detail-grid .col { max-height: none; overflow: visible; }
     }
   </style>
+  <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}</script>
   <script>
     // 计算“渲染预览”卡片高度：页面高度 - 顶栏高度
     (function(){

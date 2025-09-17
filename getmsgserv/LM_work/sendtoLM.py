@@ -1915,13 +1915,43 @@ def fetch_response_simple(prompt, config):
             timeout=API_TIMEOUT
         )
 
-        # 处理流式响应
+        # 处理流式响应（兼容多种事件/字段形态）
         output_content = ""
         for response in responses:
-            # 只拼接内容，不访问status_code
-            chunk = response.output.get('choices', [])[0].get('message', {}).get('content', '')
-            output_content += chunk
-            sys.stdout.flush()
+            if response is None:
+                continue
+            chunk = ""
+            try:
+                # 优先使用标准化的 output_text（dashscope SDK 提供）
+                text_attr = getattr(response, 'output_text', None)
+                if isinstance(text_attr, str) and text_attr:
+                    chunk = text_attr
+                else:
+                    out = getattr(response, 'output', None)
+                    if isinstance(out, dict):
+                        choices = out.get('choices') or []
+                        if choices:
+                            msg = choices[0].get('message') or {}
+                            content = msg.get('content')
+                            if isinstance(content, list):
+                                # 将 [{'text': '...'}, ...] 或混合列表合并为字符串
+                                buf = []
+                                for part in content:
+                                    if isinstance(part, str):
+                                        buf.append(part)
+                                    elif isinstance(part, dict):
+                                        t = part.get('text')
+                                        if isinstance(t, str):
+                                            buf.append(t)
+                                chunk = ''.join(buf)
+                            elif isinstance(content, str):
+                                chunk = content
+            except Exception as parse_err:
+                logging.debug(f"流式响应解析异常: {parse_err}")
+                chunk = ""
+            if chunk:
+                output_content += chunk
+                sys.stdout.flush()
         
         # Debug输出：显示接收到的内容
         logging.debug(f"接收到的内容长度: {len(output_content)} 字符")

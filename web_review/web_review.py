@@ -39,6 +39,8 @@ from http import cookies
 import base64
 import re
 import queue
+import struct
+import zlib
 
 # ============================================================================
 # 配置和路径设置
@@ -69,6 +71,73 @@ except FileNotFoundError:
     <p>请确保模板文件与 web_review.py 在同一目录下。</p>
     """
 
+# ------------------------------
+# PWA assets (manifest, sw, icons, offline)
+# ------------------------------
+MANIFEST_JSON = json.dumps({
+    "name": "OQQWall 审核面板",
+    "short_name": "OQQWall审核",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "background_color": "#F7F2FA",
+    "theme_color": "#6750A4",
+    "icons": [
+        {"src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+        {"src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+    ]
+}, ensure_ascii=False)
+
+SW_JS = """
+const CACHE_NAME = 'oqqwall-pwa-v1';
+const CORE_ASSETS = ['/', '/list', '/login', '/offline.html', '/manifest.webmanifest'];
+self.addEventListener('install', (event) => {
+  event.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(CORE_ASSETS)).then(() => self.skipWaiting()));
+});
+self.addEventListener('activate', (event) => {
+  event.waitUntil(caches.keys().then(keys => Promise.all(keys.map(k => { if (k !== CACHE_NAME) return caches.delete(k); }))).then(() => self.clients.claim()));
+});
+function isNavigate(request){ return request.mode === 'navigate' || (request.method==='GET' && request.headers.get('accept')?.includes('text/html')); }
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+  if (url.origin !== location.origin) return;
+  if (isNavigate(event.request)){
+    event.respondWith(fetch(event.request).then(r => { const rc=r.clone(); caches.open(CACHE_NAME).then(c=>c.put(event.request, rc)); return r; }).catch(async ()=>{
+      const c = await caches.open(CACHE_NAME); return (await c.match(event.request)) || c.match('/offline.html');
+    }));
+    return;
+  }
+  if (event.request.method==='GET'){
+    event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request).then(r => { const rc=r.clone(); caches.open(CACHE_NAME).then(c=>c.put(event.request, rc)); return r; }).catch(()=>caches.match('/offline.html'))));
+  }
+});
+"""
+
+OFFLINE_HTML = (
+  "<!doctype html><meta charset='utf-8'>"+
+  "<meta name='viewport' content='width=device-width, initial-scale=1'>"+
+  "<title>离线 - OQQWall 审核面板</title>"+
+  "<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,'PingFang SC','Microsoft Yahei',sans-serif;background:#F7F2FA;margin:0;display:grid;place-items:center;height:100vh;color:#1C1B1F}.card{background:#fff;border-radius:16px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,.08);max-width:520px}.btn{display:inline-block;margin-top:12px;padding:8px 14px;border-radius:999px;background:#6750A4;color:#fff;text-decoration:none}</style>"+
+  "<div class='card'><h1>📴 你目前处于离线状态</h1><p>已缓存的页面仍可查看。恢复网络后将自动刷新。</p><a class='btn' href='/'>返回首页</a></div>"
+)
+
+def _png_rgba(w:int, h:int, rgba=(0x67,0x50,0xA4,255)) -> bytes:
+    sig=b'\x89PNG\r\n\x1a\n'
+    ihdr=struct.pack('!IIBBBBB', w,h,8,6,0,0,0)
+    ihdr_chunk=b'IHDR'+ihdr
+    ihdr_crc=struct.pack('!I', zlib.crc32(ihdr_chunk)&0xffffffff)
+    ihdr_len=struct.pack('!I', len(ihdr))
+    row=bytes([0])+bytes(rgba)*w
+    raw=row*h
+    comp=zlib.compress(raw)
+    idat_chunk=b'IDAT'+comp
+    idat_crc=struct.pack('!I', zlib.crc32(idat_chunk)&0xffffffff)
+    idat_len=struct.pack('!I', len(comp))
+    iend_chunk=b'IEND'
+    iend_crc=struct.pack('!I', zlib.crc32(iend_chunk)&0xffffffff)
+    iend_len=struct.pack('!I', 0)
+    return b''.join([sig, ihdr_len, ihdr_chunk, ihdr_crc, idat_len, idat_chunk, idat_crc, iend_len, iend_chunk, iend_crc])
+
 # 列表页模板（内置默认，可外置 list_template.html 覆盖）
 try:
     with open(SCRIPT_DIR / 'list_template.html', 'r', encoding='utf-8') as f:
@@ -76,6 +145,7 @@ try:
 except FileNotFoundError:
     LIST_HTML_TEMPLATE = """
     <!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+    <link rel=\"manifest\" href=\"/manifest.webmanifest\">\n    <meta name=\"theme-color\" content=\"#6750A4\">\n    <link rel=\"apple-touch-icon\" href=\"/static/icons/icon-192.png\">
     <title>列表视图</title>
     <style>
       :root{--outline:#CAC4D0}
@@ -394,7 +464,7 @@ try:
 except FileNotFoundError:
     LOGIN_HTML_TEMPLATE = """
 <!doctype html>
-<html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>登录</title>
+<html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><link rel=\"manifest\" href=\"/manifest.webmanifest\"><meta name=\"theme-color\" content=\"#6750A4\"><link rel=\"apple-touch-icon\" href=\"/static/icons/icon-192.png\"><title>登录</title>
 <style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,\"PingFang SC\",\"Microsoft Yahei\",sans-serif;background:#F7F2FA;margin:0;display:flex;align-items:center;justify-content:center;height:100vh} .card{background:#fff;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,.08);padding:24px;min-width:320px;max-width:560px;width:75%} h1{font-size:20px;margin:.2rem 0 1rem} .row{display:flex;flex-direction:column;gap:6px;margin-bottom:10px} input{padding:10px 12px;border:1px solid #ccc;border-radius:10px} .btn{width:100%;padding:10px 12px;border:none;border-radius:999px;background:#6750A4;color:#fff;font-weight:600;cursor:pointer} .msg{color:#B3261E;margin-bottom:8px;font-size:13px}</style>
 </head><body>
 <form class=\"card\" method=\"post\" action=\"/login\"> 
@@ -404,6 +474,7 @@ except FileNotFoundError:
   <div class=\"row\"><label>密码</label><input type=\"password\" name=\"password\" required></div>
   <button class=\"btn\">登录</button>
 </form>
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}</script>
 </body></html>
 """
 
@@ -836,6 +907,48 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         - 其他: 渲染审核页面
         """
         parsed_path = urllib.parse.urlparse(self.path)
+        # PWA assets (public, no auth required)
+        if parsed_path.path == '/manifest.webmanifest':
+            body = MANIFEST_JSON.encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-type', 'application/manifest+json; charset=utf-8')
+            self.send_header('Cache-Control', 'public, max-age=3600')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed_path.path == '/sw.js':
+            body = SW_JS.encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-type', 'application/javascript; charset=utf-8')
+            self.send_header('Service-Worker-Allowed', '/')
+            self.send_header('Cache-Control', 'public, max-age=300')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed_path.path in ('/offline.html', '/pwa/offline'):
+            body = OFFLINE_HTML.encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html; charset=utf-8')
+            self.send_header('Cache-Control', 'public, max-age=3600')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if parsed_path.path in ('/static/icons/icon-192.png', '/favicon.ico'):
+            png = _png_rgba(192, 192, (0x67, 0x50, 0xA4, 255))
+            self.send_response(200)
+            self.send_header('Content-type', 'image/png')
+            self.send_header('Cache-Control', 'public, max-age=2592000')
+            self.end_headers()
+            self.wfile.write(png)
+            return
+        if parsed_path.path == '/static/icons/icon-512.png':
+            png = _png_rgba(512, 512, (0x67, 0x50, 0xA4, 255))
+            self.send_response(200)
+            self.send_header('Content-type', 'image/png')
+            self.send_header('Cache-Control', 'public, max-age=2592000')
+            self.end_headers()
+            self.wfile.write(png)
+            return
         
         # 获取当前用户
         user = self._get_user()
@@ -1249,8 +1362,9 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             <div class='empty-state'>
                 <h3>🎉 恭喜！</h3>
                 <p>所有投稿都已处理完毕。</p>
-            </div>
-            """
+    </div>
+    <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}</script>
+    """
         elif not items and search_term:
             rows_html = f"""
             <div class='empty-state'>
@@ -1456,7 +1570,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             # 简单降级模板
             template = """
 <!doctype html>
-<html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>稿件详情 #{tag}</title>
+<html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><link rel=\"manifest\" href=\"/manifest.webmanifest\"><meta name=\"theme-color\" content=\"#6750A4\"><link rel=\"apple-touch-icon\" href=\"/static/icons/icon-192.png\"><title>稿件详情 #{tag}</title>
 <style>body{font-family:Arial,Helvetica,sans-serif;padding:16px;max-width:900px;margin:0 auto}img{max-width:100%;height:auto;border-radius:8px}pre{white-space:pre-wrap;background:#f6f6f6;padding:12px;border-radius:8px;overflow:auto}</style>
 </head><body>
 <h1>稿件详情 #{tag}</h1>
@@ -1501,7 +1615,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
 <details><summary style=\"cursor:pointer;user-select:none\">展开/收起</summary>
 <pre>{afterlm_pretty}</pre>
 </details>
-</body></html>
+<script>if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}</script></body></html>
 """
 
         # 构造图片 HTML
