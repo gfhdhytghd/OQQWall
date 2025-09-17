@@ -89,7 +89,7 @@ MANIFEST_JSON = json.dumps({
 }, ensure_ascii=False)
 
 SW_JS = """
-const CACHE_NAME = 'oqqwall-pwa-v2';
+const CACHE_NAME = 'oqqwall-pwa-v3';
 const CORE_ASSETS = ['/', '/list', '/login', '/offline.html', '/manifest.webmanifest'];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(CORE_ASSETS)).then(() => self.skipWaiting()));
@@ -862,6 +862,28 @@ def get_image_mime_type(file_path):
         
     return 'application/octet-stream'
 
+def make_inline_img_src(img_source_dir: str, tag: str | int, filename: str, inline: bool = True) -> str:
+    """返回列表/详情页可用的图片 src。
+
+    - inline=True 时，优先将项目目录内的文件转为 data:URI，避免鉴权/缓存等因素导致首屏不显示。
+    - 若读取失败或不在项目目录内，则退回到 /cache 路由，由服务器按权限与 MIME 正确返回。
+    """
+    try:
+        tag_str = str(tag)
+        rel = Path('cache') / img_source_dir / tag_str / filename
+        p = (ROOT_DIR / rel).resolve()
+        root = ROOT_DIR.resolve()
+        if inline and str(p).startswith(str(root)) and p.is_file():
+            data = p.read_bytes()
+            mime = get_image_mime_type(p)
+            b64 = base64.b64encode(data).decode('ascii')
+            return f"data:{mime};base64,{b64}"
+    except Exception as e:
+        print(f"[web-review] 构建内联图片失败: {e}")
+    # 回退为 /cache 路径（仍然可用）
+    from urllib.parse import quote
+    return quote(f"/cache/{img_source_dir}/{tag}/{filename}")
+
 # ============================================================================
 # 命令执行函数
 # ============================================================================
@@ -1002,8 +1024,13 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         
         # 获取当前用户
         user = self._get_user()
-        # 登录页
+        # 登录页：如果已登录则直接跳到首页，避免二次点击/刷新
         if parsed_path.path == '/login':
+            if user:
+                self.send_response(303)
+                self.send_header('Location', '/')
+                self.end_headers()
+                return
             self._render_login()
             return
         if parsed_path.path == '/logout':
@@ -1533,12 +1560,13 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         Returns:
             str: 卡片 HTML
         """
-        # 生成图片 HTML
+        # 生成图片 HTML（内联 data:URI，提升首屏稳定性；失败回退为 /cache 路径）
         images_html = ""
         if item['has_images']:
             for img in item['images']:
-                img_path = urlquote(f"/cache/{item['img_source_dir']}/{item['tag']}/{img}")
-                images_html += f'<img src="{img_path}" alt="投稿图片" loading="lazy">'
+                img_src = make_inline_img_src(item['img_source_dir'], item['tag'], img, inline=True)
+                fallback = f"/cache/{item['img_source_dir']}/{item['tag']}/{img}"
+                images_html += f'<img src="{img_src}" data-fallback="{html.escape(fallback)}" alt="投稿图片" loading="lazy">'
         
         # 生成徽章 HTML
         badges_html = ""
@@ -1705,12 +1733,12 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
 <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}</script></body></html>
 """
 
-        # 构造图片 HTML
+        # 构造图片 HTML（优先内联为 data:URI，避免首屏偶发加载失败）
         images_html = ""
         if item['has_images']:
             for img in item['images']:
-                img_path = urlquote(f"/cache/{item['img_source_dir']}/{item['tag']}/{img}")
-                images_html += f'<img src="{img_path}" alt="投稿图片" loading="lazy" style="max-width:100%;margin:6px 0">'
+                img_src = make_inline_img_src(item['img_source_dir'], item['tag'], img, inline=True)
+                images_html += f'<img src="{img_src}" alt="投稿图片" loading="lazy" style="max-width:100%;margin:6px 0">'
 
         comment_html = html.escape(item.get('comment') or '').replace('\n', '<br>')
         afterlm_pretty = html.escape(json.dumps(item.get('afterlm') or {}, ensure_ascii=False, indent=2))
@@ -1800,8 +1828,9 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             for img in item.get('images') or []:
                 if cnt >= 6:
                     break
-                img_path = urlquote(f"/cache/{item['img_source_dir']}/{item['tag']}/{img}")
-                images_html += f'<img src="{img_path}" alt="图片" loading="lazy">'
+                img_src = make_inline_img_src(item['img_source_dir'], item['tag'], img, inline=True)
+                fallback = f"/cache/{item['img_source_dir']}/{item['tag']}/{img}"
+                images_html += f'<img src="{img_src}" data-fallback="{html.escape(fallback)}" alt="图片" loading="lazy">'
                 cnt += 1
         # 徽章
         badges_html = ""
@@ -1894,17 +1923,34 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
                 if not p.is_file():
                     return m.group(0)
                 data = p.read_bytes()
-                # mime by suffix
-                ext = p.suffix.lower()
-                mime = 'image/png'
-                if ext in ('.jpg', '.jpeg'):
-                    mime = 'image/jpeg'
-                elif ext == '.gif':
-                    mime = 'image/gif'
-                elif ext == '.webp':
-                    mime = 'image/webp'
-                elif ext == '.bmp':
-                    mime = 'image/bmp'
+                # 优先按文件头嗅探 MIME，避免后缀与内容不一致导致无法显示
+                mime = None
+                try:
+                    if len(data) >= 12 and data[0:8] == b"\x89PNG\r\n\x1a\x0a":
+                        mime = 'image/png'
+                    elif len(data) >= 3 and data[0:2] == b"\xff\xd8":
+                        mime = 'image/jpeg'
+                    elif len(data) >= 6 and (data[0:6] == b"GIF87a" or data[0:6] == b"GIF89a"):
+                        mime = 'image/gif'
+                    elif len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
+                        mime = 'image/webp'
+                    elif len(data) >= 2 and data[0:2] == b"BM":
+                        mime = 'image/bmp'
+                except Exception:
+                    mime = None
+                if not mime:
+                    # fallback by suffix
+                    ext = p.suffix.lower()
+                    if ext in ('.jpg', '.jpeg'):
+                        mime = 'image/jpeg'
+                    elif ext == '.gif':
+                        mime = 'image/gif'
+                    elif ext == '.webp':
+                        mime = 'image/webp'
+                    elif ext == '.bmp':
+                        mime = 'image/bmp'
+                    else:
+                        mime = 'image/png'
                 b64 = base64.b64encode(data).decode('ascii')
                 return f"src=\"data:{mime};base64,{b64}\""
             except Exception as e:

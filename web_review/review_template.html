@@ -1029,6 +1029,16 @@
                     updateImageCols();
                 }
             }, true);
+            // 如果图片解码失败，尝试回退到 data-fallback（/cache/... 路由）
+            document.addEventListener('error', (e) => {
+                const img = e.target;
+                if (img && img.tagName === 'IMG') {
+                    const fb = img.getAttribute('data-fallback');
+                    if (fb && img.src !== fb) {
+                        img.src = fb;
+                    }
+                }
+            }, true);
 
             // 暴露函数供其他模块调用
             window._updateImageCols = updateImageCols;

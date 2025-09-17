@@ -12,7 +12,8 @@ folder="cache/picture/${tag}"
 db_file="cache/OQQWall.db"
 pwd_path="$(pwd)"   # 项目根目录或网页根目录
 napcat_api="127.0.0.1:$2"
-container_name="napcat"  # Docker 容器名，用于 docker cp
+# Docker 容器名（可用环境变量 NAPCAT_CONTAINER 覆盖），用于 docker cp
+container_name="${NAPCAT_CONTAINER:-napcat}"
 
 #####################################
 #           基础函数定义            #
@@ -353,7 +354,28 @@ download_and_replace_images() {
     [[ -z "$url" ]] && continue
     [[ -n "${seen_urls[$url]+x}" ]] && continue
 
-    local_file="$folder/$tag-$next_file_index.png"
+    # 推断原始文件名与扩展名，确保保存的扩展名与内容一致
+    orig_name=$(jq -r '.data.file // empty' <<<"$image_item")
+    if [[ -z "$orig_name" ]]; then
+      if [[ "$url" =~ ^file:// ]]; then
+        orig_name="$(basename "${url#file://}")"
+      else
+        u_no_query="${url%%\?*}"
+        orig_name="$(basename "$u_no_query")"
+      fi
+    fi
+    ext="${orig_name##*.}"
+    if [[ -z "$ext" || "$ext" == "$orig_name" ]]; then
+      ext="png"
+    else
+      ext="${ext,,}"
+      case "$ext" in
+        jpg|jpeg|png|gif|bmp|webp) ;;
+        *) ext="png";;
+      esac
+    fi
+
+    local_file="$folder/$tag-$next_file_index.$ext"
 
     # 检查是否已经存在本地文件
     if [[ -f "$local_file" ]]; then
@@ -364,7 +386,11 @@ download_and_replace_images() {
       if [[ "$url" =~ ^file:// ]]; then
         src_path="${url#file://}"
         if [[ "$src_path" == /app* ]]; then
+          # 优先尝试从容器复制，若失败则回退到宿主机路径复制
           docker cp "$container_name:$src_path" "$local_file" || true
+          if [[ ! -f "$local_file" && -f "$src_path" ]]; then
+            cp -f "$src_path" "$local_file" || true
+          fi
         else
           [[ -f "$src_path" ]] && cp -f "$src_path" "$local_file"
         fi
@@ -448,7 +474,11 @@ download_and_replace_videos() {
       if [[ "$url" =~ ^file:// ]]; then
         src_path="${url#file://}"
         if [[ "$src_path" == /app* ]]; then
+          # 优先尝试从容器复制，若失败则回退到宿主机路径复制
           docker cp "$container_name:$src_path" "$local_file" || true
+          if [[ ! -f "$local_file" && -f "$src_path" ]]; then
+            cp -f "$src_path" "$local_file" || true
+          fi
         else
           [[ -f "$src_path" ]] && cp -f "$src_path" "$local_file"
         fi
