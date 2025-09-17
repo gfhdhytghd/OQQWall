@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#6750A4">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
   <title>OQQWall 审核登录</title>
   <style>
@@ -66,10 +68,27 @@
       <input id="password" name="password" type="password" required autocomplete="current-password" />
     </div>
     <button class="btn" type="submit">登录</button>
+    <div style="display:flex;gap:8px;margin-top:8px;align-items:center;justify-content:space-between">
+      <small class="sub" style="opacity:.85">想以应用形式使用？</small>
+      <button id="installBtn" type="button" class="btn" style="width:auto;min-width:140px;display:none">⬇️ 安装应用</button>
+    </div>
     <div class="foot">
       管理员账号在 <code>AcountGroupcfg.json</code> 中各账户组的 <code>admins</code> 配置，
       支持明文或 <code>sha256:&lt;hex&gt;</code>。
     </div>
   </form>
+  <script>
+    // PWA 安装按钮：在登录页也提供显式入口
+    (function(){
+      let deferredPrompt=null; const btn=document.getElementById('installBtn');
+      function installed(){ return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (window.navigator.standalone===true); }
+      function show(){ if(btn && !installed()) btn.style.display=''; }
+      function hide(){ if(btn) btn.style.display='none'; }
+      window.addEventListener('beforeinstallprompt', (e)=>{ e.preventDefault(); deferredPrompt=e; show(); });
+      btn && btn.addEventListener('click', async ()=>{ try{ if(!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; }catch(_){ } finally{ deferredPrompt=null; hide(); } });
+      if(installed()) hide();
+      try{ const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent); if(isIOS && !installed()) show(); }catch(_){ }
+    })();
+  </script>
 </body>
 </html>

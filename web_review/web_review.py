@@ -89,26 +89,58 @@ MANIFEST_JSON = json.dumps({
 }, ensure_ascii=False)
 
 SW_JS = """
-const CACHE_NAME = 'oqqwall-pwa-v1';
+const CACHE_NAME = 'oqqwall-pwa-v2';
 const CORE_ASSETS = ['/', '/list', '/login', '/offline.html', '/manifest.webmanifest'];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(CORE_ASSETS)).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (event) => {
-  event.waitUntil(caches.keys().then(keys => Promise.all(keys.map(k => { if (k !== CACHE_NAME) return caches.delete(k); }))).then(() => self.clients.claim()));
+  event.waitUntil(
+    caches.keys().then(keys => Promise.all(keys.map(k => { if (k !== CACHE_NAME) return caches.delete(k); })))
+      .then(() => self.clients.claim())
+  );
 });
 function isNavigate(request){ return request.mode === 'navigate' || (request.method==='GET' && request.headers.get('accept')?.includes('text/html')); }
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== location.origin) return;
-  if (isNavigate(event.request)){
-    event.respondWith(fetch(event.request).then(r => { const rc=r.clone(); caches.open(CACHE_NAME).then(c=>c.put(event.request, rc)); return r; }).catch(async ()=>{
-      const c = await caches.open(CACHE_NAME); return (await c.match(event.request)) || c.match('/offline.html');
-    }));
+
+  // 动态图片与缓存目录：始终走网络，不缓存，避免会话失效或重定向被缓存
+  if (url.pathname.startsWith('/cache/')) {
+    if (event.request.method === 'GET') {
+      event.respondWith(fetch(event.request));
+    }
     return;
   }
+
+  if (isNavigate(event.request)){
+    event.respondWith(
+      fetch(event.request)
+        .then(r => {
+          if (r && r.ok && r.status === 200) {
+            const rc = r.clone();
+            caches.open(CACHE_NAME).then(c=>c.put(event.request, rc));
+          }
+          return r;
+        })
+        .catch(async ()=>{
+          const c = await caches.open(CACHE_NAME);
+          return (await c.match(event.request)) || c.match('/offline.html');
+        })
+    );
+    return;
+  }
+
   if (event.request.method==='GET'){
-    event.respondWith(caches.match(event.request).then(cached => cached || fetch(event.request).then(r => { const rc=r.clone(); caches.open(CACHE_NAME).then(c=>c.put(event.request, rc)); return r; }).catch(()=>caches.match('/offline.html'))));
+    event.respondWith(
+      caches.match(event.request).then(cached => cached || fetch(event.request).then(r => {
+        if (r && r.ok && r.status === 200) {
+          const rc = r.clone();
+          caches.open(CACHE_NAME).then(c=>c.put(event.request, rc));
+        }
+        return r;
+      }).catch(()=>caches.match('/offline.html')))
+    );
   }
 });
 """
@@ -503,8 +535,12 @@ def load_config():
                     cfg[k.strip()] = v.strip().strip('"')
     return cfg
 
-# 简易会话存储：token -> {username, group}
+# 简易会话存储：token -> {username, group, created}
 SESSION_STORE: dict[str, dict] = {}
+# 会话配置
+SESSION_COOKIE_NAME = 'oqqwall_review_session'
+# 默认 7 天（可按需调整）
+SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 
 # 服务器推送（SSE）
 EVENT_CLIENTS: list[tuple[str, queue.Queue]] = []  # (group, queue)
@@ -896,6 +932,20 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         """
         super().__init__(*args, directory=str(ROOT_DIR), **kwargs)
 
+    # --- Session helpers ---
+    def _issue_session_cookie(self, token: str):
+        try:
+            max_age = SESSION_TTL_SECONDS
+            expires_dt = datetime.utcnow() + timedelta(seconds=max_age)
+            expires_str = expires_dt.strftime('%a, %d %b %Y %H:%M:%S GMT')
+            parts = [f"{SESSION_COOKIE_NAME}={token}", 'HttpOnly', 'Path=/', f"Max-Age={max_age}", f"Expires={expires_str}", 'SameSite=Lax']
+            proto = (self.headers.get('X-Forwarded-Proto') or '').lower()
+            if proto == 'https':
+                parts.append('Secure')
+            self.send_header('Set-Cookie', '; '.join(parts))
+        except Exception:
+            pass
+
     def do_GET(self):
         """
         处理 GET 请求
@@ -979,6 +1029,27 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 print(f"[web-review] API 错误: {e}")
                 self.send_error(500, "Internal Server Error")
+            return
+
+        # API 端点：查看会话（调试用）
+        if parsed_path.path == '/api/whoami':
+            u = self._get_user()
+            body = json.dumps({
+                "ok": bool(u),
+                "user": {"username": (u or {}).get('username'), "group": (u or {}).get('group')}
+            }, ensure_ascii=False).encode('utf-8')
+            self.send_response(200)
+            # 访问即刷新 Cookie
+            tok = None
+            try:
+                tok = (parse_cookies(self.headers.get('Cookie')) or {}).get(SESSION_COOKIE_NAME)
+            except Exception:
+                tok = None
+            if tok:
+                self._issue_session_cookie(tok)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         # SSE 事件流
@@ -1139,6 +1210,8 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
                     self.send_response(200)
                     self.send_header('Content-type', content_type)
                     self.send_header('Content-Length', str(len(content)))
+                    # 避免浏览器/Service Worker 缓存动态图片响应，减少旧重定向/错误被缓存的问题
+                    self.send_header('Cache-Control', 'private, no-store')
                     self.end_headers()
                     self.wfile.write(content)
                 except IOError:
@@ -1180,7 +1253,13 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
                 token = secrets.token_urlsafe(32)
                 SESSION_STORE[token] = {'username': username, 'group': rec['group'], 'created': time.time()}
                 self.send_response(303)
-                self.send_header('Set-Cookie', f'session={token}; HttpOnly; Path=/')
+                # 计算 Cookie 属性
+                cookie_attrs = [f"{SESSION_COOKIE_NAME}={token}", 'HttpOnly', 'Path=/', f"Max-Age={SESSION_TTL_SECONDS}", 'SameSite=Lax']
+                # 透传代理的 HTTPS 头以决定是否设置 Secure
+                proto = (self.headers.get('X-Forwarded-Proto') or '').lower()
+                if proto == 'https':
+                    cookie_attrs.append('Secure')
+                self.send_header('Set-Cookie', '; '.join(cookie_attrs))
                 self.send_header('Location', '/')
                 self.end_headers()
                 return
@@ -1348,6 +1427,14 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         
         # 设置响应头
         self.send_response(200)
+        # 滚动续期：刷新 Cookie 过期时间
+        tok = None
+        try:
+            tok = (parse_cookies(self.headers.get('Cookie')) or {}).get(SESSION_COOKIE_NAME)
+        except Exception:
+            tok = None
+        if tok:
+            self._issue_session_cookie(tok)
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
         
@@ -1630,6 +1717,13 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
 
         # 响应
         self.send_response(200)
+        tok = None
+        try:
+            tok = (parse_cookies(self.headers.get('Cookie')) or {}).get(SESSION_COOKIE_NAME)
+        except Exception:
+            tok = None
+        if tok:
+            self._issue_session_cookie(tok)
         self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
         page = template
@@ -1686,6 +1780,13 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             hide_staging = 'true'
         html_out = LIST_HTML_TEMPLATE.replace('{rows}', rows_html).replace('{hide_staging}', hide_staging)
         self.send_response(200)
+        tok = None
+        try:
+            tok = (parse_cookies(self.headers.get('Cookie')) or {}).get(SESSION_COOKIE_NAME)
+        except Exception:
+            tok = None
+        if tok:
+            self._issue_session_cookie(tok)
         self.send_header('Content-type', 'text/html; charset=utf-8')
         self.end_headers()
         self.wfile.write(html_out.encode('utf-8'))
@@ -1812,6 +1913,13 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         # 替换 <img src="file://...">
         content = re.sub(r'src=\"(file://[^\"]+)\"', repl_img, content)
         self.send_response(200)
+        tok = None
+        try:
+            tok = (parse_cookies(self.headers.get('Cookie')) or {}).get(SESSION_COOKIE_NAME)
+        except Exception:
+            tok = None
+        if tok:
+            self._issue_session_cookie(tok)
         self.send_header('Content-type', 'text/html; charset=utf-8')
         self.end_headers()
         self.wfile.write(content.encode('utf-8', errors='ignore'))
@@ -1827,20 +1935,38 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
     def _logout(self):
         # 清理 cookie（客户端覆盖），删除服务端会话
         jar = parse_cookies(self.headers.get('Cookie'))
-        token = jar.get('session')
+        token = jar.get(SESSION_COOKIE_NAME) or jar.get('session')
         if token and token in SESSION_STORE:
             del SESSION_STORE[token]
         self.send_response(303)
-        self.send_header('Set-Cookie', 'session=deleted; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/')
+        self.send_header('Set-Cookie', f'{SESSION_COOKIE_NAME}=deleted; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/')
         self.send_header('Location', '/login')
         self.end_headers()
 
     def _get_user(self):
         jar = parse_cookies(self.headers.get('Cookie'))
-        token = jar.get('session')
+        # 兼容旧 cookie 名称 'session'
+        token = jar.get(SESSION_COOKIE_NAME) or jar.get('session')
         if not token:
             return None
         rec = SESSION_STORE.get(token)
+        if not rec:
+            return None
+        # TTL 校验与滚动续期
+        try:
+            created = float(rec.get('created') or 0)
+        except Exception:
+            created = 0.0
+        now = time.time()
+        if created and (now - created > SESSION_TTL_SECONDS):
+            # 过期
+            try:
+                del SESSION_STORE[token]
+            except Exception:
+                pass
+            return None
+        # 滚动续期：每次访问刷新创建时间
+        rec['created'] = now
         return rec
 
 # ============================================================================

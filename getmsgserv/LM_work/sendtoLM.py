@@ -1925,44 +1925,60 @@ def fetch_response_simple(prompt, config):
             if response is None:
                 continue
             chunk = ""
+            out = None
+            # 1) 尝试读取标准化的 output_text；个别 SDK 版本可能抛异常，这里单独兜底
             try:
-                # 优先使用标准化的 output_text（dashscope SDK 提供）
-                text_attr = getattr(response, 'output_text', None)
-                if isinstance(text_attr, str) and text_attr:
-                    chunk = text_attr
-                else:
+                text_attr = getattr(response, 'output_text')
+            except Exception as e:
+                text_attr = None
+                logging.debug(f"output_text 不可用: {e}")
+            if isinstance(text_attr, str) and text_attr:
+                chunk = text_attr
+
+            # 2) 若无 chunk，尝试通过 output / to_dict 提取
+            if not chunk:
+                try:
                     out = getattr(response, 'output', None)
-                    if isinstance(out, dict):
-                        choices = out.get('choices') or []
-                        if choices:
-                            msg = choices[0].get('message') or {}
-                            content = msg.get('content')
-                            if isinstance(content, list):
-                                # 将 [{'text': '...'}, ...] 或混合列表合并为字符串
-                                buf = []
-                                for part in content:
-                                    if isinstance(part, str):
-                                        buf.append(part)
-                                    elif isinstance(part, dict):
-                                        t = part.get('text')
-                                        if isinstance(t, str):
-                                            buf.append(t)
-                                chunk = ''.join(buf)
-                            elif isinstance(content, str):
-                                chunk = content
-                    # 收集原始片段用于调试
+                except Exception:
+                    out = None
+                if out is None:
                     try:
-                        if isinstance(out, dict):
-                            # 只截取部分内容，避免日志过大
-                            raw_snippets.append(json.dumps(out, ensure_ascii=False)[:500])
-                        else:
-                            # 退化为字符串表示
-                            raw_snippets.append(str(response)[:500])
+                        to_dict = getattr(response, 'to_dict', None)
+                        if callable(to_dict):
+                            d = to_dict()
+                            out = d.get('output') if isinstance(d, dict) else None
+                    except Exception:
+                        out = None
+
+                # 处理 output -> choices -> message.content
+                if isinstance(out, dict):
+                    try:
+                        raw_snippets.append(json.dumps(out, ensure_ascii=False)[:500])
                     except Exception:
                         pass
-            except Exception as parse_err:
-                logging.debug(f"流式响应解析异常: {parse_err}")
-                chunk = ""
+                    choices = out.get('choices') or []
+                    if choices:
+                        msg = choices[0].get('message') or {}
+                        content = msg.get('content')
+                        if isinstance(content, list):
+                            buf = []
+                            for part in content:
+                                if isinstance(part, str):
+                                    buf.append(part)
+                                elif isinstance(part, dict):
+                                    t = part.get('text')
+                                    if isinstance(t, str):
+                                        buf.append(t)
+                            chunk = ''.join(buf)
+                        elif isinstance(content, str):
+                            chunk = content
+                else:
+                    # 退化为字符串
+                    try:
+                        raw_snippets.append(str(response)[:500])
+                    except Exception:
+                        pass
+
             if chunk:
                 output_content += chunk
                 sys.stdout.flush()
@@ -1973,16 +1989,16 @@ def fetch_response_simple(prompt, config):
             LAST_LLM_RAW_EVENTS = "\n---\n".join(raw_snippets)[:4000]
         except Exception:
             LAST_LLM_RAW_EVENTS = ""
-        
+
         # Debug输出：显示接收到的内容
         logging.debug(f"接收到的内容长度: {len(output_content)} 字符")
         logging.debug(f"接收到的内容: {output_content}")
         logging.info("模型响应完成")
-        
+
         if not output_content:
             logging.error("流式返回为空，原始事件快照(截断)：\n" + (LAST_LLM_RAW_EVENTS or "<empty>"))
         return output_content
-                
+
     except Exception as e:
         error_msg = str(e).lower()
         if 'ssl' in error_msg or 'connection' in error_msg or 'timeout' in error_msg:

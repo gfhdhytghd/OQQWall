@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="manifest" href="/manifest.webmanifest">
     <meta name="theme-color" content="#6750A4">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
     <title>OQQWall 审核面板</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
@@ -813,12 +815,45 @@
     </style>
 </head>
 
-<body>
-    <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}</script>
-    <script>
-        // 后端注入的暂存区显示控制：若为 true 则完全隐藏暂存区
-        window.HIDE_STAGING = {hide_staging};
-    </script>
+    <body>
+        <script>if('serviceWorker' in navigator){window.addEventListener('load',()=>{navigator.serviceWorker.register('/sw.js').catch(()=>{});});}</script>
+        <script>
+            // 后端注入的暂存区显示控制：若为 true 则完全隐藏暂存区
+            window.HIDE_STAGING = {hide_staging};
+        </script>
+        <script>
+            // PWA 安装按钮（跨浏览器显式入口）
+            (function(){
+                let deferredPrompt = null;
+                const btn = document.getElementById('installBtn');
+                function installed(){
+                  return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || (window.navigator.standalone === true);
+                }
+                function show(){ if(btn && !installed()) btn.style.display=''; }
+                function hide(){ if(btn) btn.style.display='none'; }
+                window.addEventListener('beforeinstallprompt', (e) => {
+                  e.preventDefault();
+                  deferredPrompt = e; show();
+                });
+                btn && btn.addEventListener('click', async () => {
+                  try{
+                    if(!deferredPrompt) return;
+                    deferredPrompt.prompt();
+                    await deferredPrompt.userChoice;
+                  }catch(_){
+                  }finally{
+                    deferredPrompt = null; hide();
+                  }
+                });
+                // 已安装时隐藏按钮
+                if (installed()) hide();
+                // iOS 不触发 beforeinstallprompt：显示按钮提示用户通过“分享-添加到主屏幕”
+                try{
+                  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+                  if (isIOS && !installed()) show();
+                }catch(_){ }
+            })();
+        </script>
     <div class="container">
         {userbar}
         {notice_html}
@@ -828,6 +863,7 @@
         </div>
         <div style="display:flex;justify-content:flex-start;gap:8px;margin:16px 0px" ;>
             <a href="/list" class="btn btn-info"><span class="ico">📋</span><span class="label">切换列表模式</span></a>
+            <button id="installBtn" class="btn btn-primary" style="display:none"><span class="ico">⬇️</span><span class="label">安装应用</span></button>
         </div>
         <div class="sep">
             <div class="stats">
