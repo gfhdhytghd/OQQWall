@@ -53,3 +53,4 @@ logs/qzone.log
 */__pycache__/*
 tests/recordings/*
 testmsg
+web_review/web_review.log

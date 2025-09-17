@@ -378,6 +378,7 @@
             border-radius: 16px;
             padding: 16px;
             box-shadow: var(--shadow-1);
+            width: 100%;
         }
 
         .global-controls h2 {
@@ -463,7 +464,7 @@
         /* 超大屏：合并为一行（9列） - 仅在 ≥1300px */
         @media (min-width: 1300px) {
             .global-row {
-                grid-template-columns: repeat(9, auto);
+                grid-template-columns: repeat(9, minmax(0, 1fr));
             }
 
             .global-row .row-1,
@@ -674,6 +675,7 @@
             align-items: stretch;
             gap: 16px;
             margin: 12px 0 16px 0;
+            width: 100%;
         }
 
         .top-right {
@@ -681,6 +683,9 @@
             flex-direction: column;
             align-items: center;
             gap: 16px;
+            flex: 1 1 auto;
+            min-width: 0;
+            width: 100%;
         }
 
         /* 7. 移动端优化 */

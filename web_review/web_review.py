@@ -23,6 +23,7 @@ import os
 import sqlite3
 import json
 import subprocess
+import shlex
 import sys
 import argparse
 from pathlib import Path
@@ -79,6 +80,7 @@ except FileNotFoundError:
     <style>
       :root{--outline:#CAC4D0}
       body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"PingFang SC","Microsoft Yahei",sans-serif;background:#F7F2FA;margin:0;padding:12px;color:#1C1B1F}
+      .container{max-width:1600px;margin:0 auto;padding:24px}
       .items-list{display:block}
       .l-card{position:relative;background:#fff;border-radius:16px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin:10px 0;transition:transform .2s ease, box-shadow .2s ease}
       .l-card:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(0,0,0,.12)}
@@ -126,8 +128,10 @@ except FileNotFoundError:
         .l-form{grid-template-columns:1fr}
         .l-actions{margin-top:8px; background:transparent; box-shadow:none; border:0}
       }
+      @media (max-width: 768px){ .container{padding:12px} }
     </style>
     <script>window.HIDE_STAGING={hide_staging};</script>
+    <div class='container'>
     <div style="display:flex;justify-content:flex-start;gap:8px;margin-bottom:8px"><a href="/" class="btn">← 返回瀑布流</a></div>
     <div class='staging-area' style="display:none;background:#ECE6F0;border-radius:16px;padding:16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
       <h2 style="margin:0 0 10px 0;color:#49454F;font-size:18px">暂存区预览</h2>
@@ -147,6 +151,7 @@ except FileNotFoundError:
       </div>
     </div>
     <div class='items-list'>{rows}</div>
+    </div>
     <script>
       // 批量按钮响应式文本处理
       (function(){
@@ -1408,12 +1413,12 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
     def _run_command_sh(self, object_str: str, self_id: str, web_user: str | None = None):
         if not object_str:
             return 1, 'empty'
-        obj_safe = object_str.replace("'", "'\\''")
-        id_safe = (self_id or '').replace("'", "'\\''")
+        obj_safe = shlex.quote(object_str)
+        id_safe = shlex.quote(self_id or '')
         env_prefix = "WEB_REVIEW=1"
         if web_user:
-            env_prefix += f" WEB_REVIEW_USER='{web_user.replace("'", "'\\''")}'"
-        cmdline = ['bash', '-lc', f"{env_prefix} ./getmsgserv/command.sh '{obj_safe}' '{id_safe}'"]
+            env_prefix += f" WEB_REVIEW_USER={shlex.quote(web_user)}"
+        cmdline = ['bash', '-lc', f"{env_prefix} ./getmsgserv/command.sh {obj_safe} {id_safe}"]
         print(f"[web-review] command.sh -> {object_str} (self_id={self_id})")
         proc = subprocess.run(cmdline, cwd=str(ROOT_DIR), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         if proc.stdout:
