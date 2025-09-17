@@ -27,6 +27,9 @@ from typing import Dict, Any, List, Optional, Tuple
 from contextlib import contextmanager
 from functools import wraps
 
+# 最近一次LLM原始事件调试信息（便于在空响应时输出）
+LAST_LLM_RAW_EVENTS = ""
+
 # ============================================================================
 # 配置区域：词典、规则、提示词模板
 # ============================================================================
@@ -1917,6 +1920,7 @@ def fetch_response_simple(prompt, config):
 
         # 处理流式响应（兼容多种事件/字段形态）
         output_content = ""
+        raw_snippets = []
         for response in responses:
             if response is None:
                 continue
@@ -1946,18 +1950,37 @@ def fetch_response_simple(prompt, config):
                                 chunk = ''.join(buf)
                             elif isinstance(content, str):
                                 chunk = content
+                    # 收集原始片段用于调试
+                    try:
+                        if isinstance(out, dict):
+                            # 只截取部分内容，避免日志过大
+                            raw_snippets.append(json.dumps(out, ensure_ascii=False)[:500])
+                        else:
+                            # 退化为字符串表示
+                            raw_snippets.append(str(response)[:500])
+                    except Exception:
+                        pass
             except Exception as parse_err:
                 logging.debug(f"流式响应解析异常: {parse_err}")
                 chunk = ""
             if chunk:
                 output_content += chunk
                 sys.stdout.flush()
+
+        # 将原始事件快照存入全局，供调用方在需要时打印
+        global LAST_LLM_RAW_EVENTS
+        try:
+            LAST_LLM_RAW_EVENTS = "\n---\n".join(raw_snippets)[:4000]
+        except Exception:
+            LAST_LLM_RAW_EVENTS = ""
         
         # Debug输出：显示接收到的内容
         logging.debug(f"接收到的内容长度: {len(output_content)} 字符")
         logging.debug(f"接收到的内容: {output_content}")
         logging.info("模型响应完成")
         
+        if not output_content:
+            logging.error("流式返回为空，原始事件快照(截断)：\n" + (LAST_LLM_RAW_EVENTS or "<empty>"))
         return output_content
                 
     except Exception as e:
@@ -2260,7 +2283,8 @@ def main():
         final_response = fetch_response_simple(prompt, config)
         
         if not final_response:
-            logging.error("未获得有效的模型响应")
+            # 打印模型原始输出快照，便于定位问题
+            logging.error("未获得有效的模型响应，原始事件(截断)：\n" + (LAST_LLM_RAW_EVENTS or "<empty>"))
             sys.exit(1)
         
         final_response = clean_json_output(final_response)
