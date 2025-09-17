@@ -7,12 +7,20 @@
   <style>
     :root { --color-primary:#6750A4; --color-primary-container:#EADDFF; --color-on-primary-container:#21005D; --color-surface:#F7F2FA; --color-surface-0:#FFFFFF; --color-outline:#CAC4D0; --color-text:#1C1B1F; --color-text-sub:#49454F; }
     * { box-sizing: border-box; }
+    /* Hide all scrollbars (Firefox + WebKit) but preserve scroll behavior */
+    * { scrollbar-width: none; }
+    *::-webkit-scrollbar { width: 0; height: 0; }
     body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Microsoft Yahei",sans-serif; background: var(--color-surface); color: var(--color-text); }
-    /* 限制整页宽度不超过高度的 180%（即 180vh），并在大屏下留出边距 */
-    .wrap { max-width: min(180vh, 96vw); margin:0 auto; padding:16px; }
+    /* 限制整页最大宽度，避免受视口高度影响造成横向收缩 */
+    .wrap { max-width: min(1200px, 96vw); margin:0 auto; padding:16px; }
     .topbar { display:flex; align-items:center; gap:12px; margin-bottom: 12px; }
     .back { text-decoration:none; color:#fff; background:#17a2b8; padding:8px 12px; border-radius:999px; }
     .card { background: var(--color-surface-0); border:1px solid var(--color-outline); border-radius: 16px; box-shadow:0 1px 3px rgba(0,0,0,.05); margin-bottom: 16px; overflow:hidden; }
+    /* 预览卡片：高度=页面高度-顶栏高度，内部头部自适应，主体填充 */
+    .card-preview { overflow: hidden; display:grid; grid-template-rows:auto 1fr; height: calc(100vh - 120px); }
+    .card-preview .bd { overflow: hidden; height: 100%; }
+    .card-preview .bd iframe { height: calc(100% - 24px) !important; }
+    .card-preview .bd .preview-foot { height: 32px; margin: 0; font-size: 12px; color: #49454F; display:flex; align-items:center; }
     .card .hd { padding:14px 16px; border-bottom:1px solid var(--color-outline); display:flex; justify-content:space-between; align-items:center; }
     .card .bd { padding:16px; }
     .title { margin:0; font-size:18px; font-weight:600; }
@@ -36,11 +44,28 @@
     .detail-grid { display:grid; grid-template-columns: 400px minmax(0, 1fr); gap:16px; align-items:start; }
     .detail-grid .col { max-height: calc(100vh - 120px); overflow:auto; }
     @media (max-width: 768px) {
+      .wrap { max-width: 100vw; padding: 12px; }
       .detail-grid { grid-template-columns: 1fr; }
       .detail-grid .col { max-height: none; overflow: visible; }
     }
   </style>
   <script>
+    // 计算“渲染预览”卡片高度：页面高度 - 顶栏高度
+    (function(){
+      function setPreviewHeight(){
+        try{
+          const topbar = document.querySelector('.topbar');
+          const hTop = topbar ? topbar.offsetHeight : 0;
+          const vh = window.innerHeight || document.documentElement.clientHeight;
+          // 预留一点底部空间（12px）避免视觉挤压
+          const avail = Math.max(240, vh - hTop - 12);
+          document.documentElement.style.setProperty('--preview-h', avail + 'px');
+        }catch(_){ }
+      }
+      window.addEventListener('load', setPreviewHeight);
+      window.addEventListener('resize', ()=>{ clearTimeout(window.__pv_t); window.__pv_t = setTimeout(setPreviewHeight, 50); });
+      if (document.fonts && document.fonts.ready){ document.fonts.ready.then(setPreviewHeight).catch(()=>{}); }
+    })();
     // 轻量级图片浏览器（与列表页一致）
     (function(){
       let modal=null, imgEl=null, leftBtn=null, rightBtn=null, currentIdx=0, list=[];
@@ -143,8 +168,8 @@
         <div class="card card-preview">
           <div class="hd"><h2 class="title">渲染预览</h2></div>
           <div class="bd">
-            <iframe src="/detail_html?tag={tag}" style="width:100%;height:70vh;border:1px solid #e5e5ef;border-radius:12px;background:#fff"></iframe>
-            <div style="margin-top:8px;font-size:12px;color:#49454F">如无法显示，请<a href="/detail_html?tag={tag}" target="_blank">点击在新窗口打开</a></div>
+            <iframe src="/detail_html?tag={tag}" style="width:100%;height:100%;border:1px solid #e5e5ef;border-radius:12px;background:#fff"></iframe>
+            <div class="preview-foot">如无法显示，请<a href="/detail_html?tag={tag}" target="_blank" style="margin-left:6px">点击在新窗口打开</a></div>
           </div>
         </div>
       </div>

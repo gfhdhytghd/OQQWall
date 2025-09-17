@@ -74,7 +74,8 @@ try:
         LIST_HTML_TEMPLATE = f.read()
 except FileNotFoundError:
     LIST_HTML_TEMPLATE = """
-    <!doctype html><meta charset='utf-8'><title>列表视图</title>
+    <!doctype html><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>
+    <title>列表视图</title>
     <style>
       :root{--outline:#CAC4D0}
       body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,"PingFang SC","Microsoft Yahei",sans-serif;background:#F7F2FA;margin:0;padding:12px;color:#1C1B1F}
@@ -90,12 +91,15 @@ except FileNotFoundError:
       .l-select input{appearance:none;width:0;height:0;margin:0}
       .l-select.checked{border-color:#28a745;background:#28a745}
       .l-select.checked::after{content:'✓';color:#fff;font-size:12px;line-height:12px;text-align:center}
+      /* 批量模式下：已处理卡片隐藏复选框 */
+      body.batch-on .l-card.processed .l-select{display:none !important}
       .l-tag{color:#6750A4;font-weight:700}
       .l-comment{color:#1C1B1F;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:42vw}
       .l-meta{color:#49454F;font-size:13px;display:grid;gap:2px}
       .l-images, i-image{display:flex;flex-wrap:nowrap;overflow:hidden;gap:6px;align-items:center;height:80px}
-      .l-images img, i-image img{flex:0 0 80px;width:80px;height:80px;border-radius:8px;border:1px solid var(--outline);object-fit:cover}
-      .l-right, i-right{display:flex;flex-direction:column;min-height:80px;position:relative}
+      .l-images img, i-image img{flex:0 0 76px;width:76px;height:76px;border-radius:8px;border:1px solid var(--outline);object-fit:cover}
+      .l-images{max-width:var(--list-img-width, 320px)}
+      .l-right, i-right{display:flex;flex-direction:column;margin-top:auto;position:relative}
       .l-badges, badge{position:absolute;top:8px;right:8px;display:flex;gap:8px}
       .badge{padding:4px 10px;border-radius:16px;font-size:12px;font-weight:600}
       .badge-anonymous{background:#F8D7DA;color:#721C24}
@@ -113,11 +117,19 @@ except FileNotFoundError:
       .batch-row1{display:flex;align-items:center;gap:12px}
       .batch-bar .count{color:#49454F}
       .batch-actions{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+      /* 批量按钮文本显示：桌面显示文字 + emoji；窄屏仅显示 emoji，去掉不稳定计算 */
+      .batch-btn{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .batch-btn .text{display:inline}
+      @media (max-width: 550px){ .batch-btn .text{display:none} }
       @media (max-width: 900px){ .l-form{grid-template-columns:1fr 200px} }
-      @media (max-width: 720px){ .l-form{grid-template-columns:1fr} .l-actions{margin-top:8px} }
+      @media (max-width: 720px){
+        .l-form{grid-template-columns:1fr}
+        .l-actions{margin-top:8px; background:transparent; box-shadow:none; border:0}
+      }
     </style>
+    <script>window.HIDE_STAGING={hide_staging};</script>
     <div style="display:flex;justify-content:flex-start;gap:8px;margin-bottom:8px"><a href="/" class="btn">← 返回瀑布流</a></div>
-    <div class='staging-area' style="background:#ECE6F0;border-radius:16px;padding:16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
+    <div class='staging-area' style="display:none;background:#ECE6F0;border-radius:16px;padding:16px;margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)">
       <h2 style="margin:0 0 10px 0;color:#49454F;font-size:18px">暂存区预览</h2>
       <div id='staging-grid' class='staging-grid' style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px"></div>
     </div>
@@ -127,25 +139,178 @@ except FileNotFoundError:
         <span class='count' id='selCount'>已选 0</span>
       </div>
       <div class='batch-actions'>
-        <button class='btn btn-success' id='batchApprove'>✅ 通过</button>
-        <button class='btn btn-danger' id='batchDelete'>🗑️ 删除</button>
-        <button class='btn' id='batchMore'>⋯ 其他</button>
-        <button class='btn' id='selectAll'>全选</button>
-        <button class='btn' id='invertSel'>反选</button>
+        <button class='btn btn-success batch-btn' id='batchApprove'>✅<span class='text'> 通过</span></button>
+        <button class='btn btn-danger batch-btn' id='batchDelete'>🗑️<span class='text'> 删除</span></button>
+        <button class='btn batch-btn' id='batchMore'>⋯<span class='text'> 其他</span></button>
+        <button class='btn batch-btn' id='selectAll'>📋<span class='text'>全选</span></button>
+        <button class='btn batch-btn' id='invertSel'>🔄<span class='text'>反选</span></button>
       </div>
     </div>
     <div class='items-list'>{rows}</div>
     <script>
+      // 批量按钮响应式文本处理
+      (function(){
+        function updateBatchButtons(){
+          const buttons = document.querySelectorAll('.batch-btn');
+          buttons.forEach(btn => {
+            const container = btn.closest('.batch-actions');
+            if (!container) return;
+
+            // 临时显示文本来测量宽度
+            btn.classList.remove('compact');
+
+            // 获取按钮的实际宽度和可用宽度
+            const btnWidth = btn.scrollWidth;
+            const containerWidth = container.offsetWidth;
+            const buttonCount = buttons.length;
+            const gap = 8; // grid gap
+            const availableWidth = (containerWidth - (buttonCount - 1) * gap) / buttonCount;
+
+            // 如果按钮内容超出可用宽度，切换为紧凑模式
+            if (btnWidth > availableWidth) {
+              btn.classList.add('compact');
+            }
+          });
+        }
+
+        window.addEventListener('load', updateBatchButtons);
+        window.addEventListener('resize', updateBatchButtons);
+
+        // 监听批量模式切换，确保按钮状态正确
+        const batchSwitch = document.getElementById('batchSwitch');
+        if (batchSwitch) {
+          batchSwitch.addEventListener('change', () => {
+            setTimeout(updateBatchButtons, 100);
+          });
+        }
+      })();
+
+      // 列表模式自适应图片数量
+      (function(){
+        function updateListImageDisplay(){
+          document.querySelectorAll('.l-card').forEach(card => {
+            const imagesContainer = card.querySelector('.l-images, i-image');
+            if (!imagesContainer) return;
+
+            const images = imagesContainer.querySelectorAll('img');
+            if (images.length === 0) return;
+
+            // 获取卡片宽度和相关空间
+            const cardWidth = card.offsetWidth;
+            const badgeSpace = 100; // badge预留空间
+            const textSpace = 200; // 左侧文字内容最小空间
+            const imageWidth = 80;
+            const gap = 6;
+
+            // 计算不同情况下的可用宽度
+            const totalAvailableWidth = cardWidth - textSpace;
+            const availableWidthWithBadge = totalAvailableWidth - badgeSpace;
+            const availableWidthWithoutBadge = totalAvailableWidth;
+
+            // 计算在各种情况下能显示的图片数量
+            const maxImagesWithBadge = Math.floor((availableWidthWithBadge + gap) / (imageWidth + gap));
+            const maxImagesWithoutBadge = Math.floor((availableWidthWithoutBadge + gap) / (imageWidth + gap));
+
+            let displayCount, showBadge, alignRight = false;
+
+            // 决策逻辑：如果能同时显示图片和badge，则显示badge
+            if (maxImagesWithBadge >= 2 || (maxImagesWithBadge >= 1 && maxImagesWithoutBadge >= 2)) {
+              displayCount = Math.max(1, maxImagesWithBadge);
+              showBadge = true;
+            } else {
+              // 否则隐藏badge，图片靠右对齐
+              displayCount = Math.max(1, maxImagesWithoutBadge);
+              showBadge = false;
+              alignRight = true;
+            }
+
+            // 限制显示图片数量在1-4之间，且不超过实际图片数量
+            displayCount = Math.min(displayCount, Math.min(4, images.length));
+
+            // 设置图片容器样式
+            const totalWidth = displayCount * imageWidth + (displayCount - 1) * gap;
+            imagesContainer.style.setProperty('--list-img-width', totalWidth + 'px');
+
+            if (alignRight) {
+              imagesContainer.style.justifyContent = 'flex-end';
+              imagesContainer.style.marginLeft = 'auto';
+            } else {
+              imagesContainer.style.justifyContent = 'flex-start';
+              imagesContainer.style.marginLeft = '0';
+            }
+
+            // 显示/隐藏图片
+            images.forEach((img, index) => {
+              img.style.display = index < displayCount ? 'block' : 'none';
+            });
+
+            // 控制badge显示
+            const badges = card.querySelector('.l-badges, badge');
+            if (badges) {
+              badges.style.display = showBadge ? 'flex' : 'none';
+            }
+          });
+        }
+
+        window.addEventListener('load', updateListImageDisplay);
+        window.addEventListener('resize', updateListImageDisplay);
+
+        // 监听新卡片插入
+        const observer = new MutationObserver(() => {
+          updateListImageDisplay();
+          updateListActionButtons();
+        });
+        observer.observe(document.body, { childList: true, subtree: true });
+      })();
+
+      // 列表卡片操作按钮响应式文本处理
+      (function(){
+        function updateListActionButtons(){
+          document.querySelectorAll('.l-card').forEach(card => {
+            const actionButtons = card.querySelectorAll('.l-action-btn');
+            const actionsContainer = card.querySelector('.l-actions');
+            if (!actionsContainer || actionButtons.length === 0) return;
+
+            actionButtons.forEach(btn => {
+              // 临时显示文本来测量宽度
+              btn.classList.remove('compact');
+            });
+
+            // 获取容器宽度和按钮数量
+            const containerWidth = actionsContainer.offsetWidth;
+            const buttonCount = actionButtons.length;
+            const gap = 8; // grid gap
+            const availableWidth = (containerWidth - (buttonCount - 1) * gap) / buttonCount;
+
+            // 检查每个按钮是否需要紧凑模式
+            actionButtons.forEach(btn => {
+              const btnWidth = btn.scrollWidth;
+              if (btnWidth > availableWidth) {
+                btn.classList.add('compact');
+              }
+            });
+          });
+        }
+
+        window.addEventListener('load', updateListActionButtons);
+        window.addEventListener('resize', updateListActionButtons);
+
+        // 暴露函数供其他模块调用
+        window.updateListActionButtons = updateListActionButtons;
+      })();
+
       // 暂存区：复用主页面的简化加载逻辑
       (function(){
         let tmr=null;
         function schedule(){ if (tmr) return; tmr = setTimeout(()=>{ tmr=null; update(); }, 400); }
         async function update(){
           try{
+            const area = document.querySelector('.staging-area');
+            if (window.HIDE_STAGING === true || window.HIDE_STAGING === 'true') { if (area) area.style.display='none'; return; }
             const r = await fetch('/api/staged'); if(!r.ok) return; const data = await r.json();
             const grid = document.getElementById('staging-grid'); if(!grid) return; grid.innerHTML='';
             const groups = Object.keys(data||{});
-            if (!groups.length){ grid.innerHTML = '<div style="color:#49454F">暂无暂存内容</div>'; return; }
+            if (!groups.length){ if (area) area.style.display='none'; return; } else { if (area) area.style.display=''; }
             groups.forEach(groupName=>{
               (data[groupName]||[]).forEach(item=>{
                 const div = document.createElement('div');
@@ -154,13 +319,14 @@ except FileNotFoundError:
                 const thumbs = document.createElement('div'); thumbs.className='thumbs'; thumbs.style.cssText='display:flex;gap:6px';
                 (item.thumbs||[]).forEach(url=>{ const img=document.createElement('img'); img.src='/cache/'+item.img_source_dir+'/'+item.tag+'/'+url; img.style.cssText='width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #CAC4D0'; thumbs.appendChild(img); });
                 const meta = document.createElement('div'); meta.className='meta'; meta.innerHTML = `<span class=\"tag\">#${item.tag}</span>`;
-                const info = document.createElement('div'); info.className='info'; info.style.cssText='color:#49454F'; info.textContent = `${item.nickname||'未知'}`;
+                const info = document.createElement('div'); info.className='info'; info.style.cssText='color:#49454F';
+                { const name = item.nickname || ''; const sid = item.senderid || ''; info.textContent = (name || sid) ? `${name}${sid? ' ('+sid+')':''}` : '未知'; }
                 const undoWrap = document.createElement('div'); undoWrap.className='undo'; const undoBtn=document.createElement('button'); undoBtn.className='btn'; undoBtn.textContent='↩ 撤销'; undoBtn.onclick=async(ev)=>{ ev.preventDefault(); try{ const rr=await fetch('/api/staged_undo',{method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:new URLSearchParams({tag:String(item.tag)})}); if(rr.ok) div.remove(); }catch(_){}}; undoWrap.appendChild(undoBtn);
                 // 布局到三列：缩略图(列1，跨两行) | 文本(列2) | 撤销(列3，跨两行)
                 thumbs.style.gridColumn = '1'; thumbs.style.gridRow = '1 / span 2';
                 meta.style.gridColumn = '2';
                 info.style.gridColumn = '2';
-                undoWrap.style.gridColumn = '3'; undoWrap.style.gridRow = '1 / span 2'; undoWrap.style.alignSelf = 'start';
+                undoWrap.style.gridColumn = '3'; undoWrap.style.gridRow = '1 / span 2'; undoWrap.style.alignSelf = 'center'; undoWrap.style.justifySelf = 'end';
                 div.appendChild(thumbs); div.appendChild(meta); div.appendChild(info); div.appendChild(undoWrap); grid.appendChild(div);
               });
             });
@@ -189,7 +355,7 @@ except FileNotFoundError:
       // 批量模式
       (function(){
         const bodyEl=document.body, selCount=document.getElementById('selCount');
-        function boxes(){ return Array.from(document.querySelectorAll('.l-card input.sel')); }
+        function boxes(){ return Array.from(document.querySelectorAll('.l-card:not(.processed) input.sel')); }
         function update(){ const n=boxes().filter(x=>x.checked).length; selCount.textContent='已选 '+n; const dis=n===0; ['batchApprove','batchDelete','batchMore'].forEach(id=>{ const b=document.getElementById(id); if(b) b.disabled=dis; }); }
         document.getElementById('batchSwitch')?.addEventListener('change', (e)=>{ if(e.target.checked) bodyEl.classList.add('batch-on'); else { bodyEl.classList.remove('batch-on'); boxes().forEach(cb=>cb.checked=false); document.querySelectorAll('.l-select').forEach(l=>l.classList.remove('checked')); update(); } });
         document.getElementById('selectAll')?.addEventListener('click', (e)=>{ e.preventDefault(); boxes().forEach(cb=>{cb.checked=true; cb.closest('.l-select')?.classList.add('checked');}); update(); });
@@ -1099,7 +1265,7 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         
         # 渲染最终页面（安全转义模板中的花括号，避免与 CSS 冲突）
         template_safe = INDEX_HTML_TEMPLATE.replace('{', '{{').replace('}', '}}')
-        for key in ['total_count', 'anonymous_count', 'with_images_count', 'search', 'rows', 'group_options', 'userbar', 'notice_html', 'initial_max_tag', 'main_self_id']:
+        for key in ['total_count', 'anonymous_count', 'with_images_count', 'search', 'rows', 'group_options', 'userbar', 'notice_html', 'initial_max_tag', 'main_self_id', 'hide_staging']:
             template_safe = template_safe.replace('{{' + key + '}}', '{' + key + '}')
 
         # 账户组选项
@@ -1123,6 +1289,18 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
 
         initial_max_tag = max([int(i['tag']) for i in items], default=0)
         main_self_id = self._get_group_mainqqid(user['group']) or ''
+        # 每次刷新检测当前组配置的 max_post_stack，若为 1 则隐藏暂存区
+        hide_staging = 'false'
+        try:
+            with open(ROOT_DIR / 'AcountGroupcfg.json', 'r', encoding='utf-8') as f:
+                cfg = json.load(f) or {}
+            gcfg = cfg.get(user['group']) or {}
+            mps = int(gcfg.get('max_post_stack', 1))
+            if mps == 1:
+                hide_staging = 'true'
+        except Exception as e:
+            # 出错时按默认 1 处理，隐藏暂存区
+            hide_staging = 'true'
         page_content = template_safe.format(
             total_count=total_count,
             anonymous_count=anonymous_count,
@@ -1133,7 +1311,8 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             userbar=userbar,
             notice_html=notice_html,
             initial_max_tag=str(initial_max_tag),
-            main_self_id=html.escape(main_self_id)
+            main_self_id=html.escape(main_self_id),
+            hide_staging=hide_staging
         )
         
         self.wfile.write(page_content.encode('utf-8'))
@@ -1375,7 +1554,18 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         items = list_pending(search=search_term, group_filter=user['group'])
         back_path = '/list' + (('?' + urllib.parse.urlencode({'search': search_term})) if search_term else '')
         rows_html = ''.join(self._generate_list_card(i, back_path=back_path) for i in items)
-        html_out = LIST_HTML_TEMPLATE.replace('{rows}', rows_html)
+        # 读取当前组配置，若 max_post_stack == 1 则隐藏暂存区
+        hide_staging = 'false'
+        try:
+            with open(ROOT_DIR / 'AcountGroupcfg.json', 'r', encoding='utf-8') as f:
+                cfg = json.load(f) or {}
+            gcfg = cfg.get(user['group']) or {}
+            mps = int(gcfg.get('max_post_stack', 1))
+            if mps == 1:
+                hide_staging = 'true'
+        except Exception:
+            hide_staging = 'true'
+        html_out = LIST_HTML_TEMPLATE.replace('{rows}', rows_html).replace('{hide_staging}', hide_staging)
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
         self.end_headers()
@@ -1423,10 +1613,10 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
               <i-image class=\"l-images\">{images_html}</i-image> 
             </div> 
             <i-right class=\"l-right\"> 
-              <div class=\"l-actions\">  
-                <a href=\"{detail_url}\" class=\"btn btn-info\">📄 详情</a> 
-                <button type=\"button\" class=\"btn btn-success act\" data-cmd=\"是\">✅ 通过</button> 
-                <button type=\"button\" class=\"btn btn-danger act\" data-cmd=\"删\">🗑️ 删除</button> 
+              <div class=\"l-actions\">
+                <a href=\"{detail_url}\" class=\"btn btn-info l-action-btn\">📄<span class=\"text\"> 详情</span></a>
+                <button type=\"button\" class=\"btn btn-success act l-action-btn\" data-cmd=\"是\">✅<span class=\"text\"> 通过</span></button>
+                <button type=\"button\" class=\"btn btn-danger act l-action-btn\" data-cmd=\"删\">🗑️<span class=\"text\"> 删除</span></button>
               </div> 
             </i-right> 
             <badge class=\"l-badges\">{badges_html}</badge> 

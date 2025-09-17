@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
+
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -25,20 +26,20 @@
             --shadow-2: 0px 1px 2px rgba(0, 0, 0, 0.3), 0px 2px 6px 2px rgba(0, 0, 0, 0.15);
             --shadow-3: 0px 4px 8px 3px rgba(0, 0, 0, 0.15), 0px 1px 3px rgba(0, 0, 0, 0.3);
         }
-        
+
         * {
             box-sizing: border-box;
             margin: 0;
             padding: 0;
         }
-        
+
         body {
             font-family: "Roboto", "Helvetica Neue", Arial, sans-serif;
             background-color: var(--color-surface-container-low);
             color: var(--color-on-surface);
             line-height: 1.6;
         }
-        
+
         .container {
             max-width: 1600px;
             margin: 0 auto;
@@ -50,10 +51,12 @@
         .items-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-            grid-auto-rows: auto;   /* 首帧用真实高度，量测后切换为 1px 单位行高 */
+            grid-auto-rows: auto;
+            /* 首帧用真实高度，量测后切换为 1px 单位行高 */
             grid-auto-flow: dense;
             column-gap: 24px;
-            row-gap: 0;             /* 行间距由卡片 margin-bottom 提供，消除量化误差 */
+            row-gap: 0;
+            /* 行间距由卡片 margin-bottom 提供，消除量化误差 */
         }
 
         .item-card {
@@ -63,13 +66,35 @@
             display: flex;
             flex-direction: column;
             width: 100%;
-            margin: 0 0 24px;        /* 垂直间距 */
+            margin: 0 0 24px;
+            /* 垂直间距 */
             transition: transform 0.2s ease, box-shadow 0.2s ease;
-            position: relative;      /* 供右上角徽章定位 */
+            position: relative;
+            /* 供右上角徽章定位 */
         }
-        .item-card.processed { opacity: 0.8; }
-        .highlight-new { animation: flash 1.5s ease-in-out; }
-        @keyframes flash { 0%{box-shadow: 0 0 0 rgba(103,80,164,0);} 50%{box-shadow: 0 0 0 6px rgba(103,80,164,0.25);} 100%{box-shadow: 0 0 0 rgba(103,80,164,0);} }
+
+        .item-card.processed {
+            opacity: 0.8;
+        }
+
+        .highlight-new {
+            animation: flash 1.5s ease-in-out;
+        }
+
+        @keyframes flash {
+            0% {
+                box-shadow: 0 0 0 rgba(103, 80, 164, 0);
+            }
+
+            50% {
+                box-shadow: 0 0 0 6px rgba(103, 80, 164, 0.25);
+            }
+
+            100% {
+                box-shadow: 0 0 0 rgba(103, 80, 164, 0);
+            }
+        }
+
         .item-card:hover {
             transform: translateY(-4px);
             box-shadow: var(--shadow-3);
@@ -79,7 +104,7 @@
             padding: 20px;
             flex-grow: 1;
         }
-        
+
         /* 3. 字体层级优化 */
         .item-header {
             display: flex;
@@ -87,7 +112,8 @@
             align-items: flex-start;
             margin-bottom: 16px;
             gap: 12px;
-            padding-right: 96px; /* 为右上角徽章预留空间，避免重叠 */
+            padding-right: 96px;
+            /* 为右上角徽章预留空间，避免重叠 */
         }
 
         .item-tag {
@@ -95,18 +121,27 @@
             font-weight: 500;
             color: var(--color-primary);
         }
-        
+
         .info-item {
             font-size: 14px;
             color: var(--color-on-surface-variant);
             margin-top: 4px;
         }
+
         .info-item strong {
             font-weight: 500;
             color: var(--color-on-surface);
         }
 
-        .item-badges { display:flex; gap:8px; position:absolute; top:10px; right:10px; z-index:2; }
+        .item-badges {
+            display: flex;
+            gap: 8px;
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 2;
+        }
+
         .badge {
             padding: 4px 10px;
             border-radius: 16px;
@@ -114,10 +149,12 @@
             font-weight: 500;
             text-transform: uppercase;
         }
+
         .badge-anonymous {
             background-color: #F8D7DA;
             color: #721C24;
         }
+
         .badge-images {
             background-color: #D4EDDA;
             color: #155724;
@@ -128,23 +165,25 @@
             font-size: 16px;
             margin-bottom: 16px;
             padding: 16px;
-            background-color: var(--color-surface-container-low); /* 使用更柔和的背景色 */
+            background-color: var(--color-surface-container-low);
+            /* 使用更柔和的背景色 */
             border-radius: 12px;
             border-left: 4px solid var(--color-primary-container);
             word-wrap: break-word;
             overflow-wrap: anywhere;
         }
+
         .item-sep {
             height: 1px;
             background: var(--color-outline-variant);
             margin: 12px 0 16px 0;
             border-radius: 1px;
         }
-        
-        /* 5. 图片网格：一行三列，随卡片宽度自适应 */
+
+        /* 5. 图片网格：自适应数量，避免与badge重叠 */
         .item-images {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(var(--img-cols, 3), 1fr);
             gap: 12px;
             margin-bottom: 16px;
         }
@@ -152,13 +191,15 @@
         .item-images img {
             width: 100%;
             height: auto;
-            aspect-ratio: 1 / 1; /* 保持方形 */
+            aspect-ratio: 1 / 1;
+            /* 保持方形 */
             object-fit: cover;
             border-radius: 12px;
             border: 2px solid var(--color-outline-variant);
             cursor: pointer;
             transition: transform 0.2s ease, box-shadow 0.2s ease;
         }
+
         .item-images img:hover {
             transform: scale(1.05);
             box-shadow: var(--shadow-2);
@@ -169,6 +210,7 @@
             padding: 0px;
             margin: 0 0px;
         }
+
         .comment-form textarea {
             width: 100%;
             padding: 12px;
@@ -179,6 +221,7 @@
             min-height: 70px;
             background-color: var(--color-surface-container-low);
         }
+
         .comment-form textarea:focus {
             outline: 2px solid var(--color-primary);
             border-color: transparent;
@@ -186,24 +229,55 @@
 
         .item-actions {
             display: grid;
-            grid-template-columns: repeat(3, 1fr); /* 1:1:1 三列占满一行 */
+            grid-template-columns: repeat(3, 1fr);
+            /* 1:1:1 三列占满一行 */
             gap: 10px;
             padding: 20px;
             background-color: var(--color-surface-container-high);
-            border-radius: 0 0 16px 16px; /* 底部圆角 */
+            border-radius: 0 0 16px 16px;
+            /* 底部圆角 */
         }
-        .item-actions .btn { width: 100%; height: 41px; padding: 0 12px; line-height: 1; }
+
+        .item-actions .btn {
+            width: 100%;
+            height: 41px;
+            padding: 0 12px;
+            line-height: 1;
+        }
+
         /* 操作区按钮：半透明填充 + 2px 实心内边框 */
-        .item-actions .btn { 
-            background: rgba(202, 196, 208, 0.35); /* 默认淡灰半透明 */
+        .item-actions .btn {
+            background: rgba(202, 196, 208, 0.35);
+            /* 默认淡灰半透明 */
             box-shadow: inset 0 0 0 2px var(--color-outline-variant);
-            color: #000; /* 操作区文字统一黑色 */
+            color: #000;
+            /* 操作区文字统一黑色 */
         }
-        .item-actions .btn-success { background: rgba(40, 167, 69, 0.35); box-shadow: inset 0 0 0 2px #28a745; color:#000; }
-        .item-actions .btn-warning { background: rgba(255, 193, 7, 0.35); box-shadow: inset 0 0 0 2px #ffc107; color:#000; }
-        .item-actions .btn-danger { background: rgba(220, 53, 69, 0.35); box-shadow: inset 0 0 0 2px #dc3545; color:#000; }
-        .item-actions .btn-info { background: rgba(23, 162, 184, 0.35); box-shadow: inset 0 0 0 2px #17a2b8; color:#000; }
-        
+
+        .item-actions .btn-success {
+            background: rgba(40, 167, 69, 0.35);
+            box-shadow: inset 0 0 0 2px #28a745;
+            color: #000;
+        }
+
+        .item-actions .btn-warning {
+            background: rgba(255, 193, 7, 0.35);
+            box-shadow: inset 0 0 0 2px #ffc107;
+            color: #000;
+        }
+
+        .item-actions .btn-danger {
+            background: rgba(220, 53, 69, 0.35);
+            box-shadow: inset 0 0 0 2px #dc3545;
+            color: #000;
+        }
+
+        .item-actions .btn-info {
+            background: rgba(23, 162, 184, 0.35);
+            box-shadow: inset 0 0 0 2px #17a2b8;
+            color: #000;
+        }
+
         /* 按钮美化 */
         .btn {
             padding: 8px 16px;
@@ -219,111 +293,272 @@
             justify-content: center;
             gap: 8px;
         }
+
         .btn:hover {
             transform: translateY(-2px);
             box-shadow: var(--shadow-1);
         }
-        
-        .btn-success { background: #28a745; color: white; }
-        .btn-warning { background: #ffc107; color: #212529; }
-        .btn-danger { background: #dc3545; color: white; }
-        .btn-info { background: #17a2b8; color: white; }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-info {
+            background: #17a2b8;
+            color: white;
+        }
 
         /* 顶部统计和筛选 */
-        .header, .stats, .filters {
-            margin-bottom: 24px;
-        }
 
         .header {
             text-align: center;
         }
+
         h1 {
             font-size: 32px;
             font-weight: 500;
             color: var(--color-on-surface);
         }
+
         .header p {
             color: var(--color-on-surface-variant);
         }
 
         .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            display: flex;
+            flex-direction: column;
             gap: 16px;
+            width: 120px;
         }
 
         .stat-card {
             background: var(--color-surface-container-lowest);
             border-radius: 16px;
-            padding: 24px;
             text-align: center;
             box-shadow: var(--shadow-1);
-            border: 1px solid var(--color-outline-variant);
+            flex: 1 1 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
-        
+
         .stat-number {
-            font-size: 36px;
+            font-size: clamp(8px, 4vw, 32px);
             font-weight: 700;
             color: var(--color-primary);
         }
-        
+
         .stat-label {
             font-size: 14px;
             color: var(--color-on-surface-variant);
         }
-        
+
         .filters {
             background: var(--color-surface-container-lowest);
             border-radius: 16px;
             padding: 24px;
             box-shadow: var(--shadow-1);
+            margin: 0px 16px;
+            width: 100%
         }
-        
+
         .global-controls {
             background: var(--color-surface-container-lowest);
             border-radius: 16px;
             padding: 16px;
-            margin: 16px 0 24px 0;
             box-shadow: var(--shadow-1);
         }
-        .global-controls h2 { font-size: 18px; margin-bottom: 12px; font-weight: 600; }
-        .global-row { display:grid; gap: 10px; align-items: center; }
-        .global-row .note { grid-column: 1 / -1; color: var(--color-on-surface-variant); }
-        .global-row .row-1 { display:grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-        .global-row .row-2 { display:grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
-        /* 统一全局操作区按钮高度（桌面40px，移动端保持60px） */
-        .global-controls .btn { height: 40px; padding: 0 18px; line-height: 1; border-radius: 999px; }
-        .global-controls .num-input { height: 40px; padding: 0 18px; line-height: 1; border-radius: 999px; }
-        /* 超大屏：合并为一行（9列） */
-        @media (min-width: 1200px) {
-            .global-row { grid-template-columns: repeat(9, auto); }
-            .global-row .row-1, .global-row .row-2 { display: contents; }
+
+        .global-controls h2 {
+            font-size: 18px;
+            margin-bottom: 12px;
+            font-weight: 600;
         }
-        /* 移动端：3列布局（恢复按钮高度60px） */
-        @media (max-width: 768px) {
-            .global-row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-            .global-row .row-1, .global-row .row-2 { display: contents; }
-            .global-controls .btn { height: 60px; }
-            .global-controls .num-input { height: 60px; }
+
+        .global-row {
+            display: grid;
+            gap: 10px;
+            align-items: center;
         }
-        .select { padding: 10px 12px; border:1px solid var(--color-outline); border-radius: 12px; }
-        .num-input { width: 100%; padding: 10px 16px; border:1px solid var(--color-outline); border-radius: 999px; background: #fff; }
+
+        .global-row .note {
+            grid-column: 1 / -1;
+            color: var(--color-on-surface-variant);
+        }
+
+        .global-row .row-1 {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .global-row .row-2 {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        /* 统一全局操作区按钮高度（桌面40px，移动端保持60px）；图标与文本分离 */
+        .global-controls .btn {
+            height: 40px;
+            padding: 0 12px;
+            line-height: 1.2;
+            border-radius: 999px;
+            white-space: nowrap;
+            display: inline-flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .global-controls .btn .ico {
+            flex: 0 0 auto;
+        }
+
+        .global-controls .btn .label,
+        .global-controls .btn .text {
+            display: inline-block;
+        }
+
+        .global-controls .num-input {
+            height: 40px;
+            padding: 0 18px;
+            line-height: 1;
+            border-radius: 999px;
+        }
+
+        /* 全局按钮文本按词换行（不按字断行），最多两行 */
+        .global-btn {
+            white-space: normal;
+            word-break: keep-all;
+            /* 避免在单词/汉字中间断行 */
+            overflow-wrap: break-word;
+            /* 仅在必要时对超长英文单词断行 */
+            display: -webkit-box !important;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+
+        /* 支持浏览器启用中文“按词语”分行（Chrome/Safari 近版本支持） */
+        @supports (word-break: auto-phrase) {
+
+            .global-btn,
+            .global-controls .btn .label,
+            .global-controls .btn .text {
+                word-break: auto-phrase;
+            }
+        }
+
+        /* 超大屏：合并为一行（9列） - 仅在 ≥1300px */
+        @media (min-width: 1300px) {
+            .global-row {
+                grid-template-columns: repeat(9, auto);
+            }
+
+            .global-row .row-1,
+            .global-row .row-2 {
+                display: contents;
+            }
+        }
+
+        /* <1300px 强制使用两行布局：4列 + 5列（默认已定义） */
+        /* 移动版（<550px）：固定三列栅格，形成 3+3+3 */
+        @media (max-width: 550px) {
+            .global-row {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+
+            .global-row .row-1,
+            .global-row .row-2 {
+                display: contents;
+            }
+
+            /* 按钮允许换行，最多两行（仅文本部分裁切）；图标与文本左右分栏 */
+            .global-controls .btn {
+                height: 60px;
+                white-space: normal;
+                display: grid !important;
+                grid-template-columns: auto 1fr;
+                align-items: center;
+                column-gap: 8px;
+            }
+
+            .global-controls .btn .label,
+            .global-controls .btn .text {
+                display: -webkit-box !important;
+                -webkit-line-clamp: 2;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+                word-break: keep-all;
+                /* 按词换行 */
+                overflow-wrap: break-word;
+                /* 英文长词必要时断行 */
+            }
+
+            .global-controls .btn .ico {
+                grid-column: 1;
+            }
+
+            .global-controls .btn .label,
+            .global-controls .btn .text {
+                grid-column: 2;
+            }
+
+            /* 编号输入：宽度不限制，允许随栅格伸缩 */
+            .global-controls .num-input {
+                height: 60px;
+                min-width: 0;
+                width: 100%;
+            }
+        }
+
+        .select {
+            padding: 10px 12px;
+            border: 1px solid var(--color-outline);
+            border-radius: 12px;
+        }
+
+        .num-input {
+            width: 100%;
+            padding: 10px 16px;
+            border: 1px solid var(--color-outline);
+            border-radius: 999px;
+            background: #fff;
+        }
+
         /* 美化 number 输入的加减按钮 */
         .num-input::-webkit-outer-spin-button,
-        .num-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-        .num-input { -moz-appearance: textfield; }
-        
+        .num-input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+
+        .num-input {
+            -moz-appearance: textfield;
+        }
+
         .filter-row {
             display: flex;
             gap: 16px;
-            align-items: flex-end;
+            align-items: center;
             flex-wrap: wrap;
         }
 
         .filter-group {
             flex: 1;
         }
-        
+
         .filter-input {
             width: 100%;
             padding: 12px 16px;
@@ -331,52 +566,73 @@
             border-radius: 24px;
             font-size: 16px;
         }
-        
+
         .empty-state {
-            grid-column: 1 / -1; /* 让空状态占满整行 */
+            grid-column: 1 / -1;
+            /* 让空状态占满整行 */
             text-align: center;
             padding: 80px 20px;
         }
-        
-        /* 暂存区样式 */
+
+        /* 暂存区样式（与列表页一致） */
         .staging-area {
-            background: var(--color-surface-container-high);
+            background: #ECE6F0;
             border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 24px;
-            box-shadow: var(--shadow-1);
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, .06);
         }
+
         .staging-area h2 {
-            font-size: 20px;
+            font-size: 18px;
             font-weight: 500;
-            margin-bottom: 16px;
-            color: var(--color-on-surface-variant);
+            margin-bottom: 10px;
+            color: #49454F;
         }
+
         .staging-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             gap: 12px;
         }
+
         .staged-item {
-            background: var(--color-surface-container-lowest);
+            background: #fff;
             border-radius: 12px;
-            padding: 10px 12px;
+            padding: 10px;
             font-size: 14px;
             display: grid;
-            grid-template-columns: 64px 1fr auto; /* thumbs | text | undo */
+            grid-template-columns: 64px 1fr auto;
+            /* thumbs | text | undo */
             grid-template-rows: auto auto;
             grid-template-areas:
                 "thumbs meta undo"
                 "thumbs info undo";
             gap: 8px 10px;
-            box-shadow: var(--shadow-1);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, .08);
         }
-        .staged-item .thumbs { grid-area: thumbs; display:flex; flex-direction: row; gap:6px; }
-        .staged-item .thumbs img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; border:1px solid var(--color-outline-variant); background:#f6f6f6; }
+
+        .staged-item .thumbs {
+            grid-area: thumbs;
+            display: flex;
+            flex-direction: row;
+            gap: 6px;
+        }
+
+        .staged-item .thumbs img {
+            width: 56px;
+            height: 56px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 1px solid var(--color-outline-variant);
+            background: #f6f6f6;
+        }
+
         .staged-item .tag {
             font-weight: 700;
             color: var(--color-primary);
         }
+
         .staged-item .group {
             font-size: 12px;
             background: var(--color-primary-container);
@@ -384,44 +640,176 @@
             padding: 2px 8px;
             border-radius: 10px;
         }
-        .staged-item .meta { grid-area: meta; display:flex; align-items:center; gap:8px; }
-        .staged-item .info { grid-area: info; color: var(--color-on-surface-variant); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .staged-item .undo { grid-area: undo; align-self: start; }
-        .staged-item .undo .btn { padding: 6px 10px; font-size: 13px; }
+
+        .staged-item .meta {
+            grid-area: meta;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .staged-item .info {
+            grid-area: info;
+            color: var(--color-on-surface-variant);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .staged-item .undo {
+            grid-area: undo;
+            align-self: center;
+            justify-self: end;
+        }
+
+        .staged-item .undo .btn {
+            padding: 6px 10px;
+            font-size: 13px;
+        }
+
+        .sep {
+            height: auto;
+            display: flex;
+            flex-direction: row;
+            align-items: stretch;
+            gap: 16px;
+            margin: 12px 0 16px 0;
+        }
+
+        .top-right {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
 
         /* 7. 移动端优化 */
         @media (max-width: 768px) {
-            .container { padding: 12px; }
-            h1 { font-size: 24px; }
-            /* 移动端退化为单列，保留间距 */
-            .items-grid { column-count: 1; column-width: auto; column-gap: 0; }
-            .item-card { width: 100%; max-width: 100%; overflow: hidden; }
-            .item-content { padding: 14px; }
-            .item-header { flex-direction: column; align-items: flex-start; gap: 8px; }
-            .item-tag { font-size: 20px; }
-            .item-comment { font-size: 15px; padding: 12px; }
-            /* 改为网格布局，自动换行，避免超宽 */
-            .item-images { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; overflow-x: visible; }
-            .item-images img { width: 100%; height: auto; aspect-ratio: 1 / 1; }
-            /* 操作按钮 3 列布局 */
-            .item-actions { padding: 12px; gap: 8px; display: grid; grid-template-columns: repeat(3, 1fr); }
-            .item-actions .btn { width: 100%; height: 41px; padding: 0 12px; font-size: 15px; line-height: 1; }
-            .btn.btn-info[href^="/detail"] { flex: 1 1 100%; order: -1; }
-            .filters { padding: 16px; }
-            .filter-row { gap: 10px; }
-            .filter-input { font-size: 15px; padding: 10px 14px; }
-            .stats { grid-template-columns: repeat(3, 1fr); gap: 10px; }
-            .stat-number { font-size: 24px; }
-            .select, .num-input { max-width: 100%; }
-            /* 暂存区：移动端仅显示1张缩略图，横向布局 */
-            .staged-item { grid-template-columns: 64px 1fr; grid-template-areas: "thumbs meta" "thumbs info"; }
-            .staged-item .thumbs { flex-direction: row; }
-            .staged-item .thumbs img:not(:first-child) { display: none; }
-        }
+            .container {
+                padding: 12px;
+            }
 
+            h1 {
+                font-size: 24px;
+            }
+
+            /* 移动端退化为单列，保留间距 */
+            .items-grid {
+                column-count: 1;
+                column-width: auto;
+                column-gap: 0;
+            }
+
+            .item-card {
+                width: 100%;
+                max-width: 100%;
+                overflow: hidden;
+            }
+
+            .item-content {
+                padding: 14px;
+            }
+
+            .item-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+
+            .item-tag {
+                font-size: 20px;
+            }
+
+            .item-comment {
+                font-size: 15px;
+                padding: 12px;
+            }
+
+            /* 改为网格布局，自动换行，避免超宽 */
+            .item-images {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+                margin-bottom: 12px;
+                overflow-x: visible;
+            }
+
+            .item-images img {
+                width: 100%;
+                height: auto;
+                aspect-ratio: 1 / 1;
+            }
+
+            /* 操作按钮 3 列布局 */
+            .item-actions {
+                padding: 12px;
+                gap: 8px;
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+            }
+
+            .item-actions .btn {
+                width: 100%;
+                height: 41px;
+                padding: 0 12px;
+                font-size: 15px;
+                line-height: 1;
+            }
+
+            .btn.btn-info[href^="/detail"] {
+                flex: 1 1 100%;
+                order: -1;
+            }
+
+            .filters {
+                padding: 16px;
+            }
+
+            .filter-row {
+                gap: 10px;
+            }
+
+            .filter-input {
+                font-size: 15px;
+                padding: 10px 14px;
+            }
+
+            .stats {
+                display: none !important;
+                /* 手机端隐藏统计区 */
+            }
+
+            .stat-number {
+                font-size: clamp(8px, 6vw, 32px);
+            }
+
+            .select,
+            .num-input {
+                max-width: 100%;
+            }
+
+            /* 暂存区：移动端仅显示1张缩略图，横向布局 */
+            .staged-item {
+                grid-template-columns: 64px 1fr;
+                grid-template-areas: "thumbs meta" "thumbs info";
+            }
+
+            .staged-item .thumbs {
+                flex-direction: row;
+            }
+
+            .staged-item .thumbs img:not(:first-child) {
+                display: none;
+            }
+        }
     </style>
 </head>
+
 <body>
+    <script>
+        // 后端注入的暂存区显示控制：若为 true 则完全隐藏暂存区
+        window.HIDE_STAGING = {hide_staging};
+    </script>
     <div class="container">
         {userbar}
         {notice_html}
@@ -429,81 +817,189 @@
             <h1>OQQWall 审核面板</h1>
             <p>管理校园墙投稿内容，确保内容质量和社区规范</p>
         </div>
-        <div style="display:flex;justify-content:flex-start;gap:8px;margin-bottom:8px">
-            <a href="/list" class="btn btn-info">📋 切换列表模式</a>
+        <div style="display:flex;justify-content:flex-start;gap:8px;margin:16px 0px" ;>
+            <a href="/list" class="btn btn-info"><span class="ico">📋</span><span class="label">切换列表模式</span></a>
         </div>
-        
-        <div class="stats">
-            <div class="stat-card">
-                <div class="stat-number">{total_count}</div>
-                <div class="stat-label">待审项目</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">{anonymous_count}</div>
-                <div class="stat-label">匿名投稿</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-number">{with_images_count}</div>
-                <div class="stat-label">包含图片</div>
-            </div>
-        </div>
-        
-        <div class="filters">
-            <form method="get" action="/" class="filter-row">
-                <div class="filter-group">
-                    <input type="text" id="search" name="search" class="filter-input" 
-                           value="{search}" placeholder="搜索用户ID、昵称或内容...">
+        <div class="sep">
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-number">{total_count}</div>
+                    <div class="stat-label">待审项目</div>
                 </div>
-                <button type="submit" class="btn btn-primary" style="background-color: var(--color-primary); color: white;">🔍 筛选</button>
-                <a href="/" class="btn btn-secondary" style="background-color: var(--color-surface-container-high);">🔄 重置</a>
-            </form>
-        </div>
+                <div class="stat-card">
+                    <div class="stat-number">{anonymous_count}</div>
+                    <div class="stat-label">匿名投稿</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">{with_images_count}</div>
+                    <div class="stat-label">包含图片</div>
+                </div>
+            </div>
+            <div class="top-right">
+                <div class="filters">
+                    <form method="get" action="/" class="filter-row">
+                        <div class="filter-group">
+                            <input type="text" id="search" name="search" class="filter-input" value="{search}"
+                                placeholder="搜索用户ID、昵称或内容...">
+                        </div>
+                        <button type="submit" class="btn btn-primary"
+                            style="background-color: var(--color-primary); color: white;">🔍 筛选</button>
+                        <a href="/" class="btn btn-secondary"
+                            style="background-color: var(--color-surface-container-high);">🔄 重置</a>
+                    </form>
+                </div>
 
-        <div class="global-controls">
-            <h2>全局操作</h2>
-            <form method="post" action="/api/cmd" class="global-row" id="globalCmdForm">
-                <!-- 强制以主账号执行 -->
-                <input type="hidden" name="self_id" value="{main_self_id}">
-                <div class="note">以主账号执行：{main_self_id}</div>
-                <div class="row-1">
-                    <button class="btn" name="object" value="待处理">📋 待处理</button>
-                    <button class="btn" name="object" value="发送暂存区">📨 发送暂存区</button>
-                    <button class="btn" name="object" value="删除暂存区">🧹 删除暂存区</button>
-                    <button class="btn" name="object" value="删除待处理">🗑️ 删除待处理</button>
+                <div class="global-controls">
+                    <h2>全局操作</h2>
+                    <form method="post" action="/api/cmd" class="global-row" id="globalCmdForm">
+                        <!-- 强制以主账号执行 -->
+                        <input type="hidden" name="self_id" value="{main_self_id}">
+                        <div class="note">以主账号执行：{main_self_id}</div>
+                        <div class="row-1">
+                            <button class="btn global-btn" name="object" value="待处理">
+                                <span class="ico">📋</span>
+                                <span class="label"><span class="nb">待处理</span></span>
+                            </button>
+
+                            <button class="btn global-btn" name="object" value="发送暂存区">
+                                <span class="ico">📨</span>
+                                <span class="label">发送<wbr><span class="nb">暂存区</span></span>
+                            </button>
+
+                            <button class="btn global-btn" name="object" value="删除暂存区">
+                                <span class="ico">🧹</span>
+                                <span class="label">删除<wbr><span class="nb">暂存区</span></span>
+                            </button>
+
+                            <button class="btn global-btn" name="object" value="删除待处理">
+                                <span class="ico">🗑️</span>
+                                <span class="label">删除<wbr><span class="nb">待处理</span></span>
+                            </button>
+
+                        </div>
+                        <div class="row-2">
+                            <input class="num-input" type="number" name="number" placeholder="编号输入">
+                            <button class="btn global-btn" name="object" value="设定编号"><span class="ico">#</span><span
+                                    class="label">设定<wbr>编号</span></button>
+                            <button class="btn global-btn" name="object" value="调出"><span class="ico">📥</span><span
+                                    class="label">调出</span></button>
+                            <button class="btn btn-info global-btn" name="object" value="自动重新登录"><span
+                                    class="ico">🔁</span><span class="label">自动<wbr>重新登录</span></button>
+                            <button class="btn btn-info global-btn" name="object" value="手动重新登录"><span
+                                    class="ico">🔑</span><span class="label">手动<wbr>重新登录</span></button>
+                        </div>
+                    </form>
                 </div>
-                <div class="row-2">
-                    <input class="num-input" type="number" name="number" placeholder="编号（设定/调出 共用）">
-                    <button class="btn" name="object" value="设定编号"># 设定编号</button>
-                    <button class="btn" name="object" value="调出">📥 调出</button>
-                    <button class="btn btn-info" name="object" value="自动重新登录">🔁 自动重新登录</button>
-                    <button class="btn btn-info" name="object" value="手动重新登录">🔑 手动重新登录</button>
-                </div>
-            </form>
+            </div>
         </div>
-        
-        <div class="staging-area">
+        <div class="staging-area" style="display:none">
             <h2>暂存区预览</h2>
             <div id="staging-grid" class="staging-grid">
-                </div>
+            </div>
         </div>
-        
+
         <div class="items-grid">
             {rows}
         </div>
     </div>
-    
+
     <script>
+        // 瀑布流模式的全局按钮不需要响应式处理，始终显示完整文字
+
+        // ======= 自适应图片数量管理 =======
+        (function () {
+            function updateImageCols() {
+                document.querySelectorAll('.item-card').forEach(card => {
+                    const imagesContainer = card.querySelector('.item-images');
+                    if (!imagesContainer) return;
+
+                    const images = imagesContainer.querySelectorAll('img');
+                    if (images.length === 0) return;
+
+                    // 获取卡片内容区域宽度，减去padding
+                    const cardContent = card.querySelector('.item-content');
+                    if (!cardContent) return;
+
+                    const contentWidth = cardContent.offsetWidth - 40; // 减去padding
+                    const minColWidth = 80;
+                    const gap = 12;
+                    const badgeSpace = 96; // badge预留空间
+
+                    // 先尝试包含badge空间的布局
+                    const availableWidthWithBadge = contentWidth - badgeSpace;
+                    const maxColsWithBadge = Math.floor((availableWidthWithBadge + gap) / (minColWidth + gap));
+
+                    // 再计算不包含badge空间时能显示多少列
+                    const maxColsWithoutBadge = Math.floor((contentWidth + gap) / (minColWidth + gap));
+
+                    let optimalCols, showBadge, alignRight = false;
+
+                    // 如果包含badge空间还能显示多列，或者能显示1列+badge，则显示badge
+                    if (maxColsWithBadge >= 2 || (maxColsWithBadge >= 1 && maxColsWithoutBadge >= 2)) {
+                        optimalCols = Math.max(1, maxColsWithBadge);
+                        showBadge = true;
+                    } else {
+                        // 否则隐藏badge，图片靠右显示
+                        optimalCols = Math.max(1, maxColsWithoutBadge);
+                        showBadge = false;
+                        alignRight = true;
+                    }
+
+                    // 限制列数在1-6之间，且不超过实际图片数量
+                    optimalCols = Math.min(optimalCols, Math.min(6, images.length));
+
+                    // 设置CSS变量和对齐方式
+                    imagesContainer.style.setProperty('--img-cols', optimalCols);
+                    if (alignRight) {
+                        imagesContainer.style.justifyContent = 'flex-end';
+                        imagesContainer.style.marginLeft = 'auto';
+                        imagesContainer.style.maxWidth = 'fit-content';
+                    } else {
+                        imagesContainer.style.justifyContent = 'flex-start';
+                        imagesContainer.style.marginLeft = '0';
+                        imagesContainer.style.maxWidth = 'none';
+                    }
+
+                    // 显示图片
+                    const displayedImages = optimalCols * 2;
+                    images.forEach((img, index) => {
+                        img.style.display = index < displayedImages ? 'block' : 'none';
+                    });
+
+                    // 控制badge显示
+                    const badges = card.querySelector('.item-badges');
+                    if (badges) {
+                        badges.style.display = showBadge ? 'flex' : 'none';
+                    }
+                });
+            }
+
+            // 初始化和响应式更新
+            window.addEventListener('load', updateImageCols);
+            window.addEventListener('resize', updateImageCols);
+
+            // 在图片加载后更新
+            document.addEventListener('load', (e) => {
+                if (e.target.tagName === 'IMG') {
+                    updateImageCols();
+                }
+            }, true);
+
+            // 暴露函数供其他模块调用
+            window._updateImageCols = updateImageCols;
+        })();
+
         // ======= Masonry（Grid 横向优先填充，稳健版） =======
-        (function(){
-            function getGrid(){ return document.querySelector('.items-grid'); }
-            function rowMetrics(grid){
+        (function () {
+            function getGrid() { return document.querySelector('.items-grid'); }
+            function rowMetrics(grid) {
                 const cs = window.getComputedStyle(grid);
                 const rowGap = 0; // 行间距固定为0，由卡片margin提供
                 let rowH = parseFloat(cs.gridAutoRows);
                 if (!rowH || isNaN(rowH)) rowH = 1; // 使用1px单元减少量化误差
                 return { rowGap, rowH };
             }
-            function measure(card){
+            function measure(card) {
                 const grid = getGrid(); if (!grid || !card) return;
                 const { rowGap, rowH } = rowMetrics(grid);
                 const target = card.querySelector('form') || card;
@@ -513,86 +1009,88 @@
                 const span = Math.max(1, Math.ceil(h / rowH));
                 card.style.gridRowEnd = 'span ' + span;
             }
-            function layoutAll(){
+            function layoutAll() {
                 const grid = getGrid(); if (!grid) return;
+                // 首先更新图片列数
+                if (window._updateImageCols) window._updateImageCols();
                 // 首帧使用 auto 行高渲染真实高度，避免细条
                 grid.style.gridAutoRows = 'auto';
-                requestAnimationFrame(()=>{
+                requestAnimationFrame(() => {
                     grid.querySelectorAll('.item-card').forEach(measure);
                     grid.style.gridAutoRows = '1px';
                 });
             }
-            function onImgLoad(e){
+            function onImgLoad(e) {
                 const img = e.target; if (!img || img.tagName !== 'IMG') return;
                 const card = img.closest('.item-card'); if (!card) return;
                 measure(card);
             }
-            const mo = new MutationObserver((records)=>{
-                for (const r of records){
-                    r.addedNodes && r.addedNodes.forEach(node=>{
-                        if (node && node.nodeType===1){
-                            if (node.classList.contains('item-card')) requestAnimationFrame(()=>measure(node));
-                            node.querySelectorAll && node.querySelectorAll('.item-card').forEach(el=>requestAnimationFrame(()=>measure(el)));
+            const mo = new MutationObserver((records) => {
+                for (const r of records) {
+                    r.addedNodes && r.addedNodes.forEach(node => {
+                        if (node && node.nodeType === 1) {
+                            if (node.classList.contains('item-card')) requestAnimationFrame(() => measure(node));
+                            node.querySelectorAll && node.querySelectorAll('.item-card').forEach(el => requestAnimationFrame(() => measure(el)));
                         }
                     });
                 }
             });
             let ro;
-            try { ro = new ResizeObserver((entries)=>{ for (const e of entries){ if (e.target) measure(e.target); } }); } catch(_){ }
-            window.addEventListener('load', ()=>{
+            try { ro = new ResizeObserver((entries) => { for (const e of entries) { if (e.target) measure(e.target); } }); } catch (_) { }
+            window.addEventListener('load', () => {
                 const grid = getGrid();
-                if (grid){
+                if (grid) {
                     mo.observe(grid, { childList: true, subtree: true });
-                    grid.querySelectorAll('.item-card').forEach(el=> ro && ro.observe(el));
+                    grid.querySelectorAll('.item-card').forEach(el => ro && ro.observe(el));
                 }
                 layoutAll();
                 if (document.fonts && document.fonts.ready) document.fonts.ready.then(layoutAll);
             });
-            window.addEventListener('resize', ()=>{ clearTimeout(window.__mz_r); window.__mz_r = setTimeout(layoutAll, 150); });
+            window.addEventListener('resize', () => { clearTimeout(window.__mz_r); window.__mz_r = setTimeout(layoutAll, 150); });
             document.addEventListener('load', onImgLoad, true);
             window._masonry = { measure, layoutAll };
         })();
         // ======= 轻量级图片浏览器（支持左右键和移动端按钮） =======
-        (function(){
-            let modal=null, imgEl=null, leftBtn=null, rightBtn=null, currentIdx=0, list=[];
-            function close(){ if(modal){ modal.remove(); modal=null; list=[]; }}
-            function render(){ if(!imgEl) return; imgEl.src=list[currentIdx]; }
-            function createButtons(){
+        (function () {
+            let modal = null, imgEl = null, leftBtn = null, rightBtn = null, currentIdx = 0, list = [];
+            function close() { if (modal) { modal.remove(); modal = null; list = []; } }
+            function render() { if (!imgEl) return; imgEl.src = list[currentIdx]; }
+            function createButtons() {
                 const isMobile = window.matchMedia('(max-width: 768px)').matches;
-                if (isMobile){
+                if (isMobile) {
                     leftBtn = document.createElement('button');
                     rightBtn = document.createElement('button');
                     leftBtn.textContent = '‹'; rightBtn.textContent = '›';
-                    [leftBtn,rightBtn].forEach(b=>{ b.style.cssText='position:absolute;bottom:12px;background:#21005D;opacity:.9;color:#fff;border:none;border-radius:999px;padding:10px 14px;font-size:18px;pointer-events:auto;'});
-                    leftBtn.style.left='12px'; rightBtn.style.right='12px';
-                    leftBtn.onclick=(e)=>{ e.stopPropagation(); currentIdx=(currentIdx-1+list.length)%list.length; render(); };
-                    rightBtn.onclick=(e)=>{ e.stopPropagation(); currentIdx=(currentIdx+1)%list.length; render(); };
+                    [leftBtn, rightBtn].forEach(b => { b.style.cssText = 'position:absolute;bottom:12px;background:#21005D;opacity:.9;color:#fff;border:none;border-radius:999px;padding:10px 14px;font-size:18px;pointer-events:auto;' });
+                    leftBtn.style.left = '12px'; rightBtn.style.right = '12px';
+                    leftBtn.onclick = (e) => { e.stopPropagation(); currentIdx = (currentIdx - 1 + list.length) % list.length; render(); };
+                    rightBtn.onclick = (e) => { e.stopPropagation(); currentIdx = (currentIdx + 1) % list.length; render(); };
                     modal.appendChild(leftBtn); modal.appendChild(rightBtn);
                 }
             }
-            function open(startUrl, urls){
-                list = urls.slice(); currentIdx = list.indexOf(startUrl); if(currentIdx<0) currentIdx=0;
+            function open(startUrl, urls) {
+                list = urls.slice(); currentIdx = list.indexOf(startUrl); if (currentIdx < 0) currentIdx = 0;
                 modal = document.createElement('div');
-                modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;z-index:2147483646;cursor:zoom-out;';
+                modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;z-index:2147483646;cursor:zoom-out;';
                 imgEl = document.createElement('img');
-                imgEl.style.cssText='max-width:94vw;max-height:94vh;object-fit:contain;border-radius:8px;';
+                imgEl.style.cssText = 'max-width:94vw;max-height:94vh;object-fit:contain;border-radius:8px;';
                 modal.appendChild(imgEl);
                 createButtons();
                 document.body.appendChild(modal);
                 render();
-                modal.onclick=close;
+                modal.onclick = close;
                 document.addEventListener('keydown', onKey);
             }
-            function onKey(e){
-                if(!modal) return;
-                if(e.key==='Escape'){ close(); document.removeEventListener('keydown', onKey); return; }
-                if(e.key==='ArrowLeft'){ currentIdx=(currentIdx-1+list.length)%list.length; render(); }
-                if(e.key==='ArrowRight'){ currentIdx=(currentIdx+1)%list.length; render(); }
+            function onKey(e) {
+                if (!modal) return;
+                if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onKey); return; }
+                if (e.key === 'ArrowLeft') { currentIdx = (currentIdx - 1 + list.length) % list.length; render(); }
+                if (e.key === 'ArrowRight') { currentIdx = (currentIdx + 1) % list.length; render(); }
             }
             window._openImageBrowser = open;
         })();
         // ======= Toast Manager =======
-        (function(){
+        (function () {
             const container = document.createElement('div');
             container.id = 'toast-container';
             container.style.position = 'fixed';
@@ -601,7 +1099,7 @@
             container.style.flexDirection = 'column';
             container.style.gap = '8px';
             container.style.pointerEvents = 'none';
-            function position(){
+            function position() {
                 if (window.matchMedia('(max-width: 768px)').matches) {
                     container.style.top = '8px';
                     container.style.bottom = '';
@@ -623,71 +1121,73 @@
             document.body.appendChild(container);
 
             const shown = [];
-            function showToast(text, level='info'){
+            function showToast(text, level = 'info') {
                 const el = document.createElement('div');
                 el.style.cssText = 'background:#21005D;color:#fff;opacity:.95;padding:10px 12px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.25);pointer-events:auto;transition:opacity .4s ease, transform .4s ease;';
-                if (level==='success') el.style.background = '#155724';
-                if (level==='error') el.style.background = '#b3261e';
+                if (level === 'success') el.style.background = '#155724';
+                if (level === 'error') el.style.background = '#b3261e';
                 el.textContent = text;
                 // 挤压：最多4个，多的淡出
                 if (shown.length >= 4) {
                     const old = shown.shift();
                     old.style.opacity = '0';
-                    setTimeout(()=> old.remove(), 400);
+                    setTimeout(() => old.remove(), 400);
                 }
                 container.appendChild(el);
                 shown.push(el);
-                setTimeout(()=>{
+                setTimeout(() => {
                     el.style.opacity = '0';
                     el.style.transform = 'translateY(6px)';
-                    setTimeout(()=>{
+                    setTimeout(() => {
                         const idx = shown.indexOf(el);
-                        if (idx>=0) shown.splice(idx,1);
+                        if (idx >= 0) shown.splice(idx, 1);
                         el.remove();
                     }, 400);
                 }, 5000);
             }
             // 连接 SSE
-            try{
+            try {
                 const es = new EventSource('/events');
-                es.onmessage = (e)=>{
-                    try{
+                es.onmessage = (e) => {
+                    try {
                         const data = JSON.parse(e.data);
-                        if (data.type==='toast'){
-                            showToast(data.text || '操作完成', data.level||'info');
-                        } else if (data.type==='new_pending'){
+                        if (data.type === 'toast') {
+                            showToast(data.text || '操作完成', data.level || 'info');
+                        } else if (data.type === 'new_pending') {
                             // 自动拉取并插入新卡片
                             const grid = document.querySelector('.items-grid');
                             if (!grid) return;
                             const curMax = window._knownMaxTag || parseInt('{initial_max_tag}', 10) || 0;
-                            fetch('/api/pending_tags').then(r=>r.json()).then(async (j)=>{
-                                const tags = (j.tags||[]).map(t=>parseInt(t,10)).filter(n=>!isNaN(n));
-                                const newTags = tags.filter(n => n > curMax).sort((a,b)=>a-b);
-                                if (newTags.length){
-                                    for (const t of newTags){
-                                        try{
+                            fetch('/api/pending_tags').then(r => r.json()).then(async (j) => {
+                                const tags = (j.tags || []).map(t => parseInt(t, 10)).filter(n => !isNaN(n));
+                                const newTags = tags.filter(n => n > curMax).sort((a, b) => a - b);
+                                if (newTags.length) {
+                                    for (const t of newTags) {
+                                        try {
                                             const cr = await fetch('/api/card?tag=' + encodeURIComponent(String(t)));
-                                            if (cr.ok){
+                                            if (cr.ok) {
                                                 const d = await cr.json();
                                                 const wrap = document.createElement('div');
                                                 wrap.innerHTML = d.html;
                                                 const card = wrap.firstElementChild;
-                                                if (card){
+                                                if (card) {
                                                     grid.insertAdjacentElement('afterbegin', card);
                                                     card.classList.add('highlight-new');
-                                                    setTimeout(()=> card.classList.remove('highlight-new'), 1500);
+                                                    // 更新新卡片的图片布局
+                                                    if (window._updateImageCols) window._updateImageCols();
+                                                    setTimeout(() => card.classList.remove('highlight-new'), 1500);
                                                 }
                                             }
-                                        }catch(_){/* ignore */}
+                                        } catch (_) {/* ignore */ }
                                     }
                                     window._knownMaxTag = Math.max.apply(null, tags);
                                 }
-                            }).catch(()=>{});
+                            }).catch(() => { });
                             showToast('有新投稿加入队列', 'info');
-                        } else if (data.type==='undo'){
+                        } else if (data.type === 'undo') {
                             // 可选：提示撤销完成
                             showToast('已从暂存区撤回 #' + data.tag, 'success');
-                        } else if (data.type==='processed'){
+                        } else if (data.type === 'processed') {
                             // 群指令/后台处理导致的项目状态变更 -> 同步标记为已处理
                             const cardInput = document.querySelector('.item-card input[name="tag"][value="' + String(data.tag) + '"]');
                             const card = cardInput ? cardInput.closest('.item-card') : null;
@@ -695,9 +1195,9 @@
                                 markProcessed(card);
                             }
                         }
-                    }catch(_){/* ignore */}
+                    } catch (_) {/* ignore */ }
                 };
-            }catch(_){/* ignore */}
+            } catch (_) {/* ignore */ }
             // 暴露全局以便调试
             window._toast = showToast;
             window._knownMaxTag = parseInt('{initial_max_tag}', 10) || 0;
@@ -763,10 +1263,10 @@
         });
 
         // 新投稿提示：轮询 pending_meta
-        (function setupNewPostNotifier(){
+        (function setupNewPostNotifier() {
             let knownMax = window._knownMaxTag || parseInt('{initial_max_tag}', 10) || 0;
             let toast;
-            function showToast(){
+            function showToast() {
                 if (toast) return;
                 toast = document.createElement('div');
                 toast.style.cssText = 'position:fixed;right:12px;bottom:12px;background:#EADDFF;color:#21005D;padding:12px 14px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:2000;display:flex;gap:8px;align-items:center;';
@@ -780,10 +1280,10 @@
                 toast.appendChild(btn);
                 document.body.appendChild(toast);
             }
-            async function tick(){
-                try{
+            async function tick() {
+                try {
                     const r = await fetch('/api/pending_meta');
-                    if(!r.ok) return;
+                    if (!r.ok) return;
                     const data = await r.json();
                     const maxTag = parseInt(data.max_tag || 0, 10);
                     if (maxTag > knownMax) {
@@ -791,37 +1291,37 @@
                         window._knownMaxTag = knownMax;
                         showToast();
                     }
-                }catch(err){ console.warn('pending_meta error', err); }
+                } catch (err) { console.warn('pending_meta error', err); }
             }
             setInterval(tick, 12000);
         })();
         // 图片点击 -> 打开浏览器
         document.addEventListener('click', (e) => {
             if (e.target.tagName === 'IMG' && e.target.closest('.item-images')) {
-                const imgs = Array.from(e.target.closest('.item-images').querySelectorAll('img')).map(x=>x.src);
+                const imgs = Array.from(e.target.closest('.item-images').querySelectorAll('img')).map(x => x.src);
                 _openImageBrowser(e.target.src, imgs);
             }
         });
         // 点击标题 #tag -> 预览弹窗（iframe）
-        function openPreview(tag){
-            const modal=document.createElement('div');
-            modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:2147483646;';
-            const frame=document.createElement('iframe');
-            frame.src='/detail_html?tag='+encodeURIComponent(tag);
-            frame.style.cssText='width:min(92vw, 900px); height:80vh; background:#fff; border-radius:12px; border:1px solid #e5e5ef';
+        function openPreview(tag) {
+            const modal = document.createElement('div');
+            modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:2147483646;';
+            const frame = document.createElement('iframe');
+            frame.src = '/detail_html?tag=' + encodeURIComponent(tag);
+            frame.style.cssText = 'width:min(92vw, 900px); height:80vh; background:#fff; border-radius:12px; border:1px solid #e5e5ef';
             modal.appendChild(frame);
-            modal.onclick=(e)=>{ if(e.target===modal) modal.remove(); };
+            modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
             document.body.appendChild(modal);
         }
-        document.addEventListener('click',(e)=>{
+        document.addEventListener('click', (e) => {
             const tagEl = e.target.closest('.item-tag');
-            if(tagEl){
+            if (tagEl) {
                 const form = tagEl.closest('form');
                 const tag = form?.querySelector('input[name="tag"]').value;
-                if(tag){ e.preventDefault(); openPreview(tag); }
+                if (tag) { e.preventDefault(); openPreview(tag); }
             }
         });
-        
+
         // 操作按钮确认
         document.addEventListener('click', (e) => {
             if (e.target.matches('button[name="cmd"][value="删"], button[name="cmd"][value="拒"], button[name="cmd"][value="拉黑"]')) {
@@ -833,6 +1333,13 @@
 
         // 暂存区自动刷新逻辑
         function updateStagingArea() {
+            const staging = document.querySelector('.staging-area');
+            if (!staging) return;
+            // 如果配置为隐藏暂存区，直接隐藏并退出
+            if (window.HIDE_STAGING === true || window.HIDE_STAGING === 'true') {
+                staging.style.display = 'none';
+                return;
+            }
             fetch('/api/staged')
                 .then(response => response.json())
                 .then(data => {
@@ -840,9 +1347,13 @@
                     grid.innerHTML = ''; // 清空现有内容
 
                     if (Object.keys(data).length === 0) {
-                        grid.innerHTML = '<p style="color: var(--color-on-surface-variant);">暂存区是空的</p>';
+                        // 暂存为空：隐藏整个暂存区容器
+                        staging.style.display = 'none';
                         return;
                     }
+
+                    // 有内容：显示容器
+                    staging.style.display = '';
 
                     for (const groupName in data) {
                         const items = data[groupName];
@@ -852,7 +1363,7 @@
                             // thumbs
                             const th = document.createElement('div');
                             th.className = 'thumbs';
-                            const thumbs = Array.isArray(item.thumbs) ? item.thumbs.slice(0,3) : [];
+                            const thumbs = Array.isArray(item.thumbs) ? item.thumbs.slice(0, 3) : [];
                             thumbs.forEach(fn => {
                                 const img = document.createElement('img');
                                 const dir = item.img_source_dir || 'prepost';
@@ -871,9 +1382,9 @@
                             undoBtn.onclick = async (ev) => {
                                 ev.preventDefault();
                                 if (!confirm('确认将 #' + item.tag + ' 从暂存区撤回到待处理？')) return;
-                                try{
-                                    const r = await fetch('/api/staged_undo', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body: new URLSearchParams({ tag: String(item.tag) })});
-                                    if (r.ok){
+                                try {
+                                    const r = await fetch('/api/staged_undo', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ tag: String(item.tag) }) });
+                                    if (r.ok) {
                                         // 从暂存区移除
                                         div.remove();
                                         // 尝试将卡片插入待审核列表（重试几次）
@@ -882,21 +1393,23 @@
                                             let tries = 0;
                                             const tryFetch = async () => {
                                                 tries++;
-                                                try{
+                                                try {
                                                     const cr = await fetch('/api/card?tag=' + encodeURIComponent(item.tag));
-                                                    if (cr.ok){
+                                                    if (cr.ok) {
                                                         const data = await cr.json();
                                                         const wrap = document.createElement('div');
                                                         wrap.innerHTML = data.html;
                                                         const card = wrap.firstElementChild;
-                                                        if (card){
+                                                        if (card) {
                                                             grid.insertAdjacentElement('afterbegin', card);
                                                             card.classList.add('highlight-new');
-                                                            setTimeout(()=> card.classList.remove('highlight-new'), 1500);
+                                                            // 更新新卡片的图片布局
+                                                            if (window._updateImageCols) window._updateImageCols();
+                                                            setTimeout(() => card.classList.remove('highlight-new'), 1500);
                                                             return;
                                                         }
                                                     }
-                                                }catch(_){ }
+                                                } catch (_) { }
                                                 if (tries < 6) setTimeout(tryFetch, 800);
                                             };
                                             tryFetch();
@@ -904,7 +1417,7 @@
                                     } else {
                                         alert('撤销失败：' + r.status);
                                     }
-                                }catch(err){ alert('撤销失败：' + err); }
+                                } catch (err) { alert('撤销失败：' + err); }
                             };
                             const undoWrap = document.createElement('div');
                             undoWrap.className = 'undo';
@@ -913,7 +1426,7 @@
                             info.className = 'info';
                             const nick = item.nickname || '未知';
                             const sender = item.senderid || '';
-                            info.textContent = `${nick}${sender ? ' ('+sender+')' : ''}`;
+                            info.textContent = `${nick}${sender ? ' (' + sender + ')' : ''}`;
                             // assemble
                             div.appendChild(th);
                             div.appendChild(meta);
@@ -937,7 +1450,7 @@
             // 全局危险动作确认
             const form = document.getElementById('globalCmdForm');
             form.addEventListener('click', (e) => {
-                if (e.target.name === 'object' && ['删除暂存区','删除待处理'].includes(e.target.value)) {
+                if (e.target.name === 'object' && ['删除暂存区', '删除待处理'].includes(e.target.value)) {
                     if (!confirm('确定执行“' + e.target.value + '”吗？该操作不可撤销。')) {
                         e.preventDefault();
                     }
@@ -946,4 +1459,5 @@
         });
     </script>
 </body>
+
 </html>
