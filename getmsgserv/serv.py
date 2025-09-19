@@ -151,14 +151,25 @@ config = read_config('oqqwall.config')
 with open('./AcountGroupcfg.json', 'r', encoding='utf-8') as f:
     account_group_cfg = json.load(f)
 
+
+def _normalize_qq_id(value):
+    """Return a stripped string QQ id or None when blank."""
+    if value is None:
+        return None
+    qq_str = str(value).strip()
+    return qq_str or None
+
+
 self_id_to_acgroup = {}
 for group_name, group_info in account_group_cfg.items():
-    mainqqid = group_info.get('mainqqid')
+    mainqqid = _normalize_qq_id(group_info.get('mainqqid'))
     if mainqqid:
         self_id_to_acgroup[mainqqid] = group_name
-    minorqqid_list = group_info.get('minorqqid', [])
+    minorqqid_list = group_info.get('minorqqid', []) or []
     for qqid in minorqqid_list:
-        self_id_to_acgroup[qqid] = group_name
+        normalized_id = _normalize_qq_id(qqid)
+        if normalized_id:
+            self_id_to_acgroup[normalized_id] = group_name
 
 class RequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
