@@ -41,26 +41,44 @@ load_base_config() {
 
 # 获取投稿信息
 get_post_info() {
-    local tag="$1"
-    local json
-    
-    json=$(sqlite3 -json "$DB_PATH" "
-        SELECT senderid, receiver, comment, AfterLM, ACgroup
-        FROM preprocess WHERE tag='$tag';
-    ")
-    
-    if [[ -z "$json" || "$json" == "[]" ]]; then
-        log_error "未找到tag为 $tag 的投稿信息"
+    local tag_raw="$1"
+    local tag json err retries=5 delay=0.2
+
+    # 清理 tag（去除空白和不可见字符）
+    tag=$(printf '%s' "$tag_raw" | tr -d '\r\n\t ')
+    if [[ -z "$tag" ]]; then
+        log_error "get_post_info: tag 为空（原始: '$tag_raw')"
         return 1
     fi
-    
-    echo "$json"
+
+    # 重试以应对偶发的 DB 锁或初始化竞态
+    while (( retries > 0 )); do
+        err=""
+        json=$(sqlite3 -json "$DB_PATH" "
+            SELECT senderid, receiver, comment, AfterLM, ACgroup
+            FROM preprocess WHERE tag='$tag';
+        " 2> >(cat >&2)) || true
+
+        # 正常返回行
+        if [[ -n "$json" && "$json" != "[]" ]]; then
+            echo "$json"
+            return 0
+        fi
+
+        # 若无结果或锁冲突，短暂等待后重试
+        sleep "$delay"
+        retries=$((retries-1))
+    done
+
+    log_error "未找到tag为 $tag 的投稿信息"
+    return 1
 }
 
 # 保存投稿到暂存表
 save_to_storage() {
     local tag="$1" num="$2" port="$3" senderid="$4" groupname="$5"
-    
+    # 确保暂存表存在（首次运行场景）
+    sqlite3 "$DB_PATH" "CREATE TABLE IF NOT EXISTS sendstorge_$groupname (tag TEXT, num TEXT, port TEXT, senderid TEXT);"
     sqlite3 "$DB_PATH" "INSERT INTO sendstorge_$groupname (tag,num,port,senderid) VALUES ('$tag', '$num','$port','$senderid');"
     echo "success" > ./presend_out_fifo
 }
@@ -768,15 +786,30 @@ main_loop() {
             fi
             
             # 解析投稿信息
-            tag=$(echo "$in_json_data" | jq -r '.tag')
-            numfinal=$(echo "$in_json_data" | jq -r '.numb')
-            initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue')
+            tag=$(echo "$in_json_data" | jq -r '.tag // empty')
+            # 清理 tag 的不可见字符，避免 WHERE 不命中
+            tag=$(printf '%s' "$tag" | tr -d '\r\n\t ')
+            numfinal=$(echo "$in_json_data" | jq -r '.numb // empty')
+            initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue // empty')
+
+            # 基本校验：tag 必须存在
+            if [[ -z "$tag" ]]; then
+                log_error "收到的投稿JSON缺少tag字段或为空，原始输入: $in_json_data"
+                echo "failed" > ./presend_out_fifo
+                continue
+            fi
             
             # 获取发送信息并执行
-            get_send_info "$tag" || log_error "get_send_info 执行失败，tag: $tag"
+            if ! get_send_info "$tag"; then
+                # 确保调用方不会一直阻塞等待
+                echo "failed" > ./presend_out_fifo
+                log_error "get_send_info 执行失败，tag: $tag"
+            fi
             
         } || {
             log_error "主循环异常，输入数据: $in_json_data"
+            # 兜底：向调用方返回失败，避免首次运行阻塞
+            echo "failed" > ./presend_out_fifo
             continue
         }
     done
