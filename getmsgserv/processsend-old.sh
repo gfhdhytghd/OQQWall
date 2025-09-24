@@ -255,7 +255,7 @@ case $command in
         getmsgserv/preprocess.sh $object randeronly
         ;;
     扩列审查|扩列|查|查成分)
-        response=$(curl -s "http://127.0.0.1:$port/get_stranger_info?user_id=$senderid")
+        response=$(curl -s -H "$NAPCAT_AUTH_HEADER" "http://127.0.0.1:$port/get_stranger_info?user_id=$senderid")
         # 使用 jq 提取 qqLevel
         qqLevel=$(echo "$response" | jq '.data.qqLevel')
         qzoneopenstatus=$(check_qzone_open "$senderid")

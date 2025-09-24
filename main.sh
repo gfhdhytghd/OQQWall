@@ -1,6 +1,11 @@
 #!/bin/bash
+
+IFS=$'\n\t'
+umask 027
+
+CFG='./oqqwall.config'
+
 # 函数：检测文件或目录是否存在，不存在则创建
-source ./Global_toolkit.sh
 check_and_create() {
     local path=$1
     local type=$2
@@ -21,104 +26,16 @@ check_and_create() {
     fi
 }
 
-# 仅依赖 3 个位置参数：
-#   $1 = 配置文件路径
-#   $2 = 变量名
-#   $3 = 默认值
-check_variable() {
-    cfg_file='./oqqwall.config'
-    local var_name="$1"
-    local default_value="$2"
-
-    # 基础校验 ---------------------------------------------------------
-    if [[ -z "$cfg_file" || -z "$var_name" ]]; then
-        echo "[check_variable] 用法: check_variable <var_name> <default_value>"
-        return 1
-    fi
-    [[ ! -f "$cfg_file" ]] && {
-        echo "[check_variable] 错误: 配置文件 $cfg_file 不存在"
-        return 1
-    }
-
-    # 取当前值；grep -m1 只取首行，防止重复定义干扰
-    local current_value
-    current_value=$(grep -m1 "^${var_name}=" "$cfg_file" | cut -d'=' -f2-)
-
-    # 若值为空、缺失或占位符，则写入默认值 ------------------------------
-    if [[ -z "$current_value" || "$current_value" == "xxx" ]]; then
-        if grep -q "^${var_name}=" "$cfg_file"; then
-            # 已存在行 → 就地替换
-            sed -i "s|^${var_name}=.*|${var_name}=${default_value}|" "$cfg_file"
-        else
-            # 未出现过 → 追加
-            echo "${var_name}=${default_value}" >> "$cfg_file"
-        fi
-        echo "[check_variable] 已将 ${var_name} 重置为默认值: ${default_value}"
-    fi
+generate_random_token() {
+  tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32
 }
 
-
-if [[ $1 == -r ]]; then
-  echo "执行子系统重启..."
-  if [[ "$manage_napcat_internal" == "true" ]]; then
-    if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null; then
-      pgrep -f "xvfb-run -a qq --no-sandbox -q" | xargs kill -15
-    fi
-  else
-      echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理 Napcat QQ 客户端。"
-  fi
-  if pgrep -f "python3 getmsgserv/serv.py" > /dev/null; then
-    pgrep -f "python3 getmsgserv/serv.py" | xargs kill -15
-  fi
-  if pgrep -f "python3 SendQzone/qzone-serv-pipe.py" > /dev/null; then
-    pgrep -f "python3 SendQzone/qzone-serv-pipe.py" | xargs kill -15
-  fi
-  if pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" > /dev/null; then
-    pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" | xargs kill -15
-  fi
-  # 重启网页审核服务（避免旧进程占用导致代码未更新）
-  if pgrep -f "python3 web_review/web_review.py" > /dev/null; then
-    pgrep -f "python3 web_review/web_review.py" | xargs kill -15
-  fi
-elif [[ $1 == -rf ]]; then
-  echo "执行无检验的子系统强行重启..."
-  if [[ "$manage_napcat_internal" == "true" ]]; then
-      pkill qq
-  else
-      echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理Napcat QQ 客户端。"
-  fi
-  pgrep -f "python3 getmsgserv/serv.py" | xargs kill -15
-  pgrep -f "python3 SendQzone/qzone-serv-pipe.py" | xargs kill -15
-  pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" | xargs kill -15
-  # 关闭网页审核服务
-  if pgrep -f "python3 web_review/web_review.py" > /dev/null; then
-    pgrep -f "python3 web_review/web_review.py" | xargs kill -15
-  fi
-elif [[ $1 == -h ]]; then
-echo "Without any flag-->start OQQWall
--r    Subsystem restart
--rf   Force subsystem restart
---test   start OQQWall in test mode
-Show Napcat(QQ) log: open a new terminal, go to OQQWall's home path and run: tail -n 100 -f ./NapCatlog
-for more information, read./OQQWall.wiki"
-exit 0
-elif [[ $1 == --test ]]; then
-  echo "以测试模式启动OQQWall..."
-  if pgrep -f "python3 SendQzone/qzone-serv-pipe.py" > /dev/null; then
-    pgrep -f "python3 SendQzone/qzone-serv-pipe.py" | xargs kill -15
-  fi
-   if pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" > /dev/null; then
-    pgrep -f "/bin/bash ./Sendcontrol/sendcontrol.sh" | xargs kill -15
-  fi
-  if pgrep -f "python3 getmsgserv/serv.py" > /dev/null; then
-      pgrep -f "python3 getmsgserv/serv.py" | xargs kill -15
-  fi
-fi
-
-# 确保配置文件存在
-if [[ ! -f "oqqwall.config" ]]; then
-    touch "oqqwall.config"
-    echo 'http-serv-port=
+# 初始化默认配置文件（含随机 napcat_access_token）
+init_default_config() {
+  local napcat_token
+  napcat_token=$(generate_random_token)
+  cat <<EOF > "$CFG"
+http-serv-port=
 apikey=""
 process_waittime=120
 manage_napcat_internal=true
@@ -128,13 +45,184 @@ vision_model=qwen-vl-max-latest
 vision_pixel_limit=12000000
 vision_size_limit_mb=9.5
 at_unprived_sender=true
-friend_request_window_sec="300"
-force_chromium_no-sandbox="false"
+friend_request_window_sec=300
+force_chromium_no-sandbox=false
 use_web_review=false
-web_review_port=10923'>> "oqqwall.config"
-    echo "已创建文件: oqqwall.config"
-    echo "请参考wiki填写配置文件后再启动"
+web_review_port=10923
+napcat_access_token=$napcat_token
+EOF
+  echo "已创建文件: $CFG"
+  echo "请参考wiki填写配置文件后再启动"
+}
+
+
+cfg_get() {
+  # 用 awk 提取，去掉引号与空白
+  local key=$1
+  [[ -z ${key:-} ]] && return 1
+  awk -F= -v k="$key" '$1==k{v=$2; gsub(/[ \t\r"\n]+/,"",v); print v}' "$CFG" 2>/dev/null
+}
+
+# 仅依赖 3 个位置参数：
+#   $1 = 配置文件路径
+#   $2 = 变量名
+#   $3 = 默认值
+check_variable() {
+    local var_name="$1"
+    local default_value="$2"
+
+    # 基础校验 ---------------------------------------------------------
+    if [[ -z "$CFG" || -z "$var_name" ]]; then
+        echo "[check_variable] 用法: check_variable <var_name> <default_value>"
+        return 1
+    fi
+    [[ ! -f "$CFG" ]] && {
+        echo "[check_variable] 错误: 配置文件 $CFG 不存在"
+        return 1
+    }
+
+    # 取当前值（使用 cfg_get，避免 grep 未匹配导致 pipefail+errexit 退出）
+    local current_value
+    current_value=$(cfg_get "$var_name")
+
+    # 若值为空、缺失或占位符，则写入默认值 ------------------------------
+    if [[ -z "$current_value" || "$current_value" == "xxx" ]]; then
+        # 如果 default_value 为 auto，则自动生成随机值
+        if [[ "$default_value" == "auto" ]]; then
+            local new_token
+            new_token=$(generate_random_token)
+            if grep -q "^${var_name}=" "$CFG"; then
+                sed -i "s|^${var_name}=.*|${var_name}=${new_token}|" "$CFG"
+            else
+                echo "${var_name}=${new_token}" >> "$CFG"
+            fi
+            echo "[init] 已为 ${var_name} 自动生成随机值:${new_token}。请在 NapCat/OneBot 侧同步该值。"
+            exit 0
+        else
+            if grep -q "^${var_name}=" "$CFG"; then
+                # 已存在行 → 就地替换
+                sed -i "s|^${var_name}=.*|${var_name}=${default_value}|" "$CFG"
+            else
+                # 未出现过 → 追加
+                echo "${var_name}=${default_value}" >> "$CFG"
+            fi
+            echo "[check_variable] 已将 ${var_name} 重置为默认值: ${default_value}"
+        fi
+    fi
+}
+
+kill_pat() {
+    local pattern=$1
+    pkill -f -15 -- "$pattern" 2>/dev/null || true
+}
+
+require_cmd() {
+  local missing=0
+  for cmd in "$@"; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      echo "错误：未找到依赖命令 $cmd，请先安装后再运行。"
+      missing=1
+    fi
+  done
+  if [[ $missing -eq 1 ]]; then
+    exit 1
+  fi
+}
+
+print_test_mode_hint() {
+  cat <<'EOF'
+测试模式提示：核心服务已停止，需要按需手动启动：
+- 接收端：python3 getmsgserv/serv.py
+- QZone 管道（如需调试）：python3 SendQzone/qzone-serv-pipe.py
+- 审核脚本：./Sendcontrol/sendcontrol.sh
+- NapCat 测试工具：python3 tests/napcat_replayer.py --target http://localhost:8082
+EOF
+}
+
+_sanitize_tbl() {
+  local s="sendstorge_${1}";
+  s="${s//[^A-Za-z0-9_]/_}"
+  if [[ $s =~ ^[0-9] ]]; then
+    s="g_${s}"
+  fi
+  printf '%s' "$s"
+}
+
+mode="${1:-}"
+
+# Debug mode (must be first arg if combined)
+if [[ "$mode" == "--debug" ]]; then
+  export OQQ_DEBUG=1
+  PS4='+ ${BASH_SOURCE[0]##*/}:${LINENO}:${FUNCNAME[0]:-main}: '
+  set -x
+  echo "[debug] Debug mode enabled. Tracing and verbose logs on."
+  mode="${2:-}"
+fi
+
+if [[ -f "$CFG" ]]; then
+  manage_napcat_internal=$(cfg_get 'manage_napcat_internal')
+fi
+manage_napcat_internal=${manage_napcat_internal:-false}
+
+case "$mode" in
+  -r)
+    echo "执行子系统重启..."
+    if [[ "$manage_napcat_internal" == "true" ]]; then
+      echo "停止 NapCat/QQ 相关进程..."
+      kill_pat "xvfb-run -a qq --no-sandbox -q"
+    else
+      echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理 Napcat QQ 客户端。"
+    fi
+    echo "停止 getmsgserv/serv.py..."
+    kill_pat "python3 getmsgserv/serv.py"
+    echo "停止 SendQzone/qzone-serv-pipe.py..."
+    kill_pat "python3 SendQzone/qzone-serv-pipe.py"
+    echo "停止 Sendcontrol/sendcontrol.sh..."
+    kill_pat "/bin/bash ./Sendcontrol/sendcontrol.sh"
+    echo "停止 web_review/web_review.py..."
+    kill_pat "python3 web_review/web_review.py"
+    ;;
+  -rf)
+    echo "执行无检验的子系统强行重启..."
+    if [[ "$manage_napcat_internal" == "true" ]]; then
+      echo "强制停止 NapCat/QQ 相关进程..."
+      kill_pat "xvfb-run -a qq --no-sandbox -q"
+    else
+      echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理 Napcat QQ 客户端。"
+    fi
+    kill_pat "python3 getmsgserv/serv.py"
+    kill_pat "python3 SendQzone/qzone-serv-pipe.py"
+    kill_pat "/bin/bash ./Sendcontrol/sendcontrol.sh"
+    kill_pat "python3 web_review/web_review.py"
+    ;;
+  -h)
+    echo "Without any flag-->start OQQWall
+-r    Subsystem restart
+-rf   Force subsystem restart
+--test   start OQQWall in test mode
+--debug  enable verbose tracing/logging (put first to combine)
+Show Napcat(QQ) log: open a new terminal, go to OQQWall's home path and run: tail -n 100 -f ./NapCatlog
+for more information, read./OQQWall.wiki"
     exit 0
+    ;;
+  --test)
+    echo "以测试模式启动OQQWall..."
+    kill_pat "python3 SendQzone/qzone-serv-pipe.py"
+    kill_pat "/bin/bash ./Sendcontrol/sendcontrol.sh"
+    kill_pat "python3 getmsgserv/serv.py"
+    print_test_mode_hint
+    ;;
+esac
+
+# 若配置不存在，则初始化后退出，避免未配置环境继续运行
+if [[ ! -f "$CFG" ]]; then
+  init_default_config
+  exit 0
+fi
+
+require_cmd jq sqlite3 python3 xvfb-run pkill
+if ! command -v qq >/dev/null 2>&1 && ! command -v linuxqq >/dev/null 2>&1; then
+  echo "警告：未检测到 qq 或 linuxqq 可执行文件，NapCat 内部管理可能无法启动 QQ 客户端。"
 fi
 
 # 初始化目录和文件
@@ -145,10 +233,9 @@ check_and_create "getmsgserv/all/" "directory"
 # 初始化文件
 check_and_create "/dev/shm/OQQWall/oqqwallhtmlcache.html" "file"
 check_and_create "./getmsgserv/all/commugroup.txt" "file"
-if [[ ! -f "getmsgserv/all/priv_post.json" ]]; then
-    touch "getmsgserv/all/priv_post.json"
-    echo "[]" >> "getmsgserv/all/priv_post.json"
-    echo "已创建文件: getmsgserv/all/priv_post.json"
+if [[ ! -f "getmsgserv/all/priv_post.jsonl" ]]; then
+    touch "getmsgserv/all/priv_post.jsonl"
+    echo "已创建文件: getmsgserv/all/priv_post.jsonl"
 fi
 if [[ ! -f "AcountGroupcfg.json" ]]; then
     touch "AcountGroupcfg.json"
@@ -175,6 +262,7 @@ if [[ ! -f "AcountGroupcfg.json" ]]; then
 fi
 
 # 检查关键变量是否设置
+check_variable "napcat_access_token" "auto"
 check_variable "http-serv-port" "8082"
 check_variable "apikey"  "sk-"
 check_variable "process_waittime" "120"
@@ -189,6 +277,16 @@ check_variable "friend_request_window_sec" "300"
 check_variable "force_chromium_no-sandbox" "false"
 check_variable "use_web_review" "false"
 check_variable "web_review_port" "10923"
+
+# 导出 NapCat Token 供后续脚本使用
+NAPCAT_ACCESS_TOKEN=$(cfg_get 'napcat_access_token')
+export NAPCAT_ACCESS_TOKEN
+if [[ -z "$NAPCAT_ACCESS_TOKEN" ]]; then
+    echo "[ERR] 未读取到 napcat_access_token，请检查 $CFG。" >&2
+    exit 1
+fi
+
+source ./Global_toolkit.sh
 
 
 # 尝试激活现有的虚拟环境
@@ -229,28 +327,6 @@ else
 
     echo "所有包已成功安装."
 fi
-
-# 确保配置文件存在
-if [[ ! -f "oqqwall.config" ]]; then
-    touch "oqqwall.config"
-    echo 'http-serv-port=
-apikey=""
-process_waittime=120
-manage_napcat_internal=true
-max_attempts_qzone_autologin=3
-text_model=qwen-plus-latest
-vision_model=qwen-vl-max-latest
-vision_pixel_limit=12000000
-vision_size_limit_mb=9.5
-at_unprived_sender=true
-force_chromium_no-sandbox=false
-use_web_review=false
-web_review_port=10923' >> "oqqwall.config"
-    echo "已创建文件: oqqwall.config"
-    echo "请参考wiki填写配置文件后再启动"
-    exit 0
-fi
-
 
 DB_NAME="./cache/OQQWall.db"
 
@@ -341,19 +417,20 @@ SQL
 done
 
 
-apikey=$(grep 'apikey' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-http_serv_port=$(grep 'http-serv-port' oqqwall.config | cut -d'=' -f2 | tr -d '"[:space:]')
-process_waittime=$(grep 'process_waittime' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-manage_napcat_internal=$(grep 'manage_napcat_internal' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-max_attempts_qzone_autologin=$(grep 'max_attempts_qzone_autologin' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-at_unprived_sender=$(grep 'at_unprived_sender' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-text_model=$(grep 'text_model' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-vision_model=$(grep 'vision_model' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-vision_pixel_limit=$(grep 'vision_pixel_limit' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-vision_size_limit_mb=$(grep 'vision_size_limit_mb' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-force_chromium_no_sandbox=$(grep 'force_chromium_no-sandbox' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-use_web_review=$(grep 'use_web_review' oqqwall.config | cut -d'=' -f2 | tr -d '"')
-web_review_port=$(grep 'web_review_port' oqqwall.config | cut -d'=' -f2 | tr -d '"')
+apikey=$(cfg_get 'apikey')
+http_serv_port=$(cfg_get 'http-serv-port')
+process_waittime=$(cfg_get 'process_waittime')
+manage_napcat_internal=$(cfg_get 'manage_napcat_internal')
+max_attempts_qzone_autologin=$(cfg_get 'max_attempts_qzone_autologin')
+at_unprived_sender=$(cfg_get 'at_unprived_sender')
+text_model=$(cfg_get 'text_model')
+vision_model=$(cfg_get 'vision_model')
+vision_pixel_limit=$(cfg_get 'vision_pixel_limit')
+vision_size_limit_mb=$(cfg_get 'vision_size_limit_mb')
+friend_request_window_sec=$(cfg_get 'friend_request_window_sec')
+force_chromium_no_sandbox=$(cfg_get 'force_chromium_no-sandbox')
+use_web_review=$(cfg_get 'use_web_review')
+web_review_port=$(cfg_get 'web_review_port')
 
 
 DIR="./getmsgserv/rawpost/"
@@ -377,6 +454,14 @@ fi
 # 获取所有 group 并逐行读取
 while read -r group; do
   echo "正在检查 group: $group"
+  if [[ -z "$group" ]]; then
+    errors+=("错误：检测到空的组名，请检查配置文件的键。")
+    continue
+  fi
+  if [[ ! "$group" =~ ^[A-Za-z0-9_]+$ ]]; then
+    errors+=("错误：组名 '$group' 含非法字符，仅允许字母、数字和下划线。")
+    continue
+  fi
   mangroupid=$(jq -r --arg group "$group" '.[$group].mangroupid' "$json_file")
   mainqqid=$(jq -r --arg group "$group" '.[$group].mainqqid' "$json_file")
   mainqq_http_port=$(jq -r --arg group "$group" '.[$group]["mainqq_http_port"]' "$json_file")
@@ -455,8 +540,8 @@ while read -r group; do
   if [ "$minorqq_count" -ne "$minorqq_port_count" ]; then
     errors+=("错误：在 $group 中，minorqqid 的数量 ($minorqq_count) 与 minorqq_http_port 的数量 ($minorqq_port_count) 不匹配。")
   fi
-  tbl_name="sendstorge_$group"
- 
+  tbl_name=$(_sanitize_tbl "$group")
+
   # —— 杂项配置校验（允许为空）——
   max_post_stack=$(jq -r --arg group "$group" '.[$group].max_post_stack // empty' "$json_file")
   max_image_number_one_post=$(jq -r --arg group "$group" '.[$group].max_image_number_one_post // empty' "$json_file")
@@ -506,8 +591,15 @@ while read -r group; do
     else
       # 检查每个快捷回复指令是否与审核指令冲突
       audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "评论" "回复" "展示" "拉黑")
-      while IFS='|' read -r cmd_name cmd_content; do
-        if [[ -n "$cmd_name" && -n "$cmd_content" ]]; then
+      while IFS= read -r entry; do
+        cmd_name=$(jq -r '.key' <<<"$entry")
+        cmd_type=$(jq -r '.value | type' <<<"$entry")
+        cmd_content=$(jq -r '.value' <<<"$entry")
+        if [[ -n "$cmd_name" ]]; then
+          if [[ "$cmd_type" != "string" ]]; then
+            errors+=("错误：在 $group 中，快捷回复 '$cmd_name' 的值必须是字符串。")
+            continue
+          fi
           # 检查是否与审核指令冲突
           for audit_cmd in "${audit_commands[@]}"; do
             if [[ "$cmd_name" == "$audit_cmd" ]]; then
@@ -516,19 +608,15 @@ while read -r group; do
             fi
           done
           
-          # 检查指令名和内容是否为空
-          if [[ -z "$cmd_name" ]]; then
-            errors+=("错误：在 $group 中，快捷回复指令名不能为空。")
-          fi
           if [[ -z "$cmd_content" ]]; then
             errors+=("错误：在 $group 中，快捷回复内容不能为空。")
           fi
         fi
-      done < <(jq -r --arg group "$group" '.[$group].quick_replies | to_entries[] | .key + "|" + .value' "$json_file")
+      done < <(jq -c --arg group "$group" '.[$group].quick_replies | to_entries[]' "$json_file")
     fi
   fi
   # 定义期望结构 SQL
-  expected_schema="CREATE TABLE $tbl_name(tag INT, num INT, port INT, senderid TEXT);"
+  expected_schema="CREATE TABLE \"$tbl_name\" (tag INT, num INT, port INT, senderid TEXT);"
 
   # 表是否存在
   if ! sqlite3 "$DB_NAME" "SELECT 1 FROM sqlite_master WHERE type='table' AND name='$tbl_name';" | grep -q 1; then
@@ -538,13 +626,13 @@ while read -r group; do
   fi
 
   # 实际结构
-  actual_sig=$(sqlite3 "$DB_NAME" "PRAGMA table_info($tbl_name);" | \
+  actual_sig=$(sqlite3 "$DB_NAME" "PRAGMA table_info('$tbl_name');" | \
     awk -F'|' '{printf "%s|%s|%s\n", $2, toupper($3), $6}')
 
   # 期望结构（用 :memory: 临时解析）
   expected_sig=$(sqlite3 ":memory:" <<SQL |
 $expected_schema
-PRAGMA table_info($tbl_name);
+PRAGMA table_info('$tbl_name');
 SQL
   awk -F'|' '{printf "%s|%s|%s\n", $2, toupper($3), $6}')
 
@@ -553,7 +641,7 @@ SQL
     echo "⚠  表 $tbl_name 结构不匹配："
     diff --color=always <(echo "$expected_sig") <(echo "$actual_sig") || true
     echo "正在删除并重建表 $tbl_name..."
-    sqlite3 "$DB_NAME" "DROP TABLE IF EXISTS $tbl_name;"
+    sqlite3 "$DB_NAME" "DROP TABLE IF EXISTS \"$tbl_name\";"
     sqlite3 "$DB_NAME" "$expected_schema"
     echo "表 $tbl_name 已重建。"
     echo
@@ -608,47 +696,52 @@ mangroupids=($(jq -r '.[] | .mangroupid' ./AcountGroupcfg.json))
 
 
 json_content=$(cat ./AcountGroupcfg.json)
-runidlist=($(echo "$json_content" | jq -r '.[] | .mainqqid, .minorqqid[]'))
-mainqqlist=($(echo "$json_content" | jq -r '.[] | .mainqqid'))
+mapfile -t runidlist < <(jq -r '.[] | (.mainqqid // empty), (.minorqqid[]? // empty)' <<<"$json_content" | sed '/^$/d')
+mapfile -t mainqqlist < <(jq -r '.[] | .mainqqid // empty' <<<"$json_content" | sed '/^$/d')
 getinfo(){
-    json_file="./AcountGroupcfg.json"
-    # 检查输入是否为空
-    if [ -z "$1" ]; then
-    echo "请提供mainqqid或minorqqid。"
-    exit 1
+    local target="$1"
+    local json_file="./AcountGroupcfg.json"
+
+    if [[ -z ${target:-} ]]; then
+        echo "请提供 mainqqid 或 minorqqid。"
+        return 1
     fi
-    # 使用 jq 查找输入ID所属的组信息
-    group_info=$(jq -r --arg id "$1" '
-    to_entries[] | select(.value.mainqqid == $id or (.value.minorqqid[]? == $id))
+
+    local entry
+    entry=$(jq -r --arg id "$target" '
+        to_entries[] | select(.value.mainqqid == $id or (.value.minorqqid[]? == $id))
     ' "$json_file")
-    # 检查是否找到了匹配的组
-    if [ -z "$group_info" ]; then
-    echo "未找到ID为 $1 的相关信息。"
-    exit 1
+
+    if [[ -z "$entry" ]]; then
+        echo "未找到ID为 $target 的信息。"
+        return 1
     fi
-    # 提取各项信息并存入变量
-    groupname=$(echo "$group_info" | jq -r '.key')
-    groupid=$(echo "$group_info" | jq -r '.value.mangroupid')
-    mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
-    minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
-    mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
-    minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
-    # 初始化端口变量
+
+    groupname=$(jq -r '.key' <<<"$entry")
+    groupid=$(jq -r '.value.mangroupid' <<<"$entry")
+    mainqqid=$(jq -r '.value.mainqqid' <<<"$entry")
+    mainqq_http_port=$(jq -r '.value.mainqq_http_port' <<<"$entry")
+    mapfile -t _minor_ids   < <(jq -r '.value.minorqqid[]?' <<<"$entry")
+    mapfile -t _minor_ports < <(jq -r '.value.minorqq_http_port[]?' <<<"$entry")
+
     port=""
-    # 检查输入ID是否为mainqqid
-    if [ "$1" == "$mainqqid" ]; then
-    port=$mainqq_http_port
+    if [[ "$target" == "$mainqqid" ]]; then
+        port="$mainqq_http_port"
     else
-    # 遍历 minorqqid 数组并找到对应的端口
-    i=0
-    for minorqqid in $minorqqid; do
-        if [ "$1" == "$minorqqid" ]; then
-        port=$(echo "$minorqq_http_ports" | sed -n "$((i+1))p")
-        break
-        fi
-        ((i++))
-    done
+        for i in "${!_minor_ids[@]}"; do
+            if [[ "$target" == "${_minor_ids[$i]}" ]]; then
+                port="${_minor_ports[$i]:-}"
+                break
+            fi
+        done
     fi
+
+    if [[ -z "$port" ]]; then
+        echo "警告：未在 $groupname 组找到 $target 对应的 http 端口。"
+        return 1
+    fi
+
+    return 0
 }
 if pgrep -f "python3 getmsgserv/serv.py" > /dev/null
 then
@@ -695,7 +788,7 @@ fi
 # Check if the OneBot server process is running
 if [[ "$manage_napcat_internal" == "true" ]]; then
     if pgrep -f "xvfb-run -a qq --no-sandbox -q" > /dev/null; then
-        pkill qq
+        kill_pat "xvfb-run -a qq --no-sandbox -q"
     fi
 
     for qqid in "${runidlist[@]}"; do
@@ -711,33 +804,27 @@ echo 系统启动完毕
 echo -e "\033[1;34m powered by \033[0m"
 echo -e "\033[1;34m   ____  ____  ____ _       __      ____\n  / __ \/ __ \/ __ \ |     / /___ _/ / /\n / / / / / / / / / / | /| / / __ \`/ / /\n/ /_/ / /_/ / /_/ /| |/ |/ / /_/ / / /\n\____/\___\_\___\_\|__/|__/\__,_/_/_/\n\033[0m"
 
-for mqqid in ${mainqqlist[@]}; do
-  getinfo $mqqid
-  sendmsggroup 系统已启动
+for mqqid in "${mainqqlist[@]}"; do
+  if getinfo "$mqqid"; then
+    sendmsggroup 系统已启动
+  else
+    echo "跳过向 $mqqid 发送启动通知。"
+  fi
 done
 
 while true; do
-    # 获取当前小时和分钟
-    current_time=$(date +"%H:%M")
-    current_M=$(date +"%M")
-    if [ "$current_M" == "00" ];then
-        #检查是否为早上7点
-        if [ "$current_time" == "07:00" ]; then
-            echo 'reach 7:00'
-            # 运行 Python 脚本
-            for qqid in "${runidlist[@]}"; do
-                echo "Like everyone with ID: $qqid"
-                getinfo $qqid
-                python3 qqBot/likeeveryday.py $port
-            done
-        fi
-        #pgrep -f "python3 ./getmsgserv/serv.py" | xargs kill -15
-        #python3 ./getmsgserv/serv.py &
-        #echo serv.py 已重启
-        # 等待 1 小时，直到下一个小时
-        sleep 3539
-    else
-        # 如果不是整点，等待一分钟后再检查时间
-        sleep 59
+    now=$(date +%s)
+    next=$(date -d "next hour" +%s)
+    if [[ "$(date +%H:%M)" == "07:00" ]]; then
+        echo 'reach 7:00'
+        for qqid in "${runidlist[@]}"; do
+            echo "Like everyone with ID: $qqid"
+            if getinfo "$qqid"; then
+                python3 qqBot/likeeveryday.py "$port"
+            else
+                echo "警告：未找到 QQ $qqid 的端口配置，跳过点赞。"
+            fi
+        done
     fi
+    sleep "$(( next - now ))"
 done

@@ -18,7 +18,11 @@ sendmsggroup_ctx() {
     fi
 }
 
-file_to_watch="./getmsgserv/all/priv_post.json"
+file_to_watch="./getmsgserv/all/priv_post.jsonl"
+legacy_priv="./getmsgserv/all/priv_post.json"
+if [[ -f "$legacy_priv" && ! -f "$file_to_watch" ]]; then
+    file_to_watch="$legacy_priv"
+fi
 command_file="./qqBot/command/commands.txt"
 litegettag=$(grep 'use_lite_tag_generator' oqqwall.config | cut -d'=' -f2 | tr -d '"')
 self_id=$2
@@ -55,7 +59,7 @@ if [[ "$WEB_REVIEW" == "1" ]]; then
   user_display=${WEB_REVIEW_USER:-网页用户}
   summary_msg="$user_display使用网页审核执行了$object"
   encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$summary_msg")
-  curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
+  curl -s -o /dev/null -H "$NAPCAT_AUTH_HEADER" "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
   # 覆盖群发函数，抑制后续消息
   sendmsggroup() { :; }
   sendmsggroup_ctx() { :; }

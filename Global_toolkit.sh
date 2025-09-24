@@ -1,12 +1,28 @@
+if [[ -z "$NAPCAT_ACCESS_TOKEN" ]]; then
+    NAPCAT_ACCESS_TOKEN=$(grep -m1 '^napcat_access_token=' oqqwall.config | cut -d'=' -f2- | tr -d '"')
+fi
+
+if [[ -z "$NAPCAT_ACCESS_TOKEN" ]]; then
+    echo "[ERR] 未在 oqqwall.config 中找到 napcat_access_token，请先运行 main.sh 初始化。" >&2
+    exit 1
+fi
+
+NAPCAT_AUTH_HEADER="Authorization: Bearer $NAPCAT_ACCESS_TOKEN"
+
 sendmsggroup() {
     msg=$1
     encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$msg")
     echo "发送消息: $msg到QQ群$groupid,端口$mainqq_http_port"
     # 构建 curl 命令，并发送编码后的消息
-    curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
+    status=0
+    curl -s -o /dev/null -H "$NAPCAT_AUTH_HEADER" "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg" || status=$?
+    if [[ $status -ne 0 ]]; then
+        echo "[WARN] 群消息发送失败 (curl exit $status)" >&2
+    fi
+    return 0
 }
 getandsendcard() {
-    response=$(curl -s "http://127.0.0.1:$mainqq_http_port/ArkSharePeer?user_id=$1")
+    response=$(curl -s -H "$NAPCAT_AUTH_HEADER" "http://127.0.0.1:$mainqq_http_port/ArkSharePeer?user_id=$1")
     # 使用 jq 提取 qqLevel
     arkMsg=$(echo "$response" | jq -r '.data.arkMsg')
     # 获取用户信息
@@ -30,6 +46,7 @@ getandsendcard() {
     # 使用 curl 发送 POST 请求
     curl --location --request POST "http://127.0.0.1:$port/send_group_msg" \
 --header 'Content-Type: application/json' \
+--header "$NAPCAT_AUTH_HEADER" \
 --data-raw "$json_payload"
 
 }
@@ -37,7 +54,7 @@ sendmsgpriv(){
     msg=$2
     encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$msg")
     # 构建 curl 命令，并发送编码后的消息
-    cmd="curl -s -o /dev/null \"http://127.0.0.1:$port/send_private_msg?user_id=$1&message=$encoded_msg\""
+    cmd="curl -s -o /dev/null -H \"$NAPCAT_AUTH_HEADER\" \"http://127.0.0.1:$port/send_private_msg?user_id=$1&message=$encoded_msg\""
     eval $cmd
 }
 sendmsgpriv_givenport(){
@@ -45,7 +62,7 @@ sendmsgpriv_givenport(){
     port=$2
     encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$msg")
     # 构建 curl 命令，并发送编码后的消息
-    cmd="curl -s -o /dev/null \"http://127.0.0.1:$port/send_private_msg?user_id=$1&message=$encoded_msg\""
+    cmd="curl -s -o /dev/null -H \"$NAPCAT_AUTH_HEADER\" \"http://127.0.0.1:$port/send_private_msg?user_id=$1&message=$encoded_msg\""
     eval $cmd
 }
 sendimagetoqqgroup() {
@@ -61,7 +78,7 @@ sendimagetoqqgroup() {
         msg=[CQ:image,file=file://$file_path]
         encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$msg")
         # 构建 curl 命令，并发送编码后的消息
-        cmd="curl \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
+        cmd="curl -H \"$NAPCAT_AUTH_HEADER\" \"http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg\""
         eval $cmd
         sleep 1  # 添加延时以避免过于频繁的请求
     done
@@ -130,7 +147,7 @@ check_qzone_open() {
 
     # 获取 cookies JSON 并提取 cookie 字符串
     local cookies_json
-    cookies_json=$(curl -s "$api_url")
+    cookies_json=$(curl -s -H "$NAPCAT_AUTH_HEADER" "$api_url")
 
     local cookie
     cookie=$(echo "$cookies_json" | jq -r '.data.cookies')

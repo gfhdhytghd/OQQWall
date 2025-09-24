@@ -1,4 +1,6 @@
 #!/bin/bash
+source ./Global_toolkit.sh
+
 json_file="./AcountGroupcfg.json"
 senderid=$2
 receiver=$3
@@ -29,7 +31,6 @@ else
 fi
 echo "将在四分钟内通过来自$senderid 的好友请求，port：$port,flag: $1"
 sleep $((RANDOM % 241))
-curl "http://127.0.0.1:$port/set_friend_add_request?flag=$1&approve=true"
-source ./Global_toolkit.sh
+curl -H "$NAPCAT_AUTH_HEADER" "http://127.0.0.1:$port/set_friend_add_request?flag=$1&approve=true"
 sleep 30
 sendmsgpriv "$senderid" "$friend_add_message"

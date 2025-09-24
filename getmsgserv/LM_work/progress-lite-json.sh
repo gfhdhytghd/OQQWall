@@ -15,6 +15,13 @@ napcat_api="127.0.0.1:$2"
 # Docker 容器名（可用环境变量 NAPCAT_CONTAINER 覆盖），用于 docker cp
 container_name="${NAPCAT_CONTAINER:-napcat}"
 
+napcat_token=$(grep -m1 '^napcat_access_token=' oqqwall.config | cut -d'=' -f2- | tr -d '"')
+if [[ -z "$napcat_token" ]]; then
+  echo "napcat_access_token 未配置，请先运行 main.sh" >&2
+  exit 1
+fi
+napcat_auth_header="Authorization: Bearer $napcat_token"
+
 #####################################
 #           基础函数定义            #
 #####################################
@@ -231,7 +238,7 @@ resolve_forward_messages() {
 
       # 拉取 forward 详情
       local resp payload
-      resp="$(curl -s "http://$napcat_api/get_forward_msg?message_id=${fid}")" || true
+      resp="$(curl -s -H "$napcat_auth_header" "http://$napcat_api/get_forward_msg?message_id=${fid}")" || true
       [[ -z "$resp" ]] && continue
       [[ "$(jq -r '.status // empty' <<<"$resp")" != "ok" ]] && continue
 
@@ -286,7 +293,7 @@ resolve_file_urls() {
     [[ -n "${seen_ids[$file_id]+x}" ]] && continue
 
     # 请求 napcat 获取真实路径与文件名
-    resp="$(curl -s "http://$napcat_api/get_file?file_id=$file_id")" || true
+    resp="$(curl -s -H "$napcat_auth_header" "http://$napcat_api/get_file?file_id=$file_id")" || true
     [[ -z "$resp" ]] && continue
     [[ "$(jq -r '.status // empty' <<<"$resp")" != "ok" ]] && continue
 
@@ -574,7 +581,11 @@ rawmsg=$(resolve_forward_messages "$rawmsg")
 # === 仅当存在 reply 时才构建历史索引（限制在文件末尾 N 行）===
 has_reply_flag=$(has_reply "$rawmsg")
 
-history_file="getmsgserv/all/priv_post.json"
+history_file="getmsgserv/all/priv_post.jsonl"
+legacy_history="getmsgserv/all/priv_post.json"
+if [[ ! -f "$history_file" && -f "$legacy_history" ]]; then
+  history_file="$legacy_history"
+fi
 HIST_TAIL_LINES=20000
 
 # 临时文件：窗口数组（最后 N 行里抽到的完整顶层对象）
@@ -584,62 +595,53 @@ hist_idx_file="$(mktemp)"
 trap 'rm -f "$hist_window_file" "$hist_idx_file"' EXIT
 
 if [[ "$has_reply_flag" == "true" && -f "$history_file" ]]; then
-  # 用 Python 从最后 N 行中抽取“完整的顶层对象”，重组成一个小数组
+  # 兼容 JSON Lines 与旧版数组格式，抽取末尾窗口
   python3 - "$history_file" "$HIST_TAIL_LINES" > "$hist_window_file" <<'PY'
-import sys, json
+import sys
+import json
 from collections import deque
 
 path = sys.argv[1]
-n = int(sys.argv[2])
+tail_lines = int(sys.argv[2])
 
-# 取末尾 n 行
-dq = deque(maxlen=n)
-with open(path, 'r', encoding='utf-8', errors='ignore') as f:
-    for line in f:
-        dq.append(line)
-s = ''.join(dq)
+def first_non_whitespace(fp):
+    while True:
+        char = fp.read(1)
+        if not char:
+            return ''
+        if not char.isspace():
+            return char
 
-# 在“外层数组（depth_arr>=1）”内，抓取每个完整的顶层对象 { ... } 片段
-out = []
-depth_obj = 0
-depth_arr = 0
-in_str = False
-esc = False
-start = None
-
-for i, ch in enumerate(s):
-    if in_str:
-        if esc:
-            esc = False
-        elif ch == '\\':
-            esc = True
-        elif ch == '"':
-            in_str = False
-        continue
-
-    if ch == '"':
-        in_str = True
-    elif ch == '[':
-        depth_arr += 1
-    elif ch == ']':
-        depth_arr = max(0, depth_arr - 1)
-    elif ch == '{':
-        # 仅当处于外层数组里，且这是一个新对象的开始时，记录起点
-        if depth_obj == 0 and depth_arr >= 1 and start is None:
-            start = i
-        depth_obj += 1
-    elif ch == '}':
-        depth_obj -= 1
-        if depth_obj == 0 and start is not None and depth_arr >= 1:
-            frag = s[start:i+1]
+result = []
+try:
+    with open(path, 'r', encoding='utf-8', errors='ignore') as fp:
+        first_char = first_non_whitespace(fp)
+        fp.seek(0)
+        if first_char == '[':
             try:
-                out.append(json.loads(frag))
+                data = json.load(fp)
+                if isinstance(data, list):
+                    result = data[-tail_lines:]
+                else:
+                    result = []
             except Exception:
-                pass
-            start = None
+                result = []
+        else:
+            lines = deque(maxlen=tail_lines)
+            for line in fp:
+                lines.append(line)
+            for raw_line in lines:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    result.append(json.loads(line))
+                except Exception:
+                    continue
+except FileNotFoundError:
+    result = []
 
-# 输出一个小数组（只含最后 n 行内能完整取到的顶层消息对象）
-json.dump(out, sys.stdout, ensure_ascii=False)
+json.dump(result, sys.stdout, ensure_ascii=False)
 PY
 
   # 基于窗口数组建索引

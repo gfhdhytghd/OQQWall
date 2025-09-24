@@ -106,8 +106,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 print(f'Error deleting message from database: {e}')
 
     def handle_default(self, data):
-        # Append to all_posts.json incrementally
-        all_file_path = os.path.join(ALLPOST_DIR, 'all_posts.json')
+        # Append to all_posts.jsonl incrementally
+        all_file_path = os.path.join(ALLPOST_DIR, 'all_posts.jsonl')
         with open(all_file_path, 'a', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
             f.write('\n')  # Add a newline for readability
@@ -223,20 +223,35 @@ class RequestHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 print(f'Error recording private message to database: {e}')
 
-            # Keep writing to priv_post.json as per original code
-            priv_post_path = os.path.join(ALLPOST_DIR, 'priv_post.json')
+            # Keep writing to priv_post.jsonl using JSON Lines format
+            priv_post_path = os.path.join(ALLPOST_DIR, 'priv_post.jsonl')
             try:
-                if os.path.exists(priv_post_path):
+                needs_migration = False
+                if os.path.exists(priv_post_path) and os.path.getsize(priv_post_path) > 0:
                     with open(priv_post_path, 'r', encoding='utf-8') as f:
-                        priv_post_data = json.load(f)
-                else:
-                    priv_post_data = []
+                        first_char = f.read(1)
+                        if first_char == '[':
+                            needs_migration = True
 
-                priv_post_data.append(data)
-                with open(priv_post_path, 'w', encoding='utf-8') as f:
-                    json.dump(priv_post_data, f, ensure_ascii=False, indent=4)
+                if needs_migration:
+                    try:
+                        with open(priv_post_path, 'r', encoding='utf-8') as f:
+                            existing_entries = json.load(f)
+                        with open(priv_post_path, 'w', encoding='utf-8') as f:
+                            for idx, entry in enumerate(existing_entries):
+                                json.dump(entry, f, ensure_ascii=False)
+                                if idx != len(existing_entries) - 1:
+                                    f.write('\n')
+                    except Exception as migrate_error:
+                        print(f'Error migrating priv_post.jsonl to JSONL: {migrate_error}')
+
+                file_has_content = os.path.exists(priv_post_path) and os.path.getsize(priv_post_path) > 0
+                with open(priv_post_path, 'a', encoding='utf-8') as f:
+                    if file_has_content:
+                        f.write('\n')
+                    json.dump(data, f, ensure_ascii=False)
             except Exception as e:
-                print(f'Error recording to priv_post.json: {e}')
+                print(f'Error recording to priv_post.jsonl: {e}')
 
 def run(server_class=ThreadingHTTPServer, handler_class=RequestHandler):
     port = int(config.get('http-serv-port', 8000))

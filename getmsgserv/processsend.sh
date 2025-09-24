@@ -182,7 +182,7 @@ if [[ "$WEB_REVIEW" == "1" ]]; then
     fi
     # 直接调用底层群发接口
     encoded_msg=$(perl -MURI::Escape -e 'print uri_escape($ARGV[0]);' "$summary_msg")
-    curl -s -o /dev/null "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
+    curl -s -o /dev/null -H "$NAPCAT_AUTH_HEADER" "http://127.0.0.1:$mainqq_http_port/send_group_msg?group_id=$groupid&message=$encoded_msg"
     # 覆盖 sendmsggroup 以抑制其它提示
     sendmsggroup() { :; }
     sendmsggroup_ctx() { :; }
@@ -249,9 +249,20 @@ EOF
     匿)
         sendmsggroup 尝试切换匿名状态...
         json_content=$(timeout 10s sqlite3 "./cache/OQQWall.db" "SELECT AfterLM FROM preprocess WHERE tag='$object';")
-        modified_json=$(echo "$json_content" | jq '.needpriv = (.needpriv == "true" | not | tostring)')
-        timeout 10s sqlite3 "./cache/OQQWall.db" "UPDATE preprocess SET AfterLM='$modified_json' WHERE tag='$object';"
-        getmsgserv/preprocess.sh $object randeronly
+        if ! modified_json=$(echo "$json_content" | jq '.needpriv = (if (.needpriv == "true" or .needpriv == true) then "false" else "true" end)'); then
+            log_and_continue "匿名切换失败: 无法解析 AfterLM JSON (tag=$object)"
+            sendmsggroup_ctx "匿名切换失败，投稿数据解析异常"
+            sendmsggroup "内部编号$object, 请发送指令"
+        else
+            escaped_json=$(printf "%s" "$modified_json" | sed "s/'/''/g")
+            if timeout 10s sqlite3 "./cache/OQQWall.db" "UPDATE preprocess SET AfterLM='$escaped_json' WHERE tag='$object';"; then
+                getmsgserv/preprocess.sh $object randeronly
+            else
+                log_and_continue "匿名切换失败: 数据库更新错误 (tag=$object)"
+                sendmsggroup_ctx "匿名切换失败，数据库更新异常"
+                sendmsggroup "内部编号$object, 请发送指令"
+            fi
+        fi
         ;;
     刷新)
         getmsgserv/preprocess.sh $object nowaittime
@@ -260,7 +271,7 @@ EOF
         getmsgserv/preprocess.sh $object randeronly
         ;;
     扩列审查|扩列|查|查成分)
-        response=$(curl -s "http://127.0.0.1:$port/get_stranger_info?user_id=$senderid")
+        response=$(curl -s -H "$NAPCAT_AUTH_HEADER" "http://127.0.0.1:$port/get_stranger_info?user_id=$senderid")
         # 使用 jq 提取 qqLevel
         qqLevel=$(echo "$response" | jq '.data.qqLevel')
         qzoneopenstatus=$(check_qzone_open "$senderid")
