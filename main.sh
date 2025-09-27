@@ -208,6 +208,210 @@ PY
   done
 }
 
+# ------------------
+# 交互式 OOBE 向导
+# ------------------
+prompt_with_default() {
+  local prompt="$1"; shift
+  local def="$1"; shift || true
+  local var
+  read -r -p "$prompt [$def]: " var
+  echo "${var:-$def}"
+}
+
+prompt_bool() {
+  local prompt="$1"; shift
+  local def="$1"; shift || true
+  local var
+  while true; do
+    read -r -p "$prompt [$def]: " var
+    var=${var:-$def}
+    case "${var,,}" in
+      y|yes|true|1) echo true; return;;
+      n|no|false|0) echo false; return;;
+      *) echo "请输入 yes/no 或 true/false";;
+    esac
+  done
+}
+
+prompt_port() {
+  local prompt="$1"; shift
+  local def="$1"; shift || true
+  local var
+  while true; do
+    read -r -p "$prompt [$def]: " var
+    var=${var:-$def}
+    if [[ "$var" =~ ^[0-9]+$ ]] && (( var>0 && var<65536 )); then
+      echo "$var"; return
+    else
+      echo "端口应为 1-65535 的整数"
+    fi
+  done
+}
+
+write_oqq_config() {
+  local http_port="$1" apikey_val="$2" process_wait="$3" manage_q="$4" max_auto="$5" \
+        text_m="$6" vision_m="$7" vision_px="$8" vision_mb="$9" at_unpriv="${10}" \
+        fr_win="${11}" no_sandbox="${12}" use_review="${13}" review_port="${14}" token="${15}"
+  cat > "$CFG" <<EOF
+http-serv-port=$http_port
+apikey="$apikey_val"
+process_waittime=$process_wait
+manage_napcat_internal=$manage_q
+max_attempts_qzone_autologin=$max_auto
+text_model=$text_m
+vision_model=$vision_m
+vision_pixel_limit=$vision_px
+vision_size_limit_mb=$vision_mb
+at_unprived_sender=$at_unpriv
+friend_request_window_sec=$fr_win
+force_chromium_no-sandbox=$no_sandbox
+use_web_review=$use_review
+web_review_port=$review_port
+napcat_access_token=$token
+EOF
+}
+
+json_escape() {
+  # 使用 Python 可靠转义为 JSON 内部字符串（去掉首尾引号）
+  python3 - "$1" <<'PY'
+import sys, json
+print(json.dumps(sys.argv[1])[1:-1])
+PY
+}
+
+guide_account_group_setup() {
+  local out="AcountGroupcfg.json"
+  if [[ -f "$out" ]]; then
+    echo "检测到已存在 $out，将覆盖并生成新的账户组配置。"
+  fi
+
+  echo "开始账户组配置引导：将为你创建一个主账户配置。"
+  local gkey mangroup mainqq mainport
+  gkey=$(prompt_with_default "请输入组标识(键名)" "MethGroup")
+
+  while true; do
+    read -r -p "请输入 QQ 群号(mangroupid): " mangroup
+    [[ -n "$mangroup" ]] && break
+    echo "mangroupid 不能为空。"
+  done
+  while true; do
+    read -r -p "请输入主号 QQ(mainqqid): " mainqq
+    [[ -n "$mainqq" ]] && break
+    echo "mainqqid 不能为空。"
+  done
+  mainport=$(prompt_port "请输入主号 OneBot HTTP 端口(mainqq_http_port)" "8083")
+
+  # 组策略（可选）
+  echo "是否现在配置组策略（发送限额、水印、加好友自动回复等）？"
+  local do_policy
+  do_policy=$(prompt_bool "配置组策略?" "no")
+  local max_stack max_imgs friend_msg watermark
+  if [[ "$do_policy" == true ]]; then
+    max_stack=$(prompt_with_default "每批最大发送条数(max_post_stack)" "1")
+    max_imgs=$(prompt_with_default "每贴最多图片数(max_image_number_one_post)" "20")
+    read -r -p "加好友自动回复(friend_add_message，可留空): " friend_msg
+    read -r -p "水印文字(watermark_text，可留空): " watermark
+  else
+    max_stack="1"
+    max_imgs="20"
+    friend_msg=""
+    watermark=""
+  fi
+
+  local friend_json watermark_json
+  friend_json=$(json_escape "$friend_msg")
+  watermark_json=$(json_escape "$watermark")
+
+  cat > "$out" <<EOF
+{
+  "$gkey": {
+    "mangroupid": "$mangroup",
+    "mainqqid": "$mainqq",
+    "mainqq_http_port": "$mainport",
+    "minorqqid": [],
+    "minorqq_http_port": [],
+    "max_post_stack": "$max_stack",
+    "max_image_number_one_post": "$max_imgs",
+    "friend_add_message": "$friend_json",
+    "send_schedule": [],
+    "watermark_text": "$watermark_json",
+    "quick_replies": {}
+  }
+}
+EOF
+
+  echo "账户组配置已创建：$out"
+  echo "提示：需要更多功能（副号、发送计划、快捷指令等），请参考文档：OQQWall.wiki/账户组配置.md"
+}
+
+
+# 判断 AcountGroupcfg.json 是否为空模板（关键字段均为空或非数字）
+is_empty_account_group_template() {
+  local jf="AcountGroupcfg.json"
+  [[ ! -f "$jf" ]] && return 1
+  jq -e '
+    type=="object" and
+    (to_entries|length)>=1 and
+    (to_entries|all(
+      (.value.mangroupid|tostring|test("^[0-9]+$")|not) and
+      (.value.mainqqid|tostring|test("^[0-9]+$")|not) and
+      (.value.mainqq_http_port|tostring|test("^[0-9]+$")|not)
+    ))
+  ' "$jf" >/dev/null 2>&1
+}
+
+
+run_oobe() {
+  # 若非交互式终端，回退为默认初始化
+  if [[ ! -t 0 ]]; then
+    echo "检测到非交互式环境，使用默认配置初始化。"
+    init_default_config
+    return 0
+  fi
+
+  echo "欢迎使用 OQQWall 首次运行向导 (OOBE)"
+  echo "本向导将帮你生成 oqqwall.config，并可选创建 AcountGroupcfg.json。"
+
+  local http_port apikey_val process_wait manage_q max_auto text_m vision_m vision_px vision_mb at_unpriv fr_win no_sandbox use_review review_port token
+
+  http_port=$(prompt_port "HTTP 服务端口(http-serv-port)" "8082")
+  read -r -p "Qwen DashScope API Key(请参考”快速开始“文档获取): " apikey_val
+  if [[ -z "$apikey_val" ]]; then apikey_val="sk-"; fi
+  process_wait=$(prompt_with_default "任务处理等待时间秒(process_waittime)" "120")
+  manage_q=$(prompt_bool "是否由本程序管理 NapCat/QQ (manage_napcat_internal)" "yes")
+  max_auto=$(prompt_with_default "QZone 自动登录最大尝试次数(max_attempts_qzone_autologin)" "3")
+  text_m=$(prompt_with_default "文本模型(text_model)" "qwen-plus-latest")
+  vision_m=$(prompt_with_default "多模模型(vision_model)" "qwen-vl-max-latest")
+  vision_px=$(prompt_with_default "视觉像素上限(vision_pixel_limit)" "12000000")
+  vision_mb=$(prompt_with_default "视觉图片大小上限MB(vision_size_limit_mb)" "9.5")
+  at_unpriv=$(prompt_bool "@未授权发送者(at_unprived_sender)" "yes")
+  fr_win=$(prompt_with_default "好友请求窗口秒(friend_request_window_sec)" "300")
+  no_sandbox=$(prompt_bool "Chromium 强制 --no-sandbox(force_chromium_no-sandbox)" "no")
+  use_review=$(prompt_bool "启用网页审核(use_web_review)" "no")
+  if [[ "$use_review" == true ]]; then
+    review_port=$(prompt_port "网页审核端口(web_review_port)" "10923")
+  else
+    review_port="10923"
+  fi
+
+  token=$(generate_random_token)
+  echo "已为 NapCat 访问令牌生成随机值: $token"
+  local use_tok
+  use_tok=$(prompt_bool "是否使用该 Token? (NapCat/OneBot 需同步此值)" "yes")
+  if [[ "$use_tok" != true ]]; then
+    read -r -p "请输入自定义 napcat_access_token: " token
+  fi
+
+  write_oqq_config "$http_port" "$apikey_val" "$process_wait" "$manage_q" "$max_auto" \
+                   "$text_m" "$vision_m" "$vision_px" "$vision_mb" "$at_unpriv" \
+                   "$fr_win" "$no_sandbox" "$use_review" "$review_port" "$token"
+  echo "已创建文件: $CFG"
+  echo "请将 napcat_access_token 同步到 NapCat/OneBot 侧的鉴权配置中。"
+
+  echo "OOBE 完成。你可以现在运行: ./main.sh"
+}
+
 print_test_mode_hint() {
   cat <<'EOF'
 测试模式提示：核心服务已停止，需要按需手动启动：
@@ -275,13 +479,20 @@ case "$mode" in
     kill_pat "python3 web_review/web_review.py"
     ;;
   -h)
-    echo "Without any flag-->start OQQWall
+    cat <<'EOF'
+Without any flag-->start OQQWall
 -r    Subsystem restart
 -rf   Force subsystem restart
 --test   start OQQWall in test mode
 --debug  enable verbose tracing/logging (put first to combine)
+--oobe   interactive out-of-box setup to create configs
 Show Napcat(QQ) log: open a new terminal, go to OQQWall's home path and run: tail -n 100 -f ./NapCatlog
-for more information, read./OQQWall.wiki"
+for more information, read ./OQQWall.wiki
+EOF
+    exit 0
+    ;;
+  --oobe)
+    run_oobe
     exit 0
     ;;
   --test)
@@ -293,14 +504,21 @@ for more information, read./OQQWall.wiki"
     ;;
 esac
 
-# 若配置不存在，则初始化后退出，避免未配置环境继续运行
+# 若配置不存在，则引导 OOBE 初始化后退出，避免未配置环境继续运行
 if [[ ! -f "$CFG" ]]; then
-  init_default_config
+  run_oobe
+  if [[ ! -f AcountGroupcfg.json ]]; then
+    guide_account_group_setup
+  fi
+  echo "初始引导完成。可再次运行 ./main.sh 启动服务。"
   exit 0
 fi
 
-# Linux 依赖逐包检查
-check_linux_dependencies jq sqlite3 python3 xvfb-run pkill curl perl
+# Linux 依赖逐包检查（xvfb-run 仅当内部管理 NapCat 时要求）
+check_linux_dependencies jq sqlite3 python3 pkill curl perl
+if [[ "$manage_napcat_internal" == "true" ]]; then
+  check_linux_dependencies xvfb-run
+fi
 if ! command -v qq >/dev/null 2>&1 && ! command -v linuxqq >/dev/null 2>&1; then
   echo "警告：未检测到 qq 或 linuxqq 可执行文件，NapCat 内部管理可能无法启动 QQ 客户端。"
 fi
@@ -318,27 +536,30 @@ if [[ ! -f "getmsgserv/all/priv_post.jsonl" ]]; then
     echo "已创建文件: getmsgserv/all/priv_post.jsonl"
 fi
 if [[ ! -f "AcountGroupcfg.json" ]]; then
-    touch "AcountGroupcfg.json"
-    echo '{
-    "MethGroup": {
-      "mangroupid": "",
-      "mainqqid": "",
-      "mainqq_http_port": "",
-      "minorqqid": [
-        ""
-      ],
-      "minorqq_http_port": [
-        ""
-      ],
-      "max_post_stack":"1",
-      "max_image_number_one_post":"20",
-      "friend_add_message":"",
-      "send_schedule": [],
-      "watermark_text": "",
+    if [[ -t 0 ]]; then
+        echo "未检测到账户组配置文件，将启动账户组引导..."
+        guide_account_group_setup
+    else
+        echo "未检测到账户组配置文件。创建占位模板并退出，请在交互式环境下运行 --oobe 或手动编辑后重试。"
+        cat > AcountGroupcfg.json <<'EOF'
+{
+  "MethGroup": {
+    "mangroupid": "",
+    "mainqqid": "",
+    "mainqq_http_port": "",
+    "minorqqid": [],
+    "minorqq_http_port": [],
+    "max_post_stack": "1",
+    "max_image_number_one_post": "20",
+    "friend_add_message": "",
+    "send_schedule": [],
+    "watermark_text": "",
     "quick_replies": {}
-    }
-}' > AcountGroupcfg.json
-    echo "已创建文件: AcountGroupcfg.json"
+  }
+}
+EOF
+        echo "已创建占位模板: AcountGroupcfg.json"
+    fi
 fi
 
 # 检查关键变量是否设置
@@ -416,7 +637,7 @@ DB_NAME="./cache/OQQWall.db"
 #--------------------------------------------------------------------
 # 1) 期望表结构
 declare -A table_defs
-table_defs[sender]="CREATE TABLE sender (
+table_defs[sender]='CREATE TABLE sender (
   senderid TEXT,
   receiver TEXT,
   ACgroup  TEXT,
@@ -424,8 +645,8 @@ table_defs[sender]="CREATE TABLE sender (
   modtime  TEXT,
   processtime TEXT,
   PRIMARY KEY (senderid, receiver)
-);"
-table_defs[preprocess]="CREATE TABLE preprocess (
+);'
+table_defs[preprocess]='CREATE TABLE preprocess (
   tag        INT,
   senderid   TEXT,
   nickname   TEXT,
@@ -434,14 +655,14 @@ table_defs[preprocess]="CREATE TABLE preprocess (
   AfterLM    TEXT,
   comment    TEXT,
   numnfinal  INT
-);"
-table_defs[blocklist]="CREATE TABLE blocklist (
+);'
+table_defs[blocklist]='CREATE TABLE blocklist (
   senderid TEXT,
   ACgroup  TEXT,
   receiver TEXT,
   reason   TEXT,
   PRIMARY KEY (senderid, ACgroup)
-);"
+);'
 #--------------------------------------------------------------------
 # 2) 辅助函数：提取结构签名   name|TYPE|pkFlag
 table_sig () {
@@ -744,11 +965,19 @@ if [ ${#errors[@]} -ne 0 ]; then
 fi
 
 if [ $has_error -eq 1 ]; then
-  echo "以下错误已被发现："
-  for msg in "${errors[@]}"; do
-    echo "$msg"
-  done
-  exit 1
+  # 若检测到空模板且处于交互式终端，则进入账户组引导
+  if is_empty_account_group_template && [[ -t 0 ]]; then
+    echo "检测到账户组配置为空模板，启动账户组引导..."
+    guide_account_group_setup
+    echo "账户组配置已更新，重新启动主程序..."
+    exec bash "$0" "$@"
+  else
+    echo "以下错误已被发现："
+    for msg in "${errors[@]}"; do
+      echo "$msg"
+    done
+    exit 1
+  fi
 else
   if [ ${#errors[@]} -ne 0 ]; then
     echo "发现以下警告："
@@ -884,8 +1113,6 @@ else
 fi
 
 echo 系统启动完毕
-echo -e "\033[1;34m powered by \033[0m"
-echo -e "\033[1;34m   ____  ____  ____ _       __      ____\n  / __ \/ __ \/ __ \ |     / /___ _/ / /\n / / / / / / / / / / | /| / / __ \`/ / /\n/ /_/ / /_/ / /_/ /| |/ |/ / /_/ / / /\n\____/\___\_\___\_\|__/|__/\__,_/_/_/\n\033[0m"
 
 for mqqid in "${mainqqlist[@]}"; do
   if getinfo "$mqqid"; then
