@@ -129,6 +129,85 @@ require_cmd() {
   fi
 }
 
+# 逐包检查 Linux 依赖：缺失则报错并退出
+check_linux_dependencies() {
+  local missing=()
+  local dep
+  for dep in "$@"; do
+    if command -v "$dep" >/dev/null 2>&1; then
+      echo "[OK] Linux 依赖已满足: $dep"
+    else
+      echo "[ERR] 缺少 Linux 依赖: $dep"
+      missing+=("$dep")
+    fi
+  done
+  if (( ${#missing[@]} > 0 )); then
+    echo "以下 Linux 依赖未安装，请先安装后再运行: ${missing[*]}"
+    exit 1
+  fi
+}
+
+# 逐包检查 Python 依赖：缺失则自动安装修复
+ensure_python_packages() {
+  # 使用激活的 venv 的 python/pip
+  local pip_mirror="https://pypi.tuna.tsinghua.edu.cn/simple"
+  declare -A pkg_map
+  pkg_map=(
+    [dashscope]=dashscope
+    [bs4]=beautifulsoup4
+    [httpx]=httpx
+    [uvicorn]=uvicorn
+    [fastapi]=fastapi
+    [pydantic]=pydantic
+    [requests]=requests
+    [regex]=regex
+    [PIL]=pillow
+    [urllib3]=urllib3
+  )
+
+  local mod
+  for mod in "${!pkg_map[@]}"; do
+    if python - <<PY
+import sys
+try:
+    import ${mod}
+except Exception:
+    sys.exit(1)
+sys.exit(0)
+PY
+    then
+      echo "[OK] Python 依赖可用: ${mod}"
+    else
+      echo "[FIX] 缺少 Python 依赖: ${mod} -> 安装包 ${pkg_map[$mod]}"
+      # 先尝试清华镜像，失败则回退到官方 PyPI，再次失败尝试添加 trusted-host
+      if ! python -m pip install "${pkg_map[$mod]}" -i "$pip_mirror" --retries 3 --timeout 30; then
+        echo "[WARN] 镜像安装失败，尝试官方 PyPI: ${pkg_map[$mod]}"
+        if ! python -m pip install "${pkg_map[$mod]}" --retries 3 --timeout 30; then
+          echo "[WARN] 官方 PyPI 安装失败，尝试添加 trusted-host: ${pkg_map[$mod]}"
+          if ! python -m pip install "${pkg_map[$mod]}" -i "$pip_mirror" --trusted-host pypi.tuna.tsinghua.edu.cn --retries 3 --timeout 60; then
+            echo "[ERR] 安装 Python 包失败: ${pkg_map[$mod]}"
+            exit 1
+          fi
+        fi
+      fi
+      # 二次校验
+      if ! python - <<PY
+import sys
+try:
+    import ${mod}
+except Exception:
+    sys.exit(1)
+sys.exit(0)
+PY
+      then
+        echo "[ERR] 仍无法导入: ${mod}，请手动检查环境。"
+        exit 1
+      fi
+      echo "[OK] 已修复 Python 依赖: ${mod}"
+    fi
+  done
+}
+
 print_test_mode_hint() {
   cat <<'EOF'
 测试模式提示：核心服务已停止，需要按需手动启动：
@@ -220,7 +299,8 @@ if [[ ! -f "$CFG" ]]; then
   exit 0
 fi
 
-require_cmd jq sqlite3 python3 xvfb-run pkill
+# Linux 依赖逐包检查
+check_linux_dependencies jq sqlite3 python3 xvfb-run pkill curl perl
 if ! command -v qq >/dev/null 2>&1 && ! command -v linuxqq >/dev/null 2>&1; then
   echo "警告：未检测到 qq 或 linuxqq 可执行文件，NapCat 内部管理可能无法启动 QQ 客户端。"
 fi
@@ -319,7 +399,7 @@ else
 
     # 安装所需的包
     echo "正在安装所需的 Python 包..."
-    pip install dashscope re101 bs4 httpx uvicorn fastapi pydantic requests regex pillow -i https://pypi.tuna.tsinghua.edu.cn/simple
+    pip install dashscope bs4 httpx uvicorn fastapi pydantic requests regex pillow -i https://pypi.tuna.tsinghua.edu.cn/simple
     if [ $? -ne 0 ]; then
         echo "安装 Python 包失败."
         exit 1
@@ -327,6 +407,9 @@ else
 
     echo "所有包已成功安装."
 fi
+
+# 逐包检查并自动修复 Python 依赖
+ensure_python_packages
 
 DB_NAME="./cache/OQQWall.db"
 
