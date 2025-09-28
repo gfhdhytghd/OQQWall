@@ -31,7 +31,7 @@ import mimetypes
 from urllib.parse import quote as urlquote
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import html
 import secrets
 import hashlib
@@ -89,8 +89,9 @@ MANIFEST_JSON = json.dumps({
 }, ensure_ascii=False)
 
 SW_JS = """
-const CACHE_NAME = 'oqqwall-pwa-v3';
-const CORE_ASSETS = ['/', '/list', '/login', '/offline.html', '/manifest.webmanifest'];
+const CACHE_NAME = 'oqqwall-pwa-v4';
+// 避免预缓存 /login，减少非必要登录请求与噪音
+const CORE_ASSETS = ['/', '/list', '/offline.html', '/manifest.webmanifest'];
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(CORE_ASSETS)).then(() => self.skipWaiting()));
 });
@@ -106,7 +107,15 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== location.origin) return;
 
   // 动态图片与缓存目录：始终走网络，不缓存，避免会话失效或重定向被缓存
-  if (url.pathname.startsWith('/cache/')) {
+  if (url.pathname.startsWith('/cache/') || url.pathname.startsWith('/i/')) {
+    if (event.request.method === 'GET') {
+      event.respondWith(fetch(event.request));
+    }
+    return;
+  }
+
+  // API 与事件流：始终走网络，避免被缓存（包括空结果导致的长期空白）
+  if (url.pathname.startsWith('/api/') || url.pathname === '/events') {
     if (event.request.method === 'GET') {
       event.respondWith(fetch(event.request));
     }
@@ -639,28 +648,60 @@ def db_exec(sql, params=()):
 # 数据处理函数
 # ============================================================================
 
-def get_all_staged_tags() -> set:
-    """合并所有组的暂存区 tag，用于从待审核列表中过滤。"""
-    staged = set()
+def _should_hide_staging_for(group_key: str | None) -> bool:
+    """根据组配置判断是否隐藏暂存区（max_post_stack == 1）。
+
+    当读取配置出错时，保守起见返回 True（隐藏）。
+    """
+    if not group_key:
+        return True
     try:
         with open(ROOT_DIR / 'AcountGroupcfg.json', 'r', encoding='utf-8') as f:
-            account_groups = json.load(f)
-        for group in (account_groups or {}).keys():
+            cfg = json.load(f) or {}
+        gcfg = cfg.get(group_key) or {}
+        mps = int(gcfg.get('max_post_stack', 1))
+        return (mps == 1)
+    except Exception:
+        return True
+
+
+def get_staged_tags(group_filter: str | None = None) -> set:
+    """读取暂存区标签。
+
+    - 若提供 group_filter，则仅读取该组的 sendstorge_<group> 表。
+    - 否则合并所有组的暂存标签。
+    """
+    staged: set[str] = set()
+    try:
+        if group_filter:
             try:
-                rows = db_query(f"SELECT tag FROM sendstorge_{group}")
+                rows = db_query(f"SELECT tag FROM sendstorge_{group_filter}")
             except Exception as e:
-                print(f"[web-review] 读取 sendstorge_{group} 失败: {e}")
+                print(f"[web-review] 读取 sendstorge_{group_filter} 失败: {e}")
                 rows = []
             for r in rows:
                 t = str(r.get('tag') or '').strip()
                 if t:
                     staged.add(t)
+        else:
+            with open(ROOT_DIR / 'AcountGroupcfg.json', 'r', encoding='utf-8') as f:
+                account_groups = json.load(f) or {}
+            for group in account_groups.keys():
+                try:
+                    rows = db_query(f"SELECT tag FROM sendstorge_{group}")
+                except Exception as e:
+                    print(f"[web-review] 读取 sendstorge_{group} 失败: {e}")
+                    rows = []
+                for r in rows:
+                    t = str(r.get('tag') or '').strip()
+                    if t:
+                        staged.add(t)
     except Exception as e:
         print(f"[web-review] 读取暂存区标签失败(外层): {e}")
     return staged
 
 
-def list_pending(search: str | None = None, group_filter: str | None = None):
+def list_pending(search: str | None = None, group_filter: str | None = None, include_staged: bool | None = None):
     """
     获取待审核项目列表
     
@@ -670,35 +711,46 @@ def list_pending(search: str | None = None, group_filter: str | None = None):
     Returns:
         list: 待审核项目列表
     """
-    items = []
-    
+    items: list[dict] = []
+
     if not PREPOST_DIR.exists():
         return []
-    
-    # 获取所有暂存标签，避免重复展示
-    staged_tags = get_all_staged_tags()
+
+    # 若未显式指定是否包含暂存，则依据当前组配置决定：
+    # - 若该组隐藏暂存区（max_post_stack==1 或配置异常），则在待审核中包含暂存标签，避免“看不见”。
+    # - 若不隐藏暂存区，则从待审核中过滤掉暂存标签。
+    auto_hide_staging = _should_hide_staging_for(group_filter) if include_staged is None else None
+    if include_staged is None:
+        _exclude_staged = (auto_hide_staging is False)
+    else:
+        _exclude_staged = (include_staged is False)
+
+    # 仅针对当前组读取暂存标签，避免跨组误过滤
+    staged_tags = get_staged_tags(group_filter if _exclude_staged else None) if _exclude_staged else set()
 
     for p in PREPOST_DIR.iterdir():
         if not p.is_dir() or not p.name.isdigit():
             continue
-            
+
         tag = p.name
 
-        # 如果已经在暂存区中，则跳过
-        if tag in staged_tags:
-            continue
-        
-        # 从数据库获取基本信息
+        # 从数据库获取基本信息（需先拿到 ACgroup 以决定过滤逻辑）
         row = db_query(
-            "SELECT tag, senderid, nickname, receiver, ACgroup, comment, AfterLM FROM preprocess WHERE tag = ?", 
+            "SELECT tag, senderid, nickname, receiver, ACgroup, comment, AfterLM FROM preprocess WHERE tag = ?",
             (tag,)
         )
         if not row:
             continue
-            
+
         r = row[0]
+        ac_group = str(r.get('ACgroup'))
+
         # 组过滤
-        if group_filter and str(r.get('ACgroup')) != str(group_filter):
+        if group_filter and ac_group != str(group_filter):
+            continue
+
+        # 如果需要从列表中过滤暂存中的项目（且仅当它确实在本组暂存区中）
+        if _exclude_staged and tag in staged_tags:
             continue
         
         # 搜索过滤
@@ -965,7 +1017,8 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
     def _issue_session_cookie(self, token: str):
         try:
             max_age = SESSION_TTL_SECONDS
-            expires_dt = datetime.utcnow() + timedelta(seconds=max_age)
+            # Use timezone-aware UTC to avoid deprecation
+            expires_dt = datetime.now(timezone.utc) + timedelta(seconds=max_age)
             expires_str = expires_dt.strftime('%a, %d %b %Y %H:%M:%S GMT')
             parts = [f"{SESSION_COOKIE_NAME}={token}", 'HttpOnly', 'Path=/', f"Max-Age={max_age}", f"Expires={expires_str}", 'SameSite=Lax']
             proto = (self.headers.get('X-Forwarded-Proto') or '').lower()
@@ -1044,8 +1097,36 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
             self._logout()
             return
 
-        # 未登录则跳转
+        # 未登录的处理：API/SSE/资源返回 401，其余跳转登录
         if not user:
+            p = parsed_path.path
+            if p.startswith('/api/'):
+                body = json.dumps({}).encode('utf-8')
+                self.send_response(401)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            if p == '/events':
+                self.send_response(401)
+                self.send_header('Content-type', 'text/event-stream; charset=utf-8')
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                try:
+                    self.wfile.write(b"event: auth\n")
+                    self.wfile.write(b"data: unauthorized\n\n")
+                except Exception:
+                    pass
+                return
+            if p.startswith(('/cache/', '/i/')):
+                self.send_response(401)
+                self.send_header('Content-type', 'text/plain; charset=utf-8')
+                self.send_header('Cache-Control', 'no-store')
+                self.end_headers()
+                self.wfile.write(b'Unauthorized')
+                return
+            # 其他页面直接跳到登录页
             self.send_response(303)
             self.send_header('Location', '/login')
             self.end_headers()
@@ -1920,7 +2001,8 @@ class ReviewServer(http.server.SimpleHTTPRequestHandler):
         """
 
     def _get_item(self, tag: str):
-        rows = list_pending()
+        # 查找单项时应包含暂存中的项目，避免详情页无法打开
+        rows = list_pending(include_staged=True)
         for r in rows:
             if r.get('tag') == tag:
                 return r
