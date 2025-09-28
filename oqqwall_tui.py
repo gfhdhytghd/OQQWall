@@ -642,40 +642,466 @@ class GlobalConfigPage(Vertical):
 
 
 class GroupConfigPage(Vertical):
-    """组配置：展示 AcountGroupcfg.json 概览。"""
+    """组配置：可编辑 AcountGroupcfg.json。
+
+    - 顶栏：各组按钮 + “添加组”
+    - 可编辑项：mangroupid, mainqqid, mainqq_http_port, watermark_text,
+      friend_add_message, max_post_stack, max_image_number_one_post
+    - 副账号及端口：成对列表，可增删
+    - 快捷回复：指令/回复 成对列表，可增删
+    - 保存/重新加载
+    """
+
     def __init__(self):
         super().__init__(id="group_cfg_page")
-        self.table: Optional[DataTable] = None
+        self.data: dict = {}
+        self.current_group: Optional[str] = None
+        self.topbar: Optional[Horizontal] = None
+        self.form: Optional[ScrollableContainer] = None
+        # 当前组的控件引用，便于 harvest
+        self.inputs: dict[str, Input] = {}
+        self.minor_pairs: list[tuple[Input, Input]] = []
+        self.qr_pairs: list[tuple[Input, Input]] = []
+        self.sched_inputs: list[Input] = []
+        self.admin_pairs: list[tuple[Input, Input]] = []
 
     def compose(self) -> ComposeResult:
         yield Static("组配置 (AcountGroupcfg.json)", classes="title")
-        tbl = DataTable(id="group_table")
-        tbl.add_columns("组名", "主账号", "次账号数量")
-        self.table = tbl
-        yield tbl
+        self.topbar = Horizontal(id="group_topbar")
+        yield self.topbar
+        self.form = ScrollableContainer(id="group_form")
+        yield self.form
         with Horizontal(classes="toolbar"):
+            yield Button("💾 保存", id="save_group")
             yield Button("↻ 重新加载", id="reload_group")
 
-    def _load(self) -> None:
-        if not self.table:
-            return
-        self.table.clear()
+    # ---------- 数据加载/保存 ----------
+    def _load_data(self) -> None:
         try:
-            data = json.loads(GROUP_CFG.read_text(encoding="utf-8"))
-        except Exception as e:
-            self.table.add_row("加载失败", str(e), "-")
-            return
-        for g, obj in data.items():
-            mainqq = str(obj.get("mainqqid", ""))
-            minors = obj.get("minorqqid") or []
-            self.table.add_row(g, mainqq, str(len(minors)))
+            self.data = json.loads(GROUP_CFG.read_text(encoding="utf-8")) or {}
+        except Exception:
+            self.data = {}
+        if not self.current_group:
+            self.current_group = next(iter(self.data.keys()), None)
 
+    def _save_data(self) -> None:
+        # 在保存前做校验（规则参考 main.sh）
+        errs, warns = self._validate_data(self.data)
+        if errs:
+            # 展示前若干条错误，阻止保存
+            head = errs[:5]
+            for m in head:
+                self.app.notify(m, severity="error")
+            if len(errs) > 5:
+                self.app.notify(f"还有 {len(errs)-5} 条错误未显示", severity="error")
+            return
+        # 有警告但允许保存
+        for w in warns[:3]:
+            self.app.notify(w, severity="warning")
+        try:
+            GROUP_CFG.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
+            self.app.notify("已保存组配置。", severity="information")
+        except Exception as e:
+            self.app.notify(f"保存失败: {e}", severity="error")
+
+    # ---------- 顶栏/表单 渲染 ----------
+    def _render_topbar(self) -> None:
+        assert self.topbar is not None
+        try:
+            self.topbar.remove_children()
+        except Exception:
+            for ch in list(self.topbar.children):
+                try:
+                    self.topbar.remove(ch)
+                except Exception:
+                    pass
+        # 组按钮
+        for g in self.data.keys():
+            btn = Button(g, id=f"group_select__{g}")
+            self.topbar.mount(btn)
+        # 添加组
+        self.topbar.mount(Button("＋ 添加组", id="add_group"))
+
+    def _render_form(self) -> None:
+        assert self.form is not None
+        # 清空
+        try:
+            self.form.remove_children()
+        except Exception:
+            for ch in list(self.form.children):
+                try:
+                    self.form.remove(ch)
+                except Exception:
+                    pass
+        self.inputs.clear()
+        self.minor_pairs.clear()
+        self.qr_pairs.clear()
+        self.sched_inputs.clear()
+        self.admin_pairs.clear()
+
+        if not self.current_group or self.current_group not in self.data:
+            self.form.mount(Static("未选择组或配置为空。", classes="hint"))
+            return
+        obj = self.data[self.current_group] or {}
+
+        def row(key: str, label_text: str, default: str = "") -> Input:
+            val = str(obj.get(key, default) or "")
+            lab = Label(label_text, classes="cfg_key")
+            inp = Input(value=val, id=f"inp_{key}")
+            self.inputs[key] = inp
+            self.form.mount(Horizontal(lab, inp, Static("", classes="cfg_spacer"), classes="cfg_row"))
+            return inp
+
+        row("mangroupid", "群号(mangroupid)")
+        row("mainqqid", "主账号(mainqqid)")
+        row("mainqq_http_port", "主账号端口(mainqq_http_port)")
+        row("max_post_stack", "暂存区阈值(max_post_stack)")
+        row("max_image_number_one_post", "单贴图数上限")
+        row("watermark_text", "水印文本")
+        row("friend_add_message", "好友通过私信")
+
+        # 副账号与端口（成对）
+        self.form.mount(Static("副账号(qq) 与 端口(一行一对)", classes="title"))
+        minors = list(map(str, (obj.get("minorqqid") or [])))
+        minor_ports = list(map(str, (obj.get("minorqq_http_port") or [])))
+        # 对齐长度
+        ln = max(len(minors), len(minor_ports))
+        while len(minors) < ln:
+            minors.append("")
+        while len(minor_ports) < ln:
+            minor_ports.append("")
+        for i in range(ln):
+            qq_inp = Input(value=minors[i], id=f"minorqq_{i}")
+            pt_inp = Input(value=minor_ports[i], id=f"minorport_{i}")
+            del_btn = Button("删除", id=f"del_minor__{i}")
+            self.minor_pairs.append((qq_inp, pt_inp))
+            self.form.mount(Horizontal(Label("副账号"), qq_inp, Label("端口"), pt_inp, del_btn, Static("", classes="cfg_spacer"), classes="cfg_row"))
+        self.form.mount(Horizontal(Button("＋ 添加副账号", id="add_minor"), classes="toolbar"))
+
+        # 快捷回复（指令 -> 文本）
+        self.form.mount(Static("快捷回复(指令 -> 文本)", classes="title"))
+        qr_dict = obj.get("quick_replies") or {}
+        qr_items = list(qr_dict.items())
+        for i, (cmd, txt) in enumerate(qr_items):
+            c_inp = Input(value=str(cmd), id=f"qrkey_{i}")
+            t_inp = Input(value=str(txt), id=f"qrval_{i}")
+            del_btn = Button("删除", id=f"del_qr__{i}")
+            self.qr_pairs.append((c_inp, t_inp))
+            self.form.mount(Horizontal(Label("指令"), c_inp, Label("回复"), t_inp, del_btn, Static("", classes="cfg_spacer"), classes="cfg_row"))
+        self.form.mount(Horizontal(Button("＋ 添加快捷回复", id="add_qr"), classes="toolbar"))
+
+        # 发送计划（字符串时间 HH:MM 列表）
+        self.form.mount(Static("发送计划(send_schedule) - 时间(HH:MM)", classes="title"))
+        sched_list = obj.get("send_schedule") or []
+        if not isinstance(sched_list, list):
+            sched_list = []
+        for i, t in enumerate(sched_list):
+            ti = Input(value=str(t), id=f"sched_{i}")
+            self.sched_inputs.append(ti)
+            self.form.mount(Horizontal(Label("时间"), ti, Button("删除", id=f"del_sched__{i}"), Static("", classes="cfg_spacer"), classes="cfg_row"))
+        self.form.mount(Horizontal(Button("＋ 添加时间", id="add_sched"), classes="toolbar"))
+
+        # 管理员（username/password 列表）
+        self.form.mount(Static("管理员(admins) - 用户名/密码(支持 sha256: 前缀)", classes="title"))
+        admins = obj.get("admins") or []
+        if not isinstance(admins, list):
+            admins = []
+        for i, adm in enumerate(admins):
+            u = Input(value=str((adm or {}).get("username", "")), id=f"admin_u_{i}")
+            p = Input(value=str((adm or {}).get("password", "")), id=f"admin_p_{i}")
+            self.admin_pairs.append((u, p))
+            self.form.mount(Horizontal(Label("用户名"), u, Label("密码"), p, Button("删除", id=f"del_admin__{i}"), Static("", classes="cfg_spacer"), classes="cfg_row"))
+        self.form.mount(Horizontal(Button("＋ 添加管理员", id="add_admin"), classes="toolbar"))
+
+    # ---------- 事件 ----------
     async def on_mount(self) -> None:
-        self.call_after_refresh(self._load)
+        self._load_data()
+        self._render_topbar()
+        self._render_form()
+
+    def _harvest_form(self) -> None:
+        if not self.current_group or self.current_group not in self.data:
+            return
+        obj = dict(self.data.get(self.current_group) or {})
+
+        def get_val(k: str) -> str:
+            w = self.inputs.get(k)
+            return w.value if isinstance(w, Input) else str(obj.get(k, ""))
+
+        for k in [
+            "mangroupid","mainqqid","mainqq_http_port","max_post_stack",
+            "max_image_number_one_post","watermark_text","friend_add_message"
+        ]:
+            obj[k] = get_val(k)
+
+        # 副账号
+        minors: list[str] = []
+        minor_ports: list[str] = []
+        for (q, p) in self.minor_pairs:
+            minors.append(q.value.strip())
+            minor_ports.append(p.value.strip())
+        obj["minorqqid"] = minors
+        obj["minorqq_http_port"] = minor_ports
+
+        # 快捷回复
+        qr: dict[str, str] = {}
+        for (ck, tv) in self.qr_pairs:
+            k = ck.value.strip()
+            v = tv.value
+            if k:
+                qr[k] = v
+        obj["quick_replies"] = qr
+
+        # 发送计划
+        sched: list[str] = []
+        for ti in self.sched_inputs:
+            v = ti.value.strip()
+            if v:
+                sched.append(v)
+        obj["send_schedule"] = sched
+
+        # 管理员
+        admins: list[dict] = []
+        for (u, p) in self.admin_pairs:
+            uu = u.value.strip()
+            pp = p.value
+            if uu:
+                admins.append({"username": uu, "password": pp})
+        obj["admins"] = admins
+
+        self.data[self.current_group] = obj
+
+    # ---------- 校验 ----------
+    def _validate_data(self, data: dict) -> tuple[list[str], list[str]]:
+        errors: list[str] = []
+        warnings: list[str] = []
+
+        def is_num(s: str) -> bool:
+            return s.isdigit()
+
+        # 唯一性集合
+        mainqqids: set[str] = set()
+        all_minor_ids: set[str] = set()
+        http_ports: set[str] = set()
+
+        # 审核指令冲突列表
+        audit_cmds = {"是","否","匿","等","删","拒","立即","刷新","重渲染","扩列审查","评论","回复","展示","拉黑"}
+
+        for group in data.keys():
+            if not group or not all(c.isalnum() or c == '_' for c in group):
+                errors.append(f"错误：组名 '{group}' 含非法字符，仅允许字母、数字和下划线。")
+                continue
+            obj = data.get(group) or {}
+            mangroupid = str(obj.get("mangroupid") or "")
+            mainqqid = str(obj.get("mainqqid") or "")
+            main_port = str(obj.get("mainqq_http_port") or "")
+            minor_ids = [str(x or "") for x in (obj.get("minorqqid") or [])]
+            minor_ports = [str(x or "") for x in (obj.get("minorqq_http_port") or [])]
+
+            # 必填 & 数字
+            if not is_num(mangroupid):
+                errors.append(f"错误：在 {group} 中，mangroupid 缺失或不是有效的数字！")
+            if not is_num(mainqqid):
+                errors.append(f"错误：在 {group} 中，mainqqid 缺失或不是有效的数字！")
+            else:
+                if mainqqid in mainqqids:
+                    errors.append(f"错误：mainqqid {mainqqid} 在多个组中重复！")
+                mainqqids.add(mainqqid)
+            if not is_num(main_port):
+                errors.append(f"错误：在 {group} 中，mainqq_http_port 缺失或不是有效的数字！")
+            else:
+                if main_port in http_ports:
+                    errors.append(f"错误：mainqq_http_port {main_port} 在多个组中重复！")
+                http_ports.add(main_port)
+
+            # 副账号校验
+            if not minor_ids:
+                warnings.append(f"警告：在 {group} 中，minorqqid 为空。")
+            for mid in minor_ids:
+                if mid and not is_num(mid):
+                    errors.append(f"错误：在 {group} 中，minorqqid 包含非数字值：{mid}")
+                elif mid:
+                    if mid in all_minor_ids or mid in mainqqids:
+                        errors.append(f"错误：minorqqid {mid} 在多个组中重复！")
+                    all_minor_ids.add(mid)
+            if not minor_ports:
+                warnings.append(f"警告：在 {group} 中，minorqq_http_port 为空。")
+            for mp in minor_ports:
+                if mp and not is_num(mp):
+                    errors.append(f"错误：在 {group} 中，minorqq_http_port 包含非数字值：{mp}")
+                elif mp:
+                    if mp in http_ports:
+                        errors.append(f"错误：minorqq_http_port {mp} 在多个组中重复！")
+                    http_ports.add(mp)
+            if len(minor_ids) != len(minor_ports):
+                errors.append(f"错误：在 {group} 中，minorqqid 的数量 ({len(minor_ids)}) 与 minorqq_http_port 的数量 ({len(minor_ports)}) 不匹配。")
+
+            # max_* 数字（可空）
+            for key in ("max_post_stack","max_image_number_one_post"):
+                val = str(obj.get(key) or "")
+                if val and not is_num(val):
+                    errors.append(f"错误：在 {group} 中，{key} 存在但不是纯数字：{val}")
+
+            # friend_add_message 与 watermark_text（可空，若存在必须是字符串）
+            for key in ("friend_add_message","watermark_text"):
+                v = obj.get(key, None)
+                if v is not None and not isinstance(v, str):
+                    errors.append(f"错误：在 {group} 中，{key} 必须是字符串或为空。")
+
+            # send_schedule（可空；若存在必须为字符串数组，元素 HH:MM）
+            sched = obj.get("send_schedule", None)
+            if sched is not None:
+                if not isinstance(sched, list):
+                    errors.append(f"错误：在 {group} 中，send_schedule 必须是数组。")
+                else:
+                    import re
+                    pat = re.compile(r"^([01]?[0-9]|2[0-3]):[0-5][0-9]$")
+                    for t in sched:
+                        if t and (not isinstance(t, str) or not pat.match(t)):
+                            errors.append(f"错误：在 {group} 中，send_schedule 含非法时间：{t}（应为 HH:MM）")
+
+            # quick_replies（可空；若存在必须对象；键/值为字符串；不冲突；内容非空）
+            qr = obj.get("quick_replies", None)
+            if qr is not None:
+                if not isinstance(qr, dict):
+                    errors.append(f"错误：在 {group} 中，quick_replies 必须是对象。")
+                else:
+                    for k, v in qr.items():
+                        if not isinstance(k, str):
+                            errors.append(f"错误：在 {group} 中，快捷回复键必须是字符串。")
+                            continue
+                        if k in audit_cmds:
+                            errors.append(f"错误：在 {group} 中，快捷回复指令 '{k}' 与审核指令冲突。")
+                        if not isinstance(v, str):
+                            errors.append(f"错误：在 {group} 中，快捷回复 '{k}' 的值必须是字符串。")
+                        if isinstance(v, str) and not v.strip():
+                            errors.append(f"错误：在 {group} 中，快捷回复 '{k}' 内容不能为空。")
+
+        return errors, warnings
 
     async def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "reload_group":
-            self._load()
+        bid = event.button.id or ""
+        if bid == "reload_group":
+            self._load_data()
+            self._render_topbar()
+            self._render_form()
+            return
+        if bid == "save_group":
+            self._harvest_form()
+            self._save_data()
+            return
+        if bid == "add_group":
+            # 先收集当前表单
+            self._harvest_form()
+            base = "NewGroup"
+            n = 1
+            while f"{base}{n}" in self.data:
+                n += 1
+            key = f"{base}{n}"
+            self.data[key] = {
+                "mangroupid":"",
+                "mainqqid":"","mainqq_http_port":"",
+                "minorqqid":[],"minorqq_http_port":[],
+                "admins":[],"max_post_stack":"3","max_image_number_one_post":"18",
+                "friend_add_message":"","watermark_text":"",
+                "quick_replies":{}
+            }
+            self.current_group = key
+            self._render_topbar()
+            self._render_form()
+            return
+        if bid.startswith("group_select__"):
+            self._harvest_form()
+            self.current_group = bid.split("__",1)[1]
+            self._render_topbar()
+            self._render_form()
+            return
+        if bid == "add_minor":
+            self._harvest_form()
+            obj = self.data.get(self.current_group, {})
+            obj.setdefault("minorqqid", []).append("")
+            obj.setdefault("minorqq_http_port", []).append("")
+            self._render_form()
+            return
+        if bid.startswith("del_minor__"):
+            self._harvest_form()
+            idx = int(bid.split("__",1)[1])
+            obj = self.data.get(self.current_group, {})
+            qqs = obj.get("minorqqid", [])
+            pts = obj.get("minorqq_http_port", [])
+            if 0 <= idx < len(qqs):
+                qqs.pop(idx)
+            if 0 <= idx < len(pts):
+                pts.pop(idx)
+            obj["minorqqid"], obj["minorqq_http_port"] = qqs, pts
+            self._render_form()
+            return
+        if bid == "add_qr":
+            self._harvest_form()
+            obj = self.data.get(self.current_group, {})
+            qrd = obj.get("quick_replies", {})
+            # 添加一个空占位，避免键冲突
+            n=1
+            newk = f"新指令{n}"
+            while newk in qrd:
+                n+=1
+                newk = f"新指令{n}"
+            qrd[newk] = "回复内容"
+            obj["quick_replies"] = qrd
+            self._render_form()
+            return
+        if bid.startswith("del_qr__"):
+            self._harvest_form()
+            idx = int(bid.split("__",1)[1])
+            obj = self.data.get(self.current_group, {})
+            qrd = obj.get("quick_replies", {})
+            items = list(qrd.items())
+            if 0 <= idx < len(items):
+                k,_ = items[idx]
+                qrd.pop(k, None)
+            obj["quick_replies"] = qrd
+            self._render_form()
+            return
+        if bid == "add_sched":
+            self._harvest_form()
+            obj = self.data.get(self.current_group, {})
+            lst = obj.get("send_schedule") or []
+            if not isinstance(lst, list):
+                lst = []
+            lst.append("")
+            obj["send_schedule"] = lst
+            self._render_form()
+            return
+        if bid.startswith("del_sched__"):
+            self._harvest_form()
+            idx = int(bid.split("__",1)[1])
+            obj = self.data.get(self.current_group, {})
+            lst = obj.get("send_schedule") or []
+            if isinstance(lst, list) and 0 <= idx < len(lst):
+                lst.pop(idx)
+            obj["send_schedule"] = lst
+            self._render_form()
+            return
+        if bid == "add_admin":
+            self._harvest_form()
+            obj = self.data.get(self.current_group, {})
+            admins = obj.get("admins") or []
+            if not isinstance(admins, list):
+                admins = []
+            admins.append({"username":"","password":""})
+            obj["admins"] = admins
+            self._render_form()
+            return
+        if bid.startswith("del_admin__"):
+            self._harvest_form()
+            idx = int(bid.split("__",1)[1])
+            obj = self.data.get(self.current_group, {})
+            admins = obj.get("admins") or []
+            if isinstance(admins, list) and 0 <= idx < len(admins):
+                admins.pop(idx)
+            obj["admins"] = admins
+            self._render_form()
+            return
 
 
 class LogsPage(Vertical):
@@ -686,6 +1112,7 @@ class LogsPage(Vertical):
         self.follow = True
         self.current_file: Optional[Path] = None
         self.tail_task: Optional[asyncio.Task] = None
+        self.state_path: Path = ROOT / "cache" / "tui_state.json"
 
     def compose(self) -> ComposeResult:
         yield Static("Log 查看", classes="title")
@@ -698,6 +1125,29 @@ class LogsPage(Vertical):
 
     async def on_mount(self) -> None:
         await self.refresh_files()
+        # 尝试恢复上次查看的日志
+        try:
+            state = self._load_state()
+            # 恢复跟随状态
+            follow = state.get("follow") if isinstance(state, dict) else None
+            if isinstance(follow, bool):
+                self.follow = follow
+                try:
+                    btn = self.query_one("#toggle_follow", Button)
+                    btn.label = "▶ 跟随" if self.follow else "■ 暂停跟随"
+                except Exception:
+                    pass
+            # 恢复最后一次查看的日志
+            last = state.get("last_log_path") if isinstance(state, dict) else None
+            if last and Path(last).is_file():
+                await self.switch_to(Path(last))
+            else:
+                # 默认打开主日志（如果存在）
+                default = ROOT / "OQQWallmsgserv.log"
+                if default.exists():
+                    await self.switch_to(default)
+        except Exception:
+            pass
 
     async def refresh_files(self) -> None:
         self.selector.clear_options()
@@ -726,6 +1176,10 @@ class LogsPage(Vertical):
         elif event.button.id == "toggle_follow":
             self.follow = not self.follow
             event.button.label = "▶ 跟随" if self.follow else "■ 暂停跟随"
+            try:
+                self._save_state({"follow": self.follow})
+            except Exception:
+                pass
 
     async def on_option_list_option_selected(self, event) -> None:
         """处理日志文件选择（适配 Textual 6.x 的 OptionList 事件）。"""
@@ -754,6 +1208,11 @@ class LogsPage(Vertical):
         except Exception as e:
             self.textlog.write(f"打开失败: {e}")
             return
+        # 保存状态
+        try:
+            self._save_state({"last_log_path": str(path)})
+        except Exception:
+            pass
         # 启动追踪
         self.tail_task = asyncio.create_task(self._tail_loop())
 
@@ -777,6 +1236,29 @@ class LogsPage(Vertical):
             return
         except Exception as e:
             self.textlog.write(f"跟随错误: {e}")
+
+    def _load_state(self) -> dict:
+        try:
+            if self.state_path.is_file():
+                return json.loads(self.state_path.read_text(encoding="utf-8")) or {}
+        except Exception:
+            return {}
+        return {}
+
+    def _save_state(self, data: dict) -> None:
+        try:
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            # 合并已有状态，避免覆盖其他字段
+            current = {}
+            if self.state_path.exists():
+                try:
+                    current = json.loads(self.state_path.read_text(encoding="utf-8")) or {}
+                except Exception:
+                    current = {}
+            current.update(data)
+            self.state_path.write_text(json.dumps(current, ensure_ascii=False), encoding="utf-8")
+        except Exception:
+            pass
 
 
 def tail_lines(path: Path, n: int) -> list[str]:
@@ -832,6 +1314,8 @@ class OQQWallTUI(App):
     #log_view { height: 1fr; border: tall $accent; }
     #log_selector { height: 10; }
     #global_cfg_form { height: 1fr; width: 1fr; }
+    #group_topbar { height: auto; padding: 0 1; }
+    #group_form { height: 1fr; }
     """
 
     BINDINGS = [
