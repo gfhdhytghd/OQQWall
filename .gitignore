@@ -52,6 +52,5 @@ logs/http_body_1754880444680.resp
 logs/qzone.log
 */__pycache__/*
 tests/recordings/*
-testmsg
+testmsg*
 web_review/web_review.log
-getmsgserv/LM_work/sendtoLM.py
