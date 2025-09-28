@@ -106,6 +106,27 @@ CONFIG_ORDER: list[str] = [
     "vision_size_limit_mb",
 ]
 
+# 组配置固定顺序（未列出的键会按字母顺序追加在末尾）
+GROUP_CONFIG_ORDER: list[str] = [
+    # 基础映射
+    "mangroupid",
+    "mainqqid",
+    "mainqq_http_port",
+    # 副账号/端口（数组）
+    "minorqqid",
+    "minorqq_http_port",
+    # 业务阈值
+    "max_post_stack",
+    "max_image_number_one_post",
+    "send_schedule",
+    # 展示与消息
+    "watermark_text",
+    "friend_add_message",
+    # 可选功能模块（为保证“快捷回复 -> 管理员”收尾，先输出 send_schedule 再 quick_replies）
+    "quick_replies",
+    "admins",
+]
+
 
 def read_kv_config(path: Path) -> dict[str, str]:
     """读取 oqqwall.config（key=value，#注释），返回字典。"""
@@ -823,8 +844,30 @@ class GroupConfigPage(Vertical):
         # 有警告但允许保存
         for w in warns[:3]:
             self.app.notify(w, severity="warning")
+        # 统一按固定顺序输出每个组内的键，并按组名排序写回
+        def _ordered_group_obj(obj: dict) -> dict:
+            ordered: dict = {}
+            for k in GROUP_CONFIG_ORDER:
+                if k in obj:
+                    ordered[k] = obj[k]
+            # 追加未列出键（按字母序）
+            for k in sorted(obj.keys()):
+                if k not in ordered:
+                    ordered[k] = obj[k]
+            # 内部结构也做稳定排序
+            qrd = ordered.get("quick_replies")
+            if isinstance(qrd, dict):
+                ordered["quick_replies"] = {k: qrd[k] for k in sorted(qrd.keys())}
+            return ordered
+
+        data_out: dict = {}
+        for g in sorted(self.data.keys()):
+            data_out[g] = _ordered_group_obj(self.data[g] or {})
+
         try:
-            GROUP_CFG.write_text(json.dumps(self.data, ensure_ascii=False, indent=2), encoding="utf-8")
+            GROUP_CFG.write_text(json.dumps(data_out, ensure_ascii=False, indent=2), encoding="utf-8")
+            # 覆盖内存中的顺序以保持 UI 一致
+            self.data = data_out
             self.app.notify("已保存组配置。", severity="information")
         except Exception as e:
             self.app.notify(f"保存失败: {e}", severity="error")
@@ -854,8 +897,8 @@ class GroupConfigPage(Vertical):
             self.topbar.mount(Button("确认", id=f"confirm_add_group__{self._topbar_rev}"))
             self.topbar.mount(Button("取消", id=f"cancel_add_group__{self._topbar_rev}"))
 
-        # 组按钮
-        for g in self.data.keys():
+        # 组按钮（按名称排序显示，稳定顺序）
+        for g in sorted(self.data.keys()):
             btn = Button(g, id=f"group_select__{g}__{self._topbar_rev}")
             if g == self.current_group:
                 try:
@@ -910,12 +953,8 @@ class GroupConfigPage(Vertical):
         row("mangroupid", "群号(mangroupid)")
         row("mainqqid", "主账号(mainqqid)")
         row("mainqq_http_port", "主账号端口(mainqq_http_port)")
-        row("max_post_stack", "暂存区阈值(max_post_stack)")
-        row("max_image_number_one_post", "单贴图数上限")
-        row("watermark_text", "水印文本")
-        row("friend_add_message", "好友通过私信")
 
-        # 副账号与端口（成对）
+        # 副账号与端口（成对） — 提前到主账号端口之后
         self.form.mount(Static("副账号(qq) 与 端口(一行一对)", classes="title"))
         minors = list(map(str, (obj.get("minorqqid") or [])))
         minor_ports = list(map(str, (obj.get("minorqq_http_port") or [])))
@@ -933,19 +972,10 @@ class GroupConfigPage(Vertical):
             self.form.mount(Horizontal(Label("副账号"), qq_inp, Label("端口"), pt_inp, del_btn, Static("", classes="cfg_spacer"), classes="cfg_row"))
         self.form.mount(Horizontal(Button("＋ 添加副账号", id=f"add_minor__{self._form_rev}"), classes="toolbar"))
 
-        # 快捷回复（指令 -> 文本）
-        self.form.mount(Static("快捷回复(指令 -> 文本)", classes="title"))
-        qr_dict = obj.get("quick_replies") or {}
-        qr_items = list(qr_dict.items())
-        for i, (cmd, txt) in enumerate(qr_items):
-            c_inp = Input(value=str(cmd), id=f"qrkey_{i}__{self._form_rev}")
-            t_inp = Input(value=str(txt), id=f"qrval_{i}__{self._form_rev}")
-            del_btn = Button("删除", id=f"del_qr__{i}__{self._form_rev}")
-            self.qr_pairs.append((c_inp, t_inp))
-            self.form.mount(Horizontal(Label("指令"), c_inp, Label("回复"), t_inp, del_btn, Static("", classes="cfg_spacer"), classes="cfg_row"))
-        self.form.mount(Horizontal(Button("＋ 添加快捷回复", id=f"add_qr__{self._form_rev}"), classes="toolbar"))
-
-        # 发送计划（字符串时间 HH:MM 列表）
+        # 其余基础项
+        row("max_post_stack", "发件调度发件阈值")
+        row("max_image_number_one_post", "单条说说图片数量上限")
+        # 发送计划（字符串时间 HH:MM 列表） — 放在快捷回复之前，便于“快捷回复 -> 管理员”收尾
         self.form.mount(Static("发送计划(send_schedule) - 时间(HH:MM)", classes="title"))
         sched_list = obj.get("send_schedule") or []
         if not isinstance(sched_list, list):
@@ -955,9 +985,23 @@ class GroupConfigPage(Vertical):
             self.sched_inputs.append(ti)
             self.form.mount(Horizontal(Label("时间"), ti, Button("删除", id=f"del_sched__{i}__{self._form_rev}"), Static("", classes="cfg_spacer"), classes="cfg_row"))
         self.form.mount(Horizontal(Button("＋ 添加时间", id=f"add_sched__{self._form_rev}"), classes="toolbar"))
+        row("watermark_text", "水印文本")
+        row("friend_add_message", "好友通过私信")
+        # 快捷回复（指令 -> 文本）
+        self.form.mount(Static("快捷回复(指令 -> 文本)", classes="title"))
+        qr_dict = obj.get("quick_replies") or {}
+        # 稳定显示：按指令名排序
+        qr_items = sorted(qr_dict.items(), key=lambda x: str(x[0]))
+        for i, (cmd, txt) in enumerate(qr_items):
+            c_inp = Input(value=str(cmd), id=f"qrkey_{i}__{self._form_rev}")
+            t_inp = Input(value=str(txt), id=f"qrval_{i}__{self._form_rev}")
+            del_btn = Button("删除", id=f"del_qr__{i}__{self._form_rev}")
+            self.qr_pairs.append((c_inp, t_inp))
+            self.form.mount(Horizontal(Label("指令"), c_inp, Label("回复"), t_inp, del_btn, Static("", classes="cfg_spacer"), classes="cfg_row"))
+        self.form.mount(Horizontal(Button("＋ 添加快捷回复", id=f"add_qr__{self._form_rev}"), classes="toolbar"))
 
-        # 管理员（username/password 列表）
-        self.form.mount(Static("管理员(admins) - 用户名/密码(支持 sha256: 前缀)", classes="title"))
+        # 管理员（username/password 列表） — 末尾
+        self.form.mount(Static("网页审核管理员(admins) - 用户名/密码(支持 sha256: 前缀)", classes="title"))
         admins = obj.get("admins") or []
         if not isinstance(admins, list):
             admins = []
