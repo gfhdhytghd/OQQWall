@@ -54,3 +54,4 @@ logs/qzone.log
 tests/recordings/*
 testmsg
 web_review/web_review.log
+getmsgserv/LM_work/sendtoLM.py

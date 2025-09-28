@@ -1,0 +1,241 @@
+{
+  "notregular": "false",
+  "messages": [
+    {
+      "message_id": 316370717,
+      "message": [
+        {
+          "type": "forward",
+          "data": {
+            "messages": [
+              {
+                "self_id": 3995477265,
+                "user_id": 3995477265,
+                "time": 1759024266,
+                "message_id": 973231007,
+                "message_seq": 973231007,
+                "real_id": 973231007,
+                "real_seq": "4001",
+                "message_type": "group",
+                "sender": {
+                  "user_id": 3995477265,
+                  "nickname": "苏国外墙-辅助账号",
+                  "card": ""
+                },
+                "raw_message": "系统已启动",
+                "font": 14,
+                "sub_type": "normal",
+                "message": [
+                  {
+                    "type": "text",
+                    "data": {
+                      "text": "系统已启动"
+                    }
+                  }
+                ],
+                "message_format": "array",
+                "post_type": "message_sent",
+                "message_sent_type": "self",
+                "group_id": 284840486,
+                "group_name": ""
+              },
+              {
+                "self_id": 3995477265,
+                "user_id": 3995477265,
+                "time": 1759024304,
+                "message_id": 1932243987,
+                "message_seq": 1932243987,
+                "real_id": 1932243987,
+                "real_seq": "4002",
+                "message_type": "group",
+                "sender": {
+                  "user_id": 3995477265,
+                  "nickname": "苏国外墙-辅助账号",
+                  "card": ""
+                },
+                "raw_message": "3391146750使用网页审核通过了#1",
+                "font": 14,
+                "sub_type": "normal",
+                "message": [
+                  {
+                    "type": "text",
+                    "data": {
+                      "text": "3391146750使用网页审核通过了#1"
+                    }
+                  }
+                ],
+                "message_format": "array",
+                "post_type": "message_sent",
+                "message_sent_type": "self",
+                "group_id": 284840486,
+                "group_name": ""
+              },
+              {
+                "self_id": 3995477265,
+                "user_id": 3995477265,
+                "time": 1759024309,
+                "message_id": 1326604591,
+                "message_seq": 1326604591,
+                "real_id": 1326604591,
+                "real_seq": "4003",
+                "message_type": "group",
+                "sender": {
+                  "user_id": 3995477265,
+                  "nickname": "苏国外墙-辅助账号",
+                  "card": ""
+                },
+                "raw_message": "3391146750使用网页审核执行了发送暂存区",
+                "font": 14,
+                "sub_type": "normal",
+                "message": [
+                  {
+                    "type": "text",
+                    "data": {
+                      "text": "3391146750使用网页审核执行了发送暂存区"
+                    }
+                  }
+                ],
+                "message_format": "array",
+                "post_type": "message_sent",
+                "message_sent_type": "self",
+                "group_id": 284840486,
+                "group_name": ""
+              },
+              {
+                "self_id": 3995477265,
+                "user_id": 3995477265,
+                "time": 1759024309,
+                "message_id": 1655892017,
+                "message_seq": 1655892017,
+                "real_id": 1655892017,
+                "real_seq": "4004",
+                "message_type": "group",
+                "sender": {
+                  "user_id": 3995477265,
+                  "nickname": "苏国外墙-辅助账号",
+                  "card": ""
+                },
+                "raw_message": "执行发送...",
+                "font": 14,
+                "sub_type": "normal",
+                "message": [
+                  {
+                    "type": "text",
+                    "data": {
+                      "text": "执行发送..."
+                    }
+                  }
+                ],
+                "message_format": "array",
+                "post_type": "message_sent",
+                "message_sent_type": "self",
+                "group_id": 284840486,
+                "group_name": ""
+              },
+              {
+                "self_id": 3995477265,
+                "user_id": 3995477265,
+                "time": 1759024310,
+                "message_id": 875975472,
+                "message_seq": 875975472,
+                "real_id": 875975472,
+                "real_seq": "4005",
+                "message_type": "group",
+                "sender": {
+                  "user_id": 3995477265,
+                  "nickname": "苏国外墙-辅助账号",
+                  "card": ""
+                },
+                "raw_message": "3995477265已发送",
+                "font": 14,
+                "sub_type": "normal",
+                "message": [
+                  {
+                    "type": "text",
+                    "data": {
+                      "text": "3995477265已发送"
+                    }
+                  }
+                ],
+                "message_format": "array",
+                "post_type": "message_sent",
+                "message_sent_type": "self",
+                "group_id": 284840486,
+                "group_name": ""
+              },
+              {
+                "self_id": 3995477265,
+                "user_id": 3995477265,
+                "time": 1759024311,
+                "message_id": 474669179,
+                "message_seq": 474669179,
+                "real_id": 474669179,
+                "real_seq": "4006",
+                "message_type": "group",
+                "sender": {
+                  "user_id": 3995477265,
+                  "nickname": "苏国外墙-辅助账号",
+                  "card": ""
+                },
+                "raw_message": "暂存区调度器: 组 MethGroup 暂存内容已全部发送",
+                "font": 14,
+                "sub_type": "normal",
+                "message": [
+                  {
+                    "type": "text",
+                    "data": {
+                      "text": "暂存区调度器: 组 MethGroup 暂存内容已全部发送"
+                    }
+                  }
+                ],
+                "message_format": "array",
+                "post_type": "message_sent",
+                "message_sent_type": "self",
+                "group_id": 284840486,
+                "group_name": ""
+              }
+            ],
+            "id": "7554952753612438640"
+          }
+        }
+      ],
+      "time": 1759024512
+    },
+    {
+      "message_id": 591150100,
+      "message": [
+        {
+          "type": "text",
+          "data": {
+            "text": "测试带聊天记录投稿"
+          }
+        }
+      ],
+      "time": 1759024523
+    },
+    {
+      "message_id": 1539148230,
+      "message": [
+        {
+          "type": "text",
+          "data": {
+            "text": "注意，第一条看似意义不明的聊天记录消息\"316370717\"也是本条投稿的内容"
+          }
+        }
+      ],
+      "time": 1759025468
+    },
+    {
+      "message_id": 548913799,
+      "message": [
+        {
+          "type": "text",
+          "data": {
+            "text": "分段时请务必把那条聊天记录包含在内，我转发的就是系统记录，那是投稿的一部分"
+          }
+        }
+      ],
+      "time": 1759025837
+    }
+  ]
+}
