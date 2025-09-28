@@ -81,6 +81,31 @@ CONFIG_TOOLTIPS: dict[str, str] = {
     "napcat_access_token": "NapCat /get_status 接口 Access Token",
 }
 
+# 全局配置固定顺序（未列出的键会按字母顺序追加在末尾）
+CONFIG_ORDER: list[str] = [
+    # 基础/服务
+    "http-serv-port",
+    "process_waittime",
+    "apikey",
+    # NapCat/登录
+    "napcat_access_token",
+    "manage_napcat_internal",
+    # QZone/浏览器
+    "max_attempts_qzone_autologin",
+    "force_chromium_no-sandbox",
+    # 机器人行为
+    "at_unprived_sender",
+    "friend_request_window_sec",
+    # 审核面板
+    "use_web_review",
+    "web_review_port",
+    # 模型与能力
+    "text_model",
+    "vision_model",
+    "vision_pixel_limit",
+    "vision_size_limit_mb",
+]
+
 
 def read_kv_config(path: Path) -> dict[str, str]:
     """读取 oqqwall.config（key=value，#注释），返回字典。"""
@@ -238,6 +263,73 @@ async def fetch_napcat_login_user_id() -> Optional[str]:
         return None
 
 
+def _inst_urls(port: str, token: str) -> tuple[str, str]:
+    base = f"http://127.0.0.1:{port}"
+    return (
+        f"{base}/get_status?access_token={token}",
+        f"{base}/get_login_info?access_token={token}",
+    )
+
+
+async def fetch_instance_state(port: str, token: str) -> tuple[str, str, Optional[str]]:
+    """获取指定端口 NapCat 实例的状态。
+
+    Returns:
+        (state, message, user_id)
+        state: ok / warn / fail
+        message: 文本描述
+        user_id: 登录 QQ（可能为 None）
+    """
+    status_url, login_url = _inst_urls(port, token)
+    state = "fail"
+    msg = "未检测"
+    uid: Optional[str] = None
+    try:
+        with urlopen(status_url, timeout=2) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="ignore"))
+        online = bool(((data or {}).get("data") or {}).get("online"))
+        good = bool(((data or {}).get("data") or {}).get("good"))
+        if online and good:
+            state, msg = "ok", "在线且健康"
+        elif online:
+            state, msg = "warn", "在线但异常"
+        else:
+            state, msg = "fail", "离线"
+    except Exception as e:
+        state, msg = "fail", f"请求失败"
+    # 尝试读取登录 QQ
+    try:
+        with urlopen(login_url, timeout=2) as resp:
+            j = json.loads(resp.read().decode("utf-8", errors="ignore"))
+        uid = str(((j or {}).get("data") or {}).get("user_id") or "").strip() or None
+    except Exception:
+        pass
+    return state, msg, uid
+
+
+def iter_account_instances() -> list[tuple[str, str, str]]:
+    """返回 (group, qq, port) 列表，包含主/副账号。
+    若副账号端口数组长度与 id 数量不等，按较短长度对齐。
+    """
+    try:
+        raw = json.loads((ROOT / "AcountGroupcfg.json").read_text(encoding="utf-8")) or {}
+    except Exception:
+        return []
+    out: list[tuple[str, str, str]] = []
+    for g, obj in raw.items():
+        qq = str(obj.get("mainqqid") or "").strip()
+        pt = str(obj.get("mainqq_http_port") or "").strip()
+        if qq and pt:
+            out.append((g, qq, pt))
+        ids = [str(x or "").strip() for x in (obj.get("minorqqid") or [])]
+        ports = [str(x or "").strip() for x in (obj.get("minorqq_http_port") or [])]
+        m = min(len(ids), len(ports))
+        for i in range(m):
+            if ids[i] and ports[i]:
+                out.append((g, ids[i], ports[i]))
+    return out
+
+
 def get_all_qq_ids() -> list[str]:
     """从 AcountGroupcfg.json 汇总所有主/副账号 QQ 号。"""
     try:
@@ -393,12 +485,6 @@ class HomePage(Vertical):
         elif bid == "stop":
             await self._stop()
         elif bid == "check_napcat":
-            state, msg = await fetch_napcat_status()
-            self.napcat_msg = msg
-            uid = await fetch_napcat_login_user_id()
-            suffix = f"（登录: {uid}）" if uid else ""
-            color = _state_color(state)
-            self.napcat_label.update(Text(f"NapCat: {msg}{suffix}", style=color))
             await self._refresh_qq_status()
         elif bid == "check_services":
             await self._refresh_services_status()
@@ -504,20 +590,43 @@ class HomePage(Vertical):
         self._set_running_label(running)
 
     async def _refresh_qq_status(self) -> None:
-        ids = get_all_qq_ids()
-        # 默认全部待检测
-        status_map = {i: "待检测" for i in ids}
-        uid = await fetch_napcat_login_user_id()
-        # 如果拿到当前登录账号，则标记其状态
-        if uid:
-            status_map[uid] = "在线且健康"
-        # 拼接显示，用中文分号分隔
-        if status_map:
-            parts = [f"qq {k}:{v}" for k, v in status_map.items()]
-            text = "；".join(parts)
+        # 逐实例探测
+        cfg = read_kv_config(CONFIG_FILE)
+        token = cfg.get("napcat_access_token") or os.environ.get("NAPCAT_TOKEN") or ""
+        instances = iter_account_instances()
+        ok = 0
+        total = 0
+        abnormal_ids: list[str] = []
+        parts: list[Text] = []
+        if not instances:
+            self.qq_label.update(Text("无配置账号", style="grey50"))
+            self.napcat_label.update(Text("NapCat: 未配置", style="grey50"))
+            return
+        for (grp, qq, port) in instances:
+            total += 1
+            st, msg, uid = await fetch_instance_state(port, token)
+            if st == "ok":
+                ok += 1
+            else:
+                abnormal_ids.append(qq)
+            parts.extend([
+                Text(f"qq {qq}:", style="bold"),
+                Text(msg, style=_state_color(st)),
+                Text(f"({port})"),
+                Text("； ")
+            ])
+        # 去掉最后的间隔
+        if parts:
+            parts = parts[:-1]
+        self.qq_label.update(Text.assemble(*parts))
+        # 汇总到 NapCat 行
+        if ok == total:
+            self.napcat_label.update(Text(f"NapCat: 健康 {ok}/{total}", style="green"))
         else:
-            text = "无配置账号"
-        self.qq_label.update(Text(text, style="green" if uid else "grey50"))
+            base = Text(f"NapCat: 全部不可用 {ok}/{total}", style="red") if ok == 0 else Text(f"NapCat: 部分可用 {ok}/{total}", style="yellow")
+            if abnormal_ids:
+                base = Text.assemble(base, Text("；异常: "), Text(", ".join(abnormal_ids), style="red"))
+            self.napcat_label.update(base)
 
     async def _refresh_services_status(self) -> None:
         """检查子服务进程状态并更新状态行。"""
@@ -585,7 +694,17 @@ class GlobalConfigPage(Vertical):
         if not cfg:
             self.form.mount(Static("未找到 oqqwall.config 或为空", classes="hint"))
             return
-        for idx, k in enumerate(sorted(cfg.keys())):
+        # 使用固定顺序渲染；未列出的键按字母序追加
+        ordered_keys: list[str] = []
+        seen: set[str] = set()
+        for key in CONFIG_ORDER:
+            if key in cfg and key not in seen:
+                ordered_keys.append(key)
+                seen.add(key)
+        rest = sorted(k for k in cfg.keys() if k not in seen)
+        ordered_keys.extend(rest)
+
+        for idx, k in enumerate(ordered_keys):
             v = cfg.get(k, "")
             v_raw = str(v)
             v_low = v_raw.strip().lower()
@@ -664,6 +783,12 @@ class GroupConfigPage(Vertical):
         self.qr_pairs: list[tuple[Input, Input]] = []
         self.sched_inputs: list[Input] = []
         self.admin_pairs: list[tuple[Input, Input]] = []
+        self._topbar_rev: int = 0
+        self._form_rev: int = 0
+        # 顶栏交互状态
+        self._adding_group: bool = False
+        self._deleting_group: bool = False
+        self._new_group_input: Optional[Input] = None
 
     def compose(self) -> ComposeResult:
         yield Static("组配置 (AcountGroupcfg.json)", classes="title")
@@ -707,6 +832,8 @@ class GroupConfigPage(Vertical):
     # ---------- 顶栏/表单 渲染 ----------
     def _render_topbar(self) -> None:
         assert self.topbar is not None
+        # 保持已有容器，清空子节点（避免重复容器 ID）
+        # 使用 remove_children 与回退方案，确保立刻移除旧按钮，避免重复 ID。
         try:
             self.topbar.remove_children()
         except Exception:
@@ -714,13 +841,39 @@ class GroupConfigPage(Vertical):
                 try:
                     self.topbar.remove(ch)
                 except Exception:
-                    pass
+                    try:
+                        ch.remove()
+                    except Exception:
+                        pass
+        self._topbar_rev += 1
+        # 添加组/输入新组名 控件优先显示，避免被顶栏挤出
+        if self._adding_group:
+            name_inp = Input(placeholder="输入组名(字母/数字/下划线)", id=f"new_group_name__{self._topbar_rev}")
+            self._new_group_input = name_inp
+            self.topbar.mount(name_inp)
+            self.topbar.mount(Button("确认", id=f"confirm_add_group__{self._topbar_rev}"))
+            self.topbar.mount(Button("取消", id=f"cancel_add_group__{self._topbar_rev}"))
+
         # 组按钮
         for g in self.data.keys():
-            btn = Button(g, id=f"group_select__{g}")
+            btn = Button(g, id=f"group_select__{g}__{self._topbar_rev}")
+            if g == self.current_group:
+                try:
+                    btn.add_class("-active")
+                except Exception:
+                    pass
             self.topbar.mount(btn)
-        # 添加组
-        self.topbar.mount(Button("＋ 添加组", id="add_group"))
+        # 非新建模式下显示“添加组”按钮
+        if not self._adding_group:
+            self.topbar.mount(Button("＋ 添加组", id=f"add_group__{self._topbar_rev}"))
+
+        # 删除组/确认删除
+        if self._deleting_group:
+            label = f"确认删除 {self.current_group or ''}"
+            self.topbar.mount(Button(label, id=f"confirm_delete_group__{self._topbar_rev}"))
+            self.topbar.mount(Button("取消", id=f"cancel_delete_group__{self._topbar_rev}"))
+        else:
+            self.topbar.mount(Button("🗑 删除组", id=f"delete_group__{self._topbar_rev}"))
 
     def _render_form(self) -> None:
         assert self.form is not None
@@ -738,6 +891,8 @@ class GroupConfigPage(Vertical):
         self.qr_pairs.clear()
         self.sched_inputs.clear()
         self.admin_pairs.clear()
+        # 版本递增，所有控件 ID 带后缀，避免与未及时移除的旧节点发生 ID 冲突
+        self._form_rev += 1
 
         if not self.current_group or self.current_group not in self.data:
             self.form.mount(Static("未选择组或配置为空。", classes="hint"))
@@ -747,7 +902,7 @@ class GroupConfigPage(Vertical):
         def row(key: str, label_text: str, default: str = "") -> Input:
             val = str(obj.get(key, default) or "")
             lab = Label(label_text, classes="cfg_key")
-            inp = Input(value=val, id=f"inp_{key}")
+            inp = Input(value=val, id=f"inp_{key}__{self._form_rev}")
             self.inputs[key] = inp
             self.form.mount(Horizontal(lab, inp, Static("", classes="cfg_spacer"), classes="cfg_row"))
             return inp
@@ -771,24 +926,24 @@ class GroupConfigPage(Vertical):
         while len(minor_ports) < ln:
             minor_ports.append("")
         for i in range(ln):
-            qq_inp = Input(value=minors[i], id=f"minorqq_{i}")
-            pt_inp = Input(value=minor_ports[i], id=f"minorport_{i}")
-            del_btn = Button("删除", id=f"del_minor__{i}")
+            qq_inp = Input(value=minors[i], id=f"minorqq_{i}__{self._form_rev}")
+            pt_inp = Input(value=minor_ports[i], id=f"minorport_{i}__{self._form_rev}")
+            del_btn = Button("删除", id=f"del_minor__{i}__{self._form_rev}")
             self.minor_pairs.append((qq_inp, pt_inp))
             self.form.mount(Horizontal(Label("副账号"), qq_inp, Label("端口"), pt_inp, del_btn, Static("", classes="cfg_spacer"), classes="cfg_row"))
-        self.form.mount(Horizontal(Button("＋ 添加副账号", id="add_minor"), classes="toolbar"))
+        self.form.mount(Horizontal(Button("＋ 添加副账号", id=f"add_minor__{self._form_rev}"), classes="toolbar"))
 
         # 快捷回复（指令 -> 文本）
         self.form.mount(Static("快捷回复(指令 -> 文本)", classes="title"))
         qr_dict = obj.get("quick_replies") or {}
         qr_items = list(qr_dict.items())
         for i, (cmd, txt) in enumerate(qr_items):
-            c_inp = Input(value=str(cmd), id=f"qrkey_{i}")
-            t_inp = Input(value=str(txt), id=f"qrval_{i}")
-            del_btn = Button("删除", id=f"del_qr__{i}")
+            c_inp = Input(value=str(cmd), id=f"qrkey_{i}__{self._form_rev}")
+            t_inp = Input(value=str(txt), id=f"qrval_{i}__{self._form_rev}")
+            del_btn = Button("删除", id=f"del_qr__{i}__{self._form_rev}")
             self.qr_pairs.append((c_inp, t_inp))
             self.form.mount(Horizontal(Label("指令"), c_inp, Label("回复"), t_inp, del_btn, Static("", classes="cfg_spacer"), classes="cfg_row"))
-        self.form.mount(Horizontal(Button("＋ 添加快捷回复", id="add_qr"), classes="toolbar"))
+        self.form.mount(Horizontal(Button("＋ 添加快捷回复", id=f"add_qr__{self._form_rev}"), classes="toolbar"))
 
         # 发送计划（字符串时间 HH:MM 列表）
         self.form.mount(Static("发送计划(send_schedule) - 时间(HH:MM)", classes="title"))
@@ -796,10 +951,10 @@ class GroupConfigPage(Vertical):
         if not isinstance(sched_list, list):
             sched_list = []
         for i, t in enumerate(sched_list):
-            ti = Input(value=str(t), id=f"sched_{i}")
+            ti = Input(value=str(t), id=f"sched_{i}__{self._form_rev}")
             self.sched_inputs.append(ti)
-            self.form.mount(Horizontal(Label("时间"), ti, Button("删除", id=f"del_sched__{i}"), Static("", classes="cfg_spacer"), classes="cfg_row"))
-        self.form.mount(Horizontal(Button("＋ 添加时间", id="add_sched"), classes="toolbar"))
+            self.form.mount(Horizontal(Label("时间"), ti, Button("删除", id=f"del_sched__{i}__{self._form_rev}"), Static("", classes="cfg_spacer"), classes="cfg_row"))
+        self.form.mount(Horizontal(Button("＋ 添加时间", id=f"add_sched__{self._form_rev}"), classes="toolbar"))
 
         # 管理员（username/password 列表）
         self.form.mount(Static("管理员(admins) - 用户名/密码(支持 sha256: 前缀)", classes="title"))
@@ -807,17 +962,47 @@ class GroupConfigPage(Vertical):
         if not isinstance(admins, list):
             admins = []
         for i, adm in enumerate(admins):
-            u = Input(value=str((adm or {}).get("username", "")), id=f"admin_u_{i}")
-            p = Input(value=str((adm or {}).get("password", "")), id=f"admin_p_{i}")
+            u = Input(value=str((adm or {}).get("username", "")), id=f"admin_u_{i}__{self._form_rev}")
+            p = Input(value=str((adm or {}).get("password", "")), id=f"admin_p_{i}__{self._form_rev}")
             self.admin_pairs.append((u, p))
-            self.form.mount(Horizontal(Label("用户名"), u, Label("密码"), p, Button("删除", id=f"del_admin__{i}"), Static("", classes="cfg_spacer"), classes="cfg_row"))
-        self.form.mount(Horizontal(Button("＋ 添加管理员", id="add_admin"), classes="toolbar"))
+            self.form.mount(Horizontal(Label("用户名"), u, Label("密码"), p, Button("删除", id=f"del_admin__{i}__{self._form_rev}"), Static("", classes="cfg_spacer"), classes="cfg_row"))
+        self.form.mount(Horizontal(Button("＋ 添加管理员", id=f"add_admin__{self._form_rev}"), classes="toolbar"))
 
     # ---------- 事件 ----------
     async def on_mount(self) -> None:
         self._load_data()
         self._render_topbar()
         self._render_form()
+
+    async def on_input_submitted(self, event: Input.Submitted) -> None:
+        bid = event.input.id or ""
+        # 在新建组模式下，回车等同于点击“确认”
+        if self._adding_group and bid.startswith("new_group_name__"):
+            # 触发确认逻辑
+            name = (event.value or "").strip()
+            if not name:
+                self.app.notify("组名不能为空。", severity="error")
+                return
+            if not all(c.isalnum() or c == '_' for c in name):
+                self.app.notify("组名仅允许字母、数字和下划线。", severity="error")
+                return
+            if name in self.data:
+                self.app.notify("组名已存在。", severity="error")
+                return
+            self._harvest_form()
+            self.data[name] = {
+                "mangroupid":"",
+                "mainqqid":"","mainqq_http_port":"",
+                "minorqqid":[],"minorqq_http_port":[],
+                "admins":[],"max_post_stack":"3","max_image_number_one_post":"18",
+                "friend_add_message":"","watermark_text":"",
+                "quick_replies":{}
+            }
+            self.current_group = name
+            self._adding_group = False
+            self._render_topbar()
+            self._render_form()
+            return
 
     def _harvest_form(self) -> None:
         if not self.current_group or self.current_group not in self.data:
@@ -990,15 +1175,37 @@ class GroupConfigPage(Vertical):
             self._harvest_form()
             self._save_data()
             return
-        if bid == "add_group":
-            # 先收集当前表单
+        if bid.startswith("add_group"):
+            # 进入新建模式：展示输入 + 确认/取消
+            self._adding_group = True
+            self._deleting_group = False
+            self._render_topbar()
+            return
+        if bid.startswith("cancel_add_group"):
+            self._adding_group = False
+            self._render_topbar()
+            return
+        if bid.startswith("confirm_add_group"):
+            # 读取输入的新组名
+            name = ""
+            try:
+                if isinstance(self._new_group_input, Input):
+                    name = (self._new_group_input.value or "").strip()
+            except Exception:
+                name = ""
+            if not name:
+                self.app.notify("组名不能为空。", severity="error")
+                return
+            # 校验：仅允许字母/数字/下划线
+            if not all(c.isalnum() or c == '_' for c in name):
+                self.app.notify("组名仅允许字母、数字和下划线。", severity="error")
+                return
+            if name in self.data:
+                self.app.notify("组名已存在。", severity="error")
+                return
+            # 创建组
             self._harvest_form()
-            base = "NewGroup"
-            n = 1
-            while f"{base}{n}" in self.data:
-                n += 1
-            key = f"{base}{n}"
-            self.data[key] = {
+            self.data[name] = {
                 "mangroupid":"",
                 "mainqqid":"","mainqq_http_port":"",
                 "minorqqid":[],"minorqq_http_port":[],
@@ -1006,17 +1213,52 @@ class GroupConfigPage(Vertical):
                 "friend_add_message":"","watermark_text":"",
                 "quick_replies":{}
             }
-            self.current_group = key
+            self.current_group = name
+            self._adding_group = False
             self._render_topbar()
             self._render_form()
             return
         if bid.startswith("group_select__"):
             self._harvest_form()
-            self.current_group = bid.split("__",1)[1]
+            try:
+                self.current_group = bid.split("__")[1]
+            except Exception:
+                self.current_group = bid.replace("group_select__","",1)
+            self._adding_group = False
+            self._deleting_group = False
             self._render_topbar()
             self._render_form()
             return
-        if bid == "add_minor":
+        if bid.startswith("delete_group"):
+            if not self.current_group:
+                self.app.notify("没有选择任何组。", severity="warning")
+                return
+            # 进入确认删除模式
+            self._deleting_group = True
+            self._adding_group = False
+            self._render_topbar()
+            return
+        if bid.startswith("cancel_delete_group"):
+            self._deleting_group = False
+            self._render_topbar()
+            return
+        if bid.startswith("confirm_delete_group"):
+            if not self.current_group:
+                self._deleting_group = False
+                self._render_topbar()
+                return
+            g = self.current_group
+            # 删除并选择下一个组
+            try:
+                self.data.pop(g, None)
+            except Exception:
+                pass
+            self.current_group = next(iter(self.data.keys()), None)
+            self._deleting_group = False
+            self._render_topbar()
+            self._render_form()
+            return
+        if bid.startswith("add_minor"):
             self._harvest_form()
             obj = self.data.get(self.current_group, {})
             obj.setdefault("minorqqid", []).append("")
@@ -1025,7 +1267,8 @@ class GroupConfigPage(Vertical):
             return
         if bid.startswith("del_minor__"):
             self._harvest_form()
-            idx = int(bid.split("__",1)[1])
+            parts = bid.split("__")
+            idx = int(parts[1]) if len(parts) > 1 else -1
             obj = self.data.get(self.current_group, {})
             qqs = obj.get("minorqqid", [])
             pts = obj.get("minorqq_http_port", [])
@@ -1036,7 +1279,7 @@ class GroupConfigPage(Vertical):
             obj["minorqqid"], obj["minorqq_http_port"] = qqs, pts
             self._render_form()
             return
-        if bid == "add_qr":
+        if bid.startswith("add_qr"):
             self._harvest_form()
             obj = self.data.get(self.current_group, {})
             qrd = obj.get("quick_replies", {})
@@ -1052,7 +1295,8 @@ class GroupConfigPage(Vertical):
             return
         if bid.startswith("del_qr__"):
             self._harvest_form()
-            idx = int(bid.split("__",1)[1])
+            parts = bid.split("__")
+            idx = int(parts[1]) if len(parts) > 1 else -1
             obj = self.data.get(self.current_group, {})
             qrd = obj.get("quick_replies", {})
             items = list(qrd.items())
@@ -1062,7 +1306,7 @@ class GroupConfigPage(Vertical):
             obj["quick_replies"] = qrd
             self._render_form()
             return
-        if bid == "add_sched":
+        if bid.startswith("add_sched"):
             self._harvest_form()
             obj = self.data.get(self.current_group, {})
             lst = obj.get("send_schedule") or []
@@ -1074,7 +1318,8 @@ class GroupConfigPage(Vertical):
             return
         if bid.startswith("del_sched__"):
             self._harvest_form()
-            idx = int(bid.split("__",1)[1])
+            parts = bid.split("__")
+            idx = int(parts[1]) if len(parts) > 1 else -1
             obj = self.data.get(self.current_group, {})
             lst = obj.get("send_schedule") or []
             if isinstance(lst, list) and 0 <= idx < len(lst):
@@ -1082,7 +1327,7 @@ class GroupConfigPage(Vertical):
             obj["send_schedule"] = lst
             self._render_form()
             return
-        if bid == "add_admin":
+        if bid.startswith("add_admin"):
             self._harvest_form()
             obj = self.data.get(self.current_group, {})
             admins = obj.get("admins") or []
@@ -1094,7 +1339,8 @@ class GroupConfigPage(Vertical):
             return
         if bid.startswith("del_admin__"):
             self._harvest_form()
-            idx = int(bid.split("__",1)[1])
+            parts = bid.split("__")
+            idx = int(parts[1]) if len(parts) > 1 else -1
             obj = self.data.get(self.current_group, {})
             admins = obj.get("admins") or []
             if isinstance(admins, list) and 0 <= idx < len(admins):
@@ -1315,6 +1561,8 @@ class OQQWallTUI(App):
     #log_selector { height: 10; }
     #global_cfg_form { height: 1fr; width: 1fr; }
     #group_topbar { height: auto; padding: 0 1; }
+    #group_topbar Input { width: 28; min-width: 16; }
+    #group_topbar Button { width: auto; }
     #group_form { height: 1fr; }
     """
 
