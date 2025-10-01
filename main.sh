@@ -161,9 +161,6 @@ ensure_system_packages() {
         [perl]=perl
         [pkill]=procps
       )
-      if command -v pkg >/dev/null 2>&1; then
-        pkg update -y || true
-      fi
       ;;
     arch)
       pkgmap=(
@@ -174,13 +171,6 @@ ensure_system_packages() {
         [perl]=perl
         [pkill]=procps-ng
       )
-      if command -v pacman >/dev/null 2>&1; then
-        if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
-          "${SUDO_CMD[@]}" pacman -Sy --noconfirm || true
-        else
-          echo "[WARN] 无 root/sudo 权限，跳过 pacman -Sy。"
-        fi
-      fi
       ;;
     debian|ubuntu)
       pkgmap=(
@@ -191,13 +181,6 @@ ensure_system_packages() {
         [perl]=perl
         [pkill]=procps
       )
-      if command -v apt-get >/dev/null 2>&1; then
-        if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
-          "${SUDO_CMD[@]}" apt-get update -y || true
-        else
-          echo "[WARN] 无 root/sudo 权限，跳过 apt-get update。"
-        fi
-      fi
       ;;
     fedora|rhel|centos)
       pkgmap=(
@@ -317,6 +300,8 @@ ensure_system_packages() {
     case "$PKG_MGR" in
       apt)
         if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+          # 仅在确有缺失包时更新仓库索引
+          "${SUDO_CMD[@]}" apt-get update -y || true
           "${SUDO_CMD[@]}" apt-get install -y "${to_install[@]}" || true
         else
           echo "[WARN] 无 root/sudo 权限，无法自动安装: ${to_install[*]}"
@@ -324,6 +309,8 @@ ensure_system_packages() {
         ;;
       pacman)
         if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+          # 仅在确有缺失包时同步仓库
+          "${SUDO_CMD[@]}" pacman -Sy --noconfirm || true
           "${SUDO_CMD[@]}" pacman -S --noconfirm --needed "${to_install[@]}" || true
         else
           echo "[WARN] 无 root/sudo 权限，无法自动安装: ${to_install[*]}"
@@ -347,15 +334,52 @@ ensure_system_packages() {
         if ! command -v brew >/dev/null 2>&1; then
           echo "[WARN] 未检测到 Homebrew。请安装后再运行: https://brew.sh"
         else
+          # 仅在确有缺失包时更新索引
           brew update || true
           brew install "${to_install[@]}" || true
         fi
         ;;
       pkg)
+        # 仅在确有缺失包时更新索引
+        if command -v pkg >/dev/null 2>&1; then
+          pkg update -y || true
+        fi
         pkg install -y "${to_install[@]}" || true
         ;;
       *) ;;
     esac
+  fi
+
+  # Ubuntu: 优先安装 Google Chrome（不安装 chromium），仅在未检测到可用浏览器时尝试
+  if [[ "$OS_FLAVOR" == "ubuntu" ]]; then
+    if ! command -v google-chrome-stable >/dev/null 2>&1 && \
+       ! command -v chromium-browser   >/dev/null 2>&1 && \
+       ! command -v chromium           >/dev/null 2>&1; then
+      echo "[INFO] 未检测到 Chrome/Chromium，可为 Ubuntu 配置官方 Google Chrome 仓库并安装。"
+      if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+        # 需要 gnupg 以导入 key
+        if ! command -v gpg >/dev/null 2>&1; then
+          echo "[INFO] 安装 gnupg 以导入 Google key"
+          "${SUDO_CMD[@]}" apt-get install -y gnupg >/dev/null 2>&1 || true
+        fi
+        arch=$(dpkg --print-architecture 2>/dev/null || echo amd64)
+        echo "[INFO] 配置 Google Chrome APT 源 (arch=${arch})"
+        if curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | "${SUDO_CMD[@]}" gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg 2>/dev/null; then
+          echo "deb [arch=${arch} signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" | \
+            "${SUDO_CMD[@]}" tee /etc/apt/sources.list.d/google-chrome.list >/dev/null
+          "${SUDO_CMD[@]}" apt-get update -y || true
+          echo "[INFO] 安装 google-chrome-stable"
+          "${SUDO_CMD[@]}" apt-get install -y google-chrome-stable || true
+        else
+          echo "[WARN] 无法导入 Google Chrome 签名 key，跳过自动安装。"
+        fi
+      else
+        echo "[HINT] Ubuntu 上建议安装官方 Chrome 而非 chromium。手动执行："
+        echo "       curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg"
+        echo "       echo \"deb [arch=$(dpkg --print-architecture 2>/dev/null || echo amd64) signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main\" | sudo tee /etc/apt/sources.list.d/google-chrome.list"
+        echo "       sudo apt-get update && sudo apt-get install -y google-chrome-stable"
+      fi
+    fi
   fi
 
   # 如果需要 xvfb 且缺失，则尝试安装
