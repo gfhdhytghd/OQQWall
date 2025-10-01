@@ -1063,14 +1063,14 @@ else
     echo "serv.py started"
 fi
 
-if pgrep -f "python3 SendQzone/qzone-serv-pipe.py" > /dev/null
+if pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" > /dev/null
 then
     echo "qzone-serv-pipe.py is already running"
 else
     if [[ $1 == --test ]]; then
       echo "请自行启动测试服务器"
     else
-      python3 SendQzone/qzone-serv-pipe.py &
+      python3 ./SendQzone/qzone-serv-pipe.py &
       echo "qzone-serv-pipe.py started"
     fi
 fi
