@@ -248,11 +248,29 @@ ensure_system_packages() {
 
   if [[ "$PKG_MGR" == "apt" ]]; then
     if (( need_venv_pkg )); then
+      # Debian/Ubuntu 有的版本需要安装版本化的 venv 包（如 python3.13-venv）
+      # 先优选版本化名称，若不可用则回退到 python3-venv
+      local candidate="${venv_pkg_by_version}"
+      local chosen=""
+      if [[ -n "$candidate" ]]; then
+        if apt-cache show "$candidate" >/dev/null 2>&1; then
+          chosen="$candidate"
+        fi
+      fi
+      if [[ -z "$chosen" ]]; then
+        if apt-cache show python3-venv >/dev/null 2>&1; then
+          chosen="python3-venv"
+        else
+          # 两者都无法通过探测，仍然优先尝试版本化名
+          chosen="${candidate:-python3-venv}"
+        fi
+      fi
+      echo "[INFO] 检测到 python3 -m venv 不可用，APT 将安装: $chosen"
       local found=0
       for existing in "${to_install[@]}"; do
-        [[ "$existing" == "python3-venv" ]] && found=1 && break
+        [[ "$existing" == "$chosen" ]] && found=1 && break
       done
-      (( found == 0 )) && to_install+=(python3-venv)
+      (( found == 0 )) && to_install+=("$chosen")
     fi
     if (( need_pip_pkg )); then
       local found=0
