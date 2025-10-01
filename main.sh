@@ -295,6 +295,52 @@ ensure_system_packages() {
   fi
   # macOS: brew 的 python 自带 venv
 
+  # Perl URI::Escape 模块检测（用于 Shell 中 URI 编码）
+  local need_perl_uri=0
+  if command -v perl >/dev/null 2>&1; then
+    if ! perl -MURI::Escape -e 1 >/dev/null 2>&1; then
+      need_perl_uri=1
+    fi
+  fi
+
+  # 各发行版对应包名/安装策略
+  if (( need_perl_uri )); then
+    case "$PKG_MGR" in
+      apt)
+        # Debian/Ubuntu
+        local found=0
+        for existing in "${to_install[@]}"; do
+          [[ "$existing" == "liburi-perl" ]] && found=1 && break
+        done
+        (( found == 0 )) && to_install+=(liburi-perl)
+        ;;
+      pacman)
+        # Arch 系
+        local found=0
+        for existing in "${to_install[@]}"; do
+          [[ "$existing" == "perl-uri" ]] && found=1 && break
+        done
+        (( found == 0 )) && to_install+=(perl-uri)
+        ;;
+      dnf|yum)
+        # Fedora/RHEL/CentOS
+        local found=0
+        for existing in "${to_install[@]}"; do
+          [[ "$existing" == "perl-URI" ]] && found=1 && break
+        done
+        (( found == 0 )) && to_install+=(perl-URI)
+        ;;
+      brew)
+        # Homebrew 无独立 perl-URI 包，后续用 cpanminus 安装 URI 模块
+        :
+        ;;
+      pkg)
+        # Termux 可能没有独立 perl-URI 包，后续尝试 cpanminus
+        :
+        ;;
+    esac
+  fi
+
   if (( ${#to_install[@]} > 0 )); then
     echo "[INFO] 正在安装系统依赖: ${to_install[*]}"
     case "$PKG_MGR" in
@@ -348,6 +394,48 @@ ensure_system_packages() {
         ;;
       *) ;;
     esac
+  fi
+
+  # 安装后，若仍缺少 Perl 的 URI::Escape（Homebrew/Termux 常见），尝试使用 cpanminus 安装
+  if (( need_perl_uri )); then
+    if command -v perl >/dev/null 2>&1 && ! perl -MURI::Escape -e 1 >/dev/null 2>&1; then
+      case "$PKG_MGR" in
+        brew)
+          if command -v brew >/dev/null 2>&1; then
+            brew install cpanminus || true
+            if command -v cpanm >/dev/null 2>&1; then
+              cpanm --notest URI || true
+            fi
+          fi
+          ;;
+        pkg)
+          if command -v pkg >/dev/null 2>&1; then
+            pkg install -y cpanminus || true
+          fi
+          if command -v cpanm >/dev/null 2>&1; then
+            cpanm --notest URI || true
+          else
+            # 兜底安装 cpanminus（不要求 root，安装到用户目录）
+            curl -fsSL https://cpanmin.us | perl - App::cpanminus 2>/dev/null || true
+            if command -v cpanm >/dev/null 2>&1; then
+              cpanm --notest URI || true
+            fi
+          fi
+          ;;
+      esac
+    fi
+    # 最终验证与提示
+    if command -v perl >/dev/null 2>&1 && ! perl -MURI::Escape -e 1 >/dev/null 2>&1; then
+      echo "[WARN] 仍缺少 Perl 模块 URI::Escape。请手动安装：" >&2
+      case "$PKG_MGR" in
+        apt)   echo "      sudo apt-get install -y liburi-perl" >&2 ;;
+        pacman)echo "      sudo pacman -S --needed perl-uri" >&2 ;;
+        dnf)   echo "      sudo dnf -y install perl-URI" >&2 ;;
+        yum)   echo "      sudo yum -y install perl-URI" >&2 ;;
+        brew)  echo "      brew install cpanminus && cpanm --notest URI" >&2 ;;
+        pkg)   echo "      pkg install cpanminus && cpanm --notest URI" >&2 ;;
+      esac
+    fi
   fi
 
   # Ubuntu: 优先安装 Google Chrome（不安装 chromium），仅在未检测到可用浏览器时尝试
