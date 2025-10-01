@@ -239,7 +239,8 @@ ensure_system_packages() {
   local venv_pkg_by_version=""
   command -v pip3 >/dev/null 2>&1 || need_pip_pkg=1
   if command -v python3 >/dev/null 2>&1; then
-    if ! python3 -m venv --help >/dev/null 2>&1; then
+    # 在 Debian/Ubuntu 上，仅检查 venv --help 可能不足；ensurepip 缺失也会导致创建失败
+    if ! python3 -c 'import venv, ensurepip' >/dev/null 2>&1; then
       need_venv_pkg=1
       venv_pkg_by_version=$(python3 -c 'import sys; print(f"python{sys.version_info.major}.{sys.version_info.minor}-venv")' 2>/dev/null || true)
       venv_pkg_by_version=${venv_pkg_by_version//$'\n'/}
@@ -1078,8 +1079,54 @@ else
     echo "虚拟环境不存在，正在创建新的Python虚拟环境..."
     python3 -m venv ./venv
     if [ $? -ne 0 ]; then
-        echo "创建虚拟环境失败，请确保已安装 Python 3."
-        exit 1
+        echo "创建虚拟环境失败，尝试自动修复 venv 依赖..."
+        # 尝试为 APT/DNF/YUM 系列自动安装对应 venv 包，然后重试
+        detect_platform
+        get_sudo
+        if [[ "$PKG_MGR" == "apt" || "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
+          # 计算版本化 venv 包名，如 python3.13-venv 或 python3.11-venv
+          venv_pkg_by_version=$(python3 -c 'import sys; print(f"python{sys.version_info.major}.{sys.version_info.minor}-venv")' 2>/dev/null || true)
+          venv_pkg_by_version=${venv_pkg_by_version//$'\n'/}
+          pkg_to_install=""
+          if [[ "$PKG_MGR" == "apt" ]]; then
+            candidate="$venv_pkg_by_version"
+            if [[ -n "$candidate" ]] && apt-cache show "$candidate" >/dev/null 2>&1; then
+              pkg_to_install="$candidate"
+            elif apt-cache show python3-venv >/dev/null 2>&1; then
+              pkg_to_install="python3-venv"
+            else
+              pkg_to_install="${candidate:-python3-venv}"
+            fi
+            echo "[INFO] APT 将安装: $pkg_to_install 以启用 python3 venv"
+            if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+              "${SUDO_CMD[@]}" apt-get install -y "$pkg_to_install" || true
+            else
+              echo "[HINT] 请运行: apt-get install -y $pkg_to_install"
+            fi
+          else
+            # dnf/yum
+            pkg_to_install="$venv_pkg_by_version"
+            echo "[INFO] ${PKG_MGR^^} 将安装: $pkg_to_install 以启用 python3 venv"
+            if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+              if [[ "$PKG_MGR" == "dnf" ]]; then
+                "${SUDO_CMD[@]}" dnf -y install "$pkg_to_install" || true
+              else
+                "${SUDO_CMD[@]}" yum -y install "$pkg_to_install" || true
+              fi
+            else
+              echo "[HINT] 请运行: $PKG_MGR -y install $pkg_to_install"
+            fi
+          fi
+          # 重试创建 venv
+          python3 -m venv ./venv
+          if [ $? -ne 0 ]; then
+            echo "创建虚拟环境仍失败。请手动安装 venv 组件后重试。"
+            exit 1
+          fi
+        else
+          echo "创建虚拟环境失败，请确保已安装 Python venv 组件。"
+          exit 1
+        fi
     fi
 
     # 激活新创建的虚拟环境
@@ -1093,7 +1140,7 @@ else
 
     # 升级 pip
     echo "正在升级 pip..."
-    pip install --upgrade pip
+    python -m pip install --upgrade pip
     if [ $? -ne 0 ]; then
         echo "升级 pip 失败."
         exit 1
@@ -1101,7 +1148,7 @@ else
 
     # 安装所需的包
     echo "正在安装所需的 Python 包..."
-    pip install dashscope bs4 httpx uvicorn fastapi pydantic requests regex pillow -i https://pypi.tuna.tsinghua.edu.cn/simple
+    python -m pip install dashscope bs4 httpx uvicorn fastapi pydantic requests regex pillow -i https://pypi.tuna.tsinghua.edu.cn/simple
     if [ $? -ne 0 ]; then
         echo "安装 Python 包失败."
         exit 1
