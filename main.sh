@@ -451,6 +451,23 @@ check_and_create() {
     fi
 }
 
+# 确保指定路径为命名管道（若存在且非管道则替换）
+ensure_named_pipe() {
+    local fifo_path="$1"
+    [[ -z "$fifo_path" ]] && return 1
+    local parent_dir
+    parent_dir=$(dirname -- "$fifo_path")
+    mkdir -p -- "$parent_dir"
+    if [[ -e "$fifo_path" && ! -p "$fifo_path" ]]; then
+        echo "检测到 $fifo_path 存在但不是命名管道，正在替换…"
+        rm -f -- "$fifo_path" || true
+    fi
+    if [[ ! -p "$fifo_path" ]]; then
+        mkfifo -- "$fifo_path" || { echo "创建命名管道失败: $fifo_path"; return 1; }
+        echo "已创建命名管道: $fifo_path"
+    fi
+}
+
 generate_random_token() {
   tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32
 }
@@ -1041,6 +1058,12 @@ if [[ ! -f "getmsgserv/all/priv_post.jsonl" ]]; then
     touch "getmsgserv/all/priv_post.jsonl"
     echo "已创建文件: getmsgserv/all/priv_post.jsonl"
 fi
+
+# 初始化命名管道（若已存在但类型错误则更正）
+ensure_named_pipe "./qzone_in_fifo"
+ensure_named_pipe "./qzone_out_fifo"
+ensure_named_pipe "./presend_in_fifo"
+ensure_named_pipe "./presend_out_fifo"
 if [[ ! -f "AcountGroupcfg.json" ]]; then
     if [[ -t 0 ]]; then
         echo "未检测到账户组配置文件，将启动账户组引导..."
