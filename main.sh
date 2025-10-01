@@ -234,18 +234,62 @@ ensure_system_packages() {
     fi
   done
 
-  # 额外为 Debian/Ubuntu 安装 python3-venv 和 python3-pip（若缺失）
+  local need_pip_pkg=0
+  local need_venv_pkg=0
+  local venv_pkg_by_version=""
+  command -v pip3 >/dev/null 2>&1 || need_pip_pkg=1
+  if command -v python3 >/dev/null 2>&1; then
+    if ! python3 -m venv --help >/dev/null 2>&1; then
+      need_venv_pkg=1
+      venv_pkg_by_version=$(python3 -c 'import sys; print(f"python{sys.version_info.major}.{sys.version_info.minor}-venv")' 2>/dev/null || true)
+      venv_pkg_by_version=${venv_pkg_by_version//$'\n'/}
+    fi
+  fi
+
   if [[ "$PKG_MGR" == "apt" ]]; then
-    python3 -m venv --help >/dev/null 2>&1 || to_install+=(python3-venv)
-    command -v pip3 >/dev/null 2>&1 || to_install+=(python3-pip)
+    if (( need_venv_pkg )); then
+      local found=0
+      for existing in "${to_install[@]}"; do
+        [[ "$existing" == "python3-venv" ]] && found=1 && break
+      done
+      (( found == 0 )) && to_install+=(python3-venv)
+    fi
+    if (( need_pip_pkg )); then
+      local found=0
+      for existing in "${to_install[@]}"; do
+        [[ "$existing" == "python3-pip" ]] && found=1 && break
+      done
+      (( found == 0 )) && to_install+=(python3-pip)
+    fi
   fi
-  # 为 Arch 安装 pip（若缺失）
+
   if [[ "$PKG_MGR" == "pacman" ]]; then
-    command -v pip >/dev/null 2>&1 || to_install+=(python-pip)
+    if (( need_pip_pkg )); then
+      local found=0
+      for existing in "${to_install[@]}"; do
+        [[ "$existing" == "python-pip" ]] && found=1 && break
+      done
+      (( found == 0 )) && to_install+=(python-pip)
+    fi
   fi
-  # 为 DNF/YUM 系列安装 pip（若缺失）
+
   if [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
-    command -v pip3 >/dev/null 2>&1 || to_install+=(python3-pip)
+    if (( need_pip_pkg )); then
+      local found=0
+      for existing in "${to_install[@]}"; do
+        [[ "$existing" == "python3-pip" ]] && found=1 && break
+      done
+      (( found == 0 )) && to_install+=(python3-pip)
+    fi
+    if (( need_venv_pkg )); then
+      if [[ -n "$venv_pkg_by_version" ]]; then
+        local found=0
+        for existing in "${to_install[@]}"; do
+          [[ "$existing" == "$venv_pkg_by_version" ]] && found=1 && break
+        done
+        (( found == 0 )) && to_install+=("$venv_pkg_by_version")
+      fi
+    fi
   fi
   # macOS: brew 的 python 自带 venv
 
