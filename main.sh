@@ -80,31 +80,32 @@ detect_platform() {
 }
 
 # 获取 sudo（如可用）
+declare -a SUDO_CMD=()
 get_sudo() {
+  SUDO_CMD=()
   # root 不需要前缀
   if [[ $(id -u) -eq 0 ]]; then
-    echo ""
-    return
+    return 0
   fi
   # 优先 sudo 且支持非交互 -n
   if command -v sudo >/dev/null 2>&1; then
     if sudo -n true >/dev/null 2>&1; then
-      echo "sudo -n"
-      return
+      SUDO_CMD=(sudo -n)
+      return 0
     fi
     # 无 -n 能力或需要密码：若是交互式终端，允许弹出密码框
     if [[ -t 0 ]]; then
-      echo "sudo"
-      return
+      SUDO_CMD=(sudo)
+      return 0
     fi
   fi
   # OpenBSD/部分系统使用 doas
   if command -v doas >/dev/null 2>&1; then
-    echo "doas"
-    return
+    SUDO_CMD=(doas)
+    return 0
   fi
   # 无提权工具
-  echo ""
+  return 0
 }
 
 # 在某些发行版没有 xvfb-run（仅有 Xvfb）时，创建一个简单的兼容包装
@@ -139,7 +140,7 @@ SH
 # 根据发行版安装所需系统包
 ensure_system_packages() {
   detect_platform
-  local sudo_cmd; sudo_cmd=$(get_sudo)
+  get_sudo
 
   # 需要的命令 -> 包名映射，由各发行版填充
   declare -A pkgmap
@@ -174,7 +175,11 @@ ensure_system_packages() {
         [pkill]=procps-ng
       )
       if command -v pacman >/dev/null 2>&1; then
-        $sudo_cmd pacman -Sy --noconfirm || true
+        if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+          "${SUDO_CMD[@]}" pacman -Sy --noconfirm || true
+        else
+          echo "[WARN] 无 root/sudo 权限，跳过 pacman -Sy。"
+        fi
       fi
       ;;
     debian|ubuntu)
@@ -187,7 +192,11 @@ ensure_system_packages() {
         [pkill]=procps
       )
       if command -v apt-get >/dev/null 2>&1; then
-        $sudo_cmd apt-get update -y || true
+        if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+          "${SUDO_CMD[@]}" apt-get update -y || true
+        else
+          echo "[WARN] 无 root/sudo 权限，跳过 apt-get update。"
+        fi
       fi
       ;;
     fedora|rhel|centos)
@@ -244,29 +253,29 @@ ensure_system_packages() {
     echo "[INFO] 正在安装系统依赖: ${to_install[*]}"
     case "$PKG_MGR" in
       apt)
-        if [[ -n "$sudo_cmd" || $(id -u) -eq 0 ]]; then
-          $sudo_cmd apt-get install -y "${to_install[@]}" || true
+        if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+          "${SUDO_CMD[@]}" apt-get install -y "${to_install[@]}" || true
         else
           echo "[WARN] 无 root/sudo 权限，无法自动安装: ${to_install[*]}"
         fi
         ;;
       pacman)
-        if [[ -n "$sudo_cmd" || $(id -u) -eq 0 ]]; then
-          $sudo_cmd pacman -S --noconfirm --needed "${to_install[@]}" || true
+        if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+          "${SUDO_CMD[@]}" pacman -S --noconfirm --needed "${to_install[@]}" || true
         else
           echo "[WARN] 无 root/sudo 权限，无法自动安装: ${to_install[*]}"
         fi
         ;;
       dnf)
-        if [[ -n "$sudo_cmd" || $(id -u) -eq 0 ]]; then
-          $sudo_cmd dnf -y install "${to_install[@]}" || true
+        if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+          "${SUDO_CMD[@]}" dnf -y install "${to_install[@]}" || true
         else
           echo "[WARN] 无 root/sudo 权限，无法自动安装: ${to_install[*]}"
         fi
         ;;
       yum)
-        if [[ -n "$sudo_cmd" || $(id -u) -eq 0 ]]; then
-          $sudo_cmd yum -y install "${to_install[@]}" || true
+        if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+          "${SUDO_CMD[@]}" yum -y install "${to_install[@]}" || true
         else
           echo "[WARN] 无 root/sudo 权限，无法自动安装: ${to_install[*]}"
         fi
@@ -292,16 +301,32 @@ ensure_system_packages() {
     if ! command -v xvfb-run >/dev/null 2>&1 && ! command -v Xvfb >/dev/null 2>&1; then
       case "$PKG_MGR" in
         apt)
-          $sudo_cmd apt-get install -y xvfb || true
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            "${SUDO_CMD[@]}" apt-get install -y xvfb || true
+          else
+            echo "[WARN] 无 root/sudo 权限，无法自动安装 xvfb。"
+          fi
           ;;
         pacman)
-          $sudo_cmd pacman -S --noconfirm --needed xorg-server-xvfb || true
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            "${SUDO_CMD[@]}" pacman -S --noconfirm --needed xorg-server-xvfb || true
+          else
+            echo "[WARN] 无 root/sudo 权限，无法自动安装 xorg-server-xvfb。"
+          fi
           ;;
         dnf)
-          $sudo_cmd dnf -y install xorg-x11-server-Xvfb || true
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            "${SUDO_CMD[@]}" dnf -y install xorg-x11-server-Xvfb || true
+          else
+            echo "[WARN] 无 root/sudo 权限，无法自动安装 Xvfb。"
+          fi
           ;;
         yum)
-          $sudo_cmd yum -y install xorg-x11-server-Xvfb || true
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            "${SUDO_CMD[@]}" yum -y install xorg-x11-server-Xvfb || true
+          else
+            echo "[WARN] 无 root/sudo 权限，无法自动安装 Xvfb。"
+          fi
           ;;
         brew)
           if command -v brew >/dev/null 2>&1; then
