@@ -5,6 +5,286 @@ umask 027
 
 CFG='./oqqwall.config'
 
+# ----------------------------
+# 平台检测与系统依赖自动修复
+# ----------------------------
+detect_platform() {
+  OS_KERNEL=$(uname -s 2>/dev/null || echo unknown)
+  OS_ID=""; OS_VERSION_ID=""; OS_ID_LIKE=""; OS_PRETTY=""; PKG_MGR=""; OS_FLAVOR=""
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck disable=SC1091
+    . /etc/os-release
+    OS_ID=${ID:-}
+    OS_VERSION_ID=${VERSION_ID:-}
+    OS_ID_LIKE=${ID_LIKE:-}
+    OS_PRETTY=${PRETTY_NAME:-}
+  fi
+
+  # Termux 检测
+  if [[ -n ${PREFIX:-} && ${PREFIX} == */com.termux/* ]]; then
+    OS_FLAVOR="termux"
+    PKG_MGR="pkg"
+    return
+  fi
+
+  case "$OS_KERNEL" in
+    Darwin)
+      OS_FLAVOR="macos"
+      PKG_MGR="brew"
+      ;;
+    Linux)
+      case "$OS_ID" in
+        arch|endeavouros|manjaro)
+          OS_FLAVOR="arch"
+          PKG_MGR="pacman"
+          ;;
+        debian|raspbian)
+          OS_FLAVOR="debian"
+          PKG_MGR="apt"
+          ;;
+        ubuntu|linuxmint|pop)
+          OS_FLAVOR="ubuntu"
+          PKG_MGR="apt"
+          ;;
+        fedora)
+          OS_FLAVOR="fedora"
+          PKG_MGR="dnf"
+          ;;
+        rhel)
+          OS_FLAVOR="rhel"
+          # RHEL9+ 推荐 dnf
+          if command -v dnf >/dev/null 2>&1; then PKG_MGR="dnf"; else PKG_MGR="yum"; fi
+          ;;
+        centos)
+          OS_FLAVOR="centos"
+          if command -v dnf >/dev/null 2>&1; then PKG_MGR="dnf"; else PKG_MGR="yum"; fi
+          ;;
+        * )
+          # 尝试通过 ID_LIKE 归类
+          if [[ ${OS_ID_LIKE} == *"arch"* ]]; then
+            OS_FLAVOR="arch"; PKG_MGR="pacman"
+          elif [[ ${OS_ID_LIKE} == *"debian"* ]]; then
+            OS_FLAVOR="debian"; PKG_MGR="apt"
+          elif [[ ${OS_ID_LIKE} == *"rhel"* || ${OS_ID_LIKE} == *"fedora"* ]]; then
+            OS_FLAVOR="rhel"; if command -v dnf >/dev/null 2>&1; then PKG_MGR="dnf"; else PKG_MGR="yum"; fi
+          else
+            OS_FLAVOR="unknown"
+          fi
+          ;;
+      esac
+      ;;
+    *)
+      OS_FLAVOR="unknown"
+      ;;
+  esac
+}
+
+# 获取 sudo（如可用）
+get_sudo() {
+  if [[ $(id -u) -eq 0 ]]; then
+    echo ""
+  elif command -v sudo >/dev/null 2>&1; then
+    echo "sudo -n"
+  else
+    echo ""
+  fi
+}
+
+# 在某些发行版没有 xvfb-run（仅有 Xvfb）时，创建一个简单的兼容包装
+maybe_create_xvfb_run_shim() {
+  if command -v xvfb-run >/dev/null 2>&1; then
+    return 0
+  fi
+  if command -v Xvfb >/dev/null 2>&1; then
+    mkdir -p ./.local/bin
+    cat > ./.local/bin/xvfb-run <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+# 仅实现最基本的: xvfb-run [-a] <cmd...>
+display=99
+if [[ ${1:-} == "-a" ]]; then shift; fi
+XVFB_BIN=${XVFB_BIN:-Xvfb}
+"${XVFB_BIN}" :${display} -screen 0 1024x768x24 >/dev/null 2>&1 &
+XVFB_PID=$!
+trap 'kill ${XVFB_PID} >/dev/null 2>&1 || true' EXIT
+export DISPLAY=:${display}
+exec "$@"
+SH
+    chmod +x ./.local/bin/xvfb-run
+    case ":$PATH:" in
+      *":$(pwd)/.local/bin:"*) :;;
+      *) export PATH="$(pwd)/.local/bin:$PATH";;
+    esac
+    echo "[INFO] 已创建本地 xvfb-run 包装脚本（使用 Xvfb）。"
+  fi
+}
+
+# 根据发行版安装所需系统包
+ensure_system_packages() {
+  detect_platform
+  local sudo_cmd; sudo_cmd=$(get_sudo)
+
+  # 需要的命令 -> 包名映射，由各发行版填充
+  declare -A pkgmap
+
+  # 通用命令检查列表（命令名）
+  local cmds=(jq sqlite3 python3 curl perl pkill)
+
+  # 追加 xvfb-run（仅在内部管理 NapCat 时需要），在调用处按需处理
+
+  case "$OS_FLAVOR" in
+    termux)
+      # Termux: pkg
+      pkgmap=(
+        [jq]=jq
+        [sqlite3]=sqlite
+        [python3]=python
+        [curl]=curl
+        [perl]=perl
+        [pkill]=procps
+      )
+      if command -v pkg >/dev/null 2>&1; then
+        $sudo_cmd pkg update -y || true
+      fi
+      ;;
+    arch)
+      pkgmap=(
+        [jq]=jq
+        [sqlite3]=sqlite
+        [python3]=python
+        [curl]=curl
+        [perl]=perl
+        [pkill]=procps-ng
+      )
+      if command -v pacman >/dev/null 2>&1; then
+        $sudo_cmd pacman -Sy --noconfirm || true
+      fi
+      ;;
+    debian|ubuntu)
+      pkgmap=(
+        [jq]=jq
+        [sqlite3]=sqlite3
+        [python3]=python3
+        [curl]=curl
+        [perl]=perl
+        [pkill]=procps
+      )
+      if command -v apt-get >/dev/null 2>&1; then
+        $sudo_cmd apt-get update -y || true
+      fi
+      ;;
+    fedora|rhel|centos)
+      pkgmap=(
+        [jq]=jq
+        [sqlite3]=sqlite
+        [python3]=python3
+        [curl]=curl
+        [perl]=perl
+        [pkill]=procps-ng
+      )
+      ;;
+    macos)
+      pkgmap=(
+        [jq]=jq
+        [sqlite3]=sqlite
+        [python3]=python
+        [curl]=curl
+        [perl]=perl
+        [pkill]=""  # macOS 自带 pkill
+      )
+      ;;
+    *)
+      echo "[WARN] 未识别的系统，跳过系统包自动修复。"
+      return 0
+      ;;
+  esac
+
+  # 组装待安装包
+  local to_install=()
+  for c in "${cmds[@]}"; do
+    if ! command -v "$c" >/dev/null 2>&1; then
+      pkg=${pkgmap[$c]:-}
+      [[ -n $pkg ]] && to_install+=("$pkg")
+    fi
+  done
+
+  # 额外为 Debian/Ubuntu 安装 python3-venv 和 python3-pip（若缺失）
+  if [[ "$PKG_MGR" == "apt" ]]; then
+    python3 -m venv --help >/dev/null 2>&1 || to_install+=(python3-venv)
+    command -v pip3 >/dev/null 2>&1 || to_install+=(python3-pip)
+  fi
+  # 为 Arch 安装 pip（若缺失）
+  if [[ "$PKG_MGR" == "pacman" ]]; then
+    command -v pip >/dev/null 2>&1 || to_install+=(python-pip)
+  fi
+  # 为 DNF/YUM 系列安装 pip（若缺失）
+  if [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]]; then
+    command -v pip3 >/dev/null 2>&1 || to_install+=(python3-pip)
+  fi
+  # macOS: brew 的 python 自带 venv
+
+  if (( ${#to_install[@]} > 0 )); then
+    echo "[INFO] 正在安装系统依赖: ${to_install[*]}"
+    case "$PKG_MGR" in
+      apt)
+        $sudo_cmd apt-get install -y "${to_install[@]}" || true
+        ;;
+      pacman)
+        $sudo_cmd pacman -S --noconfirm --needed "${to_install[@]}" || true
+        ;;
+      dnf)
+        $sudo_cmd dnf -y install "${to_install[@]}" || true
+        ;;
+      yum)
+        $sudo_cmd yum -y install "${to_install[@]}" || true
+        ;;
+      brew)
+        if ! command -v brew >/dev/null 2>&1; then
+          echo "[WARN] 未检测到 Homebrew。请安装后再运行: https://brew.sh"
+        else
+          brew update || true
+          brew install "${to_install[@]}" || true
+        fi
+        ;;
+      pkg)
+        $sudo_cmd pkg install -y "${to_install[@]}" || true
+        ;;
+      *) ;;
+    esac
+  fi
+
+  # 如果需要 xvfb 且缺失，则尝试安装
+  local need_xvfb=${1:-false}
+  if [[ "$need_xvfb" == "true" ]]; then
+    if ! command -v xvfb-run >/dev/null 2>&1 && ! command -v Xvfb >/dev/null 2>&1; then
+      case "$PKG_MGR" in
+        apt)
+          $sudo_cmd apt-get install -y xvfb || true
+          ;;
+        pacman)
+          $sudo_cmd pacman -S --noconfirm --needed xorg-server-xvfb || true
+          ;;
+        dnf)
+          $sudo_cmd dnf -y install xorg-x11-server-Xvfb || true
+          ;;
+        yum)
+          $sudo_cmd yum -y install xorg-x11-server-Xvfb || true
+          ;;
+        brew)
+          if command -v brew >/dev/null 2>&1; then
+            brew install xorg-server || true
+          fi
+          ;;
+        pkg)
+          echo "[WARN] Termux 不提供 xvfb，已跳过安装。"
+          ;;
+      esac
+    fi
+    # 仍无 xvfb-run，但有 Xvfb，则创建本地兼容脚本
+    maybe_create_xvfb_run_shim
+  fi
+}
+
 # 函数：检测文件或目录是否存在，不存在则创建
 check_and_create() {
     local path=$1
@@ -28,6 +308,46 @@ check_and_create() {
 
 generate_random_token() {
   tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32
+}
+
+# 端口占用检测与建议
+is_port_in_use() {
+  local port="$1"
+  # 优先 ss
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn 2>/dev/null | awk '{print $4}' | grep -E "[:\.]${port}	?$|[:\.]${port}$" -q && return 0
+  fi
+  # 其次 lsof
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 && return 0
+  fi
+  # 其次 netstat
+  if command -v netstat >/dev/null 2>&1; then
+    netstat -ltn 2>/dev/null | awk '{print $4}' | grep -E "[:\.]${port}$" -q && return 0
+  fi
+  # 最后 /dev/tcp 回环连接尝试
+  (echo > "/dev/tcp/127.0.0.1/${port}") >/dev/null 2>&1 && return 0
+  return 1
+}
+
+find_next_free_port() {
+  local start="$1"; shift || true
+  local excludes=("$@")
+  local p
+  p=$start
+  while (( p>0 && p<65535 )); do
+    local conflict=0
+    for e in "${excludes[@]}"; do
+      [[ "$e" == "$p" ]] && conflict=1 && break
+    done
+    if (( conflict == 0 )) && ! is_port_in_use "$p"; then
+      echo "$p"; return 0
+    fi
+    ((p++))
+  done
+  # 回退
+  echo "$start"
+  return 1
 }
 
 # 初始化默认配置文件（含随机 napcat_access_token）
@@ -300,7 +620,21 @@ guide_account_group_setup() {
     [[ -n "$mainqq" ]] && break
     echo "mainqqid 不能为空。"
   done
-  mainport=$(prompt_port "请输入主号 OneBot HTTP 端口(mainqq_http_port)" "8083")
+  # 为主号 OneBot HTTP 端口建议一个未占用且不与现有配置冲突的端口
+  local excludes=()
+  if [[ -f "$CFG" ]]; then
+    local _http_cfg _use_review _wr_port
+    _http_cfg=$(cfg_get 'http-serv-port')
+    _use_review=$(cfg_get 'use_web_review')
+    _wr_port=$(cfg_get 'web_review_port')
+    [[ -n "${_http_cfg:-}" ]] && excludes+=("$_http_cfg")
+    if [[ "${_use_review}" == "true" && -n "${_wr_port:-}" ]]; then
+      excludes+=("$_wr_port")
+    fi
+  fi
+  local mainport_def
+  mainport_def=$(find_next_free_port 8083 "${excludes[@]}")
+  mainport=$(prompt_port "请输入主号 OneBot HTTP 端口(mainqq_http_port)" "$mainport_def")
 
   # 组策略（可选）
   echo "是否现在配置组策略（发送限额、水印、加好友自动回复等）？"
@@ -375,11 +709,25 @@ run_oobe() {
 
   local http_port apikey_val process_wait manage_q max_auto text_m vision_m vision_px vision_mb at_unpriv fr_win no_sandbox use_review review_port token
 
-  http_port=$(prompt_port "HTTP 服务端口(http-serv-port)" "8082")
+  local http_def
+  http_def=$(find_next_free_port 8082)
+  http_port=$(prompt_port "HTTP 服务端口(http-serv-port)" "$http_def")
   read -r -p "Qwen DashScope API Key(请参考”快速开始“文档获取): " apikey_val
   if [[ -z "$apikey_val" ]]; then apikey_val="sk-"; fi
   process_wait=$(prompt_with_default "任务处理等待时间秒(process_waittime)" "120")
-  manage_q=$(prompt_bool "是否由本程序管理 NapCat/QQ (manage_napcat_internal)" "yes")
+  # 根据系统可用性推荐是否内部管理 NapCat/QQ
+  local _has_qq=0 _has_xvfb=0
+  if command -v qq >/dev/null 2>&1 || command -v linuxqq >/dev/null 2>&1; then _has_qq=1; fi
+  if command -v Xvfb >/dev/null 2>&1; then _has_xvfb=1; fi
+  local _manage_def="yes"
+  if [[ $_has_qq -ne 1 || $_has_xvfb -ne 1 ]]; then
+    local _missing=()
+    [[ $_has_qq -ne 1 ]] && _missing+=("qq/linuxqq")
+    [[ $_has_xvfb -ne 1 ]] && _missing+=("Xvfb")
+    echo "[提示] 未检测到 ${_missing[*]}。建议 manage_napcat_internal 设为 false。"
+    _manage_def="no"
+  fi
+  manage_q=$(prompt_bool "是否由本程序管理 NapCat/QQ (manage_napcat_internal)" "${_manage_def}")
   max_auto=$(prompt_with_default "QZone 自动登录最大尝试次数(max_attempts_qzone_autologin)" "3")
   text_m=$(prompt_with_default "文本模型(text_model)" "qwen-plus-latest")
   vision_m=$(prompt_with_default "多模模型(vision_model)" "qwen-vl-max-latest")
@@ -387,10 +735,18 @@ run_oobe() {
   vision_mb=$(prompt_with_default "视觉图片大小上限MB(vision_size_limit_mb)" "9.5")
   at_unpriv=$(prompt_bool "@未授权发送者(at_unprived_sender)" "yes")
   fr_win=$(prompt_with_default "好友请求窗口秒(friend_request_window_sec)" "300")
-  no_sandbox=$(prompt_bool "Chromium 强制 --no-sandbox(force_chromium_no-sandbox)" "no")
+  # 若以 root 运行，推荐启用 no-sandbox
+  local default_ns="no"
+  if [[ $(id -u) -eq 0 ]]; then
+    echo "[提示] 检测到当前以 root 身份运行，建议启用 Chromium 的 --no-sandbox 模式。"
+    default_ns="yes"
+  fi
+  no_sandbox=$(prompt_bool "Chromium 强制 --no-sandbox(force_chromium_no-sandbox)" "$default_ns")
   use_review=$(prompt_bool "启用网页审核(use_web_review)" "no")
   if [[ "$use_review" == true ]]; then
-    review_port=$(prompt_port "网页审核端口(web_review_port)" "10923")
+    local review_def
+    review_def=$(find_next_free_port 10923 "$http_port")
+    review_port=$(prompt_port "网页审核端口(web_review_port)" "$review_def")
   else
     review_port="10923"
   fi
@@ -514,13 +870,18 @@ if [[ ! -f "$CFG" ]]; then
   exit 0
 fi
 
-# Linux 依赖逐包检查（xvfb-run 仅当内部管理 NapCat 时要求）
+# 系统依赖自动修复（在执行前尝试安装缺失包；不主动安装 xvfb/xvfb-run）
+ensure_system_packages "false"
+
+# Linux 依赖逐包检查
 check_linux_dependencies jq sqlite3 python3 pkill curl perl
-if [[ "$manage_napcat_internal" == "true" ]]; then
-  check_linux_dependencies xvfb-run
-fi
 if ! command -v qq >/dev/null 2>&1 && ! command -v linuxqq >/dev/null 2>&1; then
   echo "警告：未检测到 qq 或 linuxqq 可执行文件，NapCat 内部管理可能无法启动 QQ 客户端。"
+fi
+if [[ "$manage_napcat_internal" == "true" ]]; then
+  if ! command -v xvfb-run >/dev/null 2>&1 && ! command -v Xvfb >/dev/null 2>&1; then
+    echo "警告：未检测到 xvfb-run 或 Xvfb。xvfb 依赖应由 NapCat 提供；如未安装，建议在 OOBE 勾选 manage_napcat_internal=false。"
+  fi
 fi
 
 # 初始化目录和文件
@@ -1103,11 +1464,15 @@ if [[ "$manage_napcat_internal" == "true" ]]; then
         kill_pat "xvfb-run -a qq --no-sandbox -q"
     fi
 
-    for qqid in "${runidlist[@]}"; do
-        echo "Starting QQ process for ID: $qqid"
-        nohup xvfb-run -a qq --no-sandbox -q "$qqid" > ./NapCatlog 2>&1 &
-    done
-    sleep 10
+    if command -v xvfb-run >/dev/null 2>&1; then
+      for qqid in "${runidlist[@]}"; do
+          echo "Starting QQ process for ID: $qqid"
+          nohup xvfb-run -a qq --no-sandbox -q "$qqid" > ./NapCatlog 2>&1 &
+      done
+      sleep 10
+    else
+      echo "[WARN] 未检测到 xvfb-run。NapCat 应自行安装其依赖；或在 OOBE 中选择 manage_napcat_internal=false。已跳过内部启动 QQ。"
+    fi
 else
     echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理 Napcat QQ 客户端。"
 fi
