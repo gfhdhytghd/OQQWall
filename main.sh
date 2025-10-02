@@ -79,6 +79,35 @@ detect_platform() {
   esac
 }
 
+# 判断给定路径是否来自 snap（路径或其真实路径位于 /snap 下）
+is_snap_path() {
+  local p="$1"
+  [[ -z "$p" ]] && return 1
+  if [[ "$p" == /snap/* ]]; then
+    return 0
+  fi
+  local real
+  real=$(readlink -f "$p" 2>/dev/null || echo "$p")
+  if [[ "$real" == /snap/* ]]; then
+    return 0
+  fi
+  return 1
+}
+
+# 查找是否存在非 snap 的 Chrome/Chromium 可执行
+has_non_snap_chrome() {
+  local bin path
+  for bin in google-chrome-stable google-chrome chromium-browser chromium; do
+    if command -v "$bin" >/dev/null 2>&1; then
+      path=$(command -v "$bin")
+      if ! is_snap_path "$path"; then
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
 # 获取 sudo（如可用）
 declare -a SUDO_CMD=()
 get_sudo() {
@@ -438,35 +467,15 @@ ensure_system_packages() {
     fi
   fi
 
-  # Ubuntu: 优先安装 Google Chrome（不安装 chromium），仅在未检测到可用浏览器时尝试
+  # Ubuntu: 仅警告（不自动安装），要求非 snap 的 Chrome/Chromium
   if [[ "$OS_FLAVOR" == "ubuntu" ]]; then
-    if ! command -v google-chrome-stable >/dev/null 2>&1 && \
-       ! command -v chromium-browser   >/dev/null 2>&1 && \
-       ! command -v chromium           >/dev/null 2>&1; then
-      echo "[INFO] 未检测到 Chrome/Chromium，可为 Ubuntu 配置官方 Google Chrome 仓库并安装。"
-      if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
-        # 需要 gnupg 以导入 key
-        if ! command -v gpg >/dev/null 2>&1; then
-          echo "[INFO] 安装 gnupg 以导入 Google key"
-          "${SUDO_CMD[@]}" apt-get install -y gnupg >/dev/null 2>&1 || true
-        fi
-        arch=$(dpkg --print-architecture 2>/dev/null || echo amd64)
-        echo "[INFO] 配置 Google Chrome APT 源 (arch=${arch})"
-        if curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | "${SUDO_CMD[@]}" gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg 2>/dev/null; then
-          echo "deb [arch=${arch} signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main" | \
-            "${SUDO_CMD[@]}" tee /etc/apt/sources.list.d/google-chrome.list >/dev/null
-          "${SUDO_CMD[@]}" apt-get update -y || true
-          echo "[INFO] 安装 google-chrome-stable"
-          "${SUDO_CMD[@]}" apt-get install -y google-chrome-stable || true
-        else
-          echo "[WARN] 无法导入 Google Chrome 签名 key，跳过自动安装。"
-        fi
-      else
-        echo "[HINT] Ubuntu 上建议安装官方 Chrome 而非 chromium。手动执行："
-        echo "       curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg"
-        echo "       echo \"deb [arch=$(dpkg --print-architecture 2>/dev/null || echo amd64) signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main\" | sudo tee /etc/apt/sources.list.d/google-chrome.list"
-        echo "       sudo apt-get update && sudo apt-get install -y google-chrome-stable"
-      fi
+    if ! has_non_snap_chrome; then
+      echo "[WARN] 检测到 Ubuntu，系统未发现非 snap 的 Chrome/Chromium。"
+      echo "       请手动安装非 snap 浏览器（推荐 google-chrome-stable），并确保命令不在 /snap/bin 下。"
+      echo "       示例（手动执行）："
+      echo "         curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg"
+      echo "         echo \"deb [arch=$(dpkg --print-architecture 2>/dev/null || echo amd64) signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main\" | sudo tee /etc/apt/sources.list.d/google-chrome.list"
+      echo "         sudo apt-get update && sudo apt-get install -y google-chrome-stable"
     fi
   fi
 
