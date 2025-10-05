@@ -335,9 +335,15 @@ send_to_qzone() {
         local cookies
         cookies=$(cat "./cookies-$qqid.json")
         
-        echo "{\"text\":\"$message\",\"image\":$image_list,\"cookies\":$cookies}" > ./qzone_in_fifo
-        local post_status
-        post_status=$(cat ./qzone_out_fifo)
+        local post_status ipc_mode
+        ipc_mode=${QZONE_IPC:-fifo}
+        if [[ "$ipc_mode" == "uds" ]]; then
+            post_status=$(printf '%s' "{\"text\":\"$message\",\"image\":$image_list,\"cookies\":$cookies}" \
+                | python3 SendQzone/qzone_uds_client.py)
+        else
+            echo "{\"text\":\"$message\",\"image\":$image_list,\"cookies\":$cookies}" > ./qzone_in_fifo
+            post_status=$(cat ./qzone_out_fifo)
+        fi
         
         if echo "$post_status" | grep -q "success"; then
             echo "$qqid发送完毕"
