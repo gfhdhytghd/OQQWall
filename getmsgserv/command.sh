@@ -311,13 +311,28 @@ $group_pending"
             echo "sendcontrol.sh started"
         fi
 
-        if pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" > /dev/null; then
-            printf -v syschecklist '%s空间发送服务已在运行\n' "$syschecklist"
+        # 改为检查 UDS（qzone-serv-UDS.py）而非 pipe
+        qz_sock="${QZONE_UDS_PATH:-./qzone_uds.sock}"
+        if [[ -S "$qz_sock" ]]; then
+            if command -v socat >/dev/null 2>&1; then
+                qz_payload='{"text":"UDS health-check","image":[],"cookies":{}}'
+                qz_out=$(printf '%s' "$qz_payload" | socat -t 5 -T 5 - UNIX-CONNECT:"$qz_sock" 2>/dev/null) || qz_out=""
+                if [[ -n "$qz_out" ]]; then
+                    printf -v syschecklist '%s空间发送服务正常\n' "$syschecklist" "$qz_out"
+                else
+                    printf -v syschecklist '%s空间发送服务不可用 (无响应)，正在尝试重启\n' "$syschecklist"
+                    pgrep -f "python3 SendQzone/qzone-serv-UDS.py" | xargs kill -15 2>/dev/null
+                    python3 ./SendQzone/qzone-serv-UDS.py &
+                    echo "qzone-serv-UDS.py started"
+                fi
+            else
+                printf -v syschecklist '%s空间发送服务已监听 (未安装 socat，跳过连通性探测)\n' "$syschecklist"
+            fi
         else
-            printf -v syschecklist '%s空间发送服务不在运行，正在尝试重启\n' "$syschecklist"
-            pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" | xargs kill -15
-            python3 ./SendQzone/qzone-serv-pipe.py &
-            echo "qzone-serv-pipe.py started"
+            printf -v syschecklist '%s空间发送服务未监听 (socket 不存在)，正在尝试重启\n' "$syschecklist"
+            pgrep -f "python3 SendQzone/qzone-serv-UDS.py" | xargs kill -15 2>/dev/null
+            python3 ./SendQzone/qzone-serv-UDS.py &
+            echo "qzone-serv-UDS.py started"
         fi
 
         # 6. 添加结尾
