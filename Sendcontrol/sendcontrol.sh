@@ -5,10 +5,60 @@
 # 功能：管理QQ空间投稿的发送控制
 # =============================================================================
 
+# 服务说明（UDS）
+# - 本脚本既是发送调度器，又作为一个基于 Unix Domain Socket 的服务端对外提供接口。
+# - 监听方式：AF_UNIX/STREAM，使用 socat 在前台监听并为每个连接派生一次处理进程。
+# - 套接字路径：环境变量 `SENDCONTROL_UDS_PATH`（默认 `./sendcontrol_uds.sock`）。
+# - 连接模型：
+#   * 客户端一次连接发送一条 JSON，请求结束以 EOF 表示；本服务处理后回写纯文本结果并断开。
+#   * 每个连接互不影响；内部发送仍按业务规则顺序组织（分组/堆栈/限额）。
+#
+# 目标输入（JSON，无需换行，EOF 结束）：
+# 1) 传递投稿
+#    {
+#      "tag":            "<整数/字符串>",   # preprocess.tag
+#      "numb":           "<当前发布序号>",  # 用于生成文案的编号
+#      "initsendstatue": "now" | "stacking"  # 立即发送/进入暂存堆栈
+#    }
+#
+# 2) 触发组刷新发送（将暂存区的内容批量发送）
+#    {
+#      "action": "flush",
+#      "group":  "<组键名或 acgroup>"
+#    }
+#
+# 输出（纯文本）：
+# - "success"：请求已被接收并按期望处理（或触发成功）
+# - "failed"：请求解析/处理失败（含参数缺失、配置缺失、数据库/发送异常等）
+#
+# 客户端示例（socat）：
+#   printf '%s' '{"tag":"123","numb":"7","initsendstatue":"now"}' \
+#     | socat - UNIX-CONNECT:"${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}"
+#   printf '%s' '{"action":"flush","group":"MyGroup"}' \
+#     | socat - UNIX-CONNECT:"${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}"
+
 set -euo pipefail  # 严格模式
 
-# 激活虚拟环境
-source ./Global_toolkit.sh
+# 调试开关：导出 SENDCONTROL_DEBUG=1 生效
+SENDCONTROL_DEBUG=${SENDCONTROL_DEBUG:-0}
+
+log_debug() {
+    [[ "$SENDCONTROL_DEBUG" == "1" ]] || return 0
+    local msg="$1"
+    mkdir -p ./cache 2>/dev/null || true
+    printf 'sendcontrol %s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$msg" >> ./cache/SendControl_Debug.log
+}
+
+# 按需加载运行环境（仅在需要发消息/访问 NapCat 时加载）
+__SC_TOOLKIT_LOADED=0
+ensure_runtime_env() {
+    if [[ "$__SC_TOOLKIT_LOADED" != "1" ]]; then
+        # 激活虚拟环境/工具函数等（依赖 NAPCAT_ACCESS_TOKEN）
+        # 放在需要时再加载，避免 --handle-conn 轻量回复阶段阻塞或报错
+        source ./Global_toolkit.sh
+        __SC_TOOLKIT_LOADED=1
+    fi
+}
 
 # =============================================================================
 # 配置管理模块
@@ -80,7 +130,6 @@ save_to_storage() {
     # 确保暂存表存在（首次运行场景）
     sqlite3 "$DB_PATH" "CREATE TABLE IF NOT EXISTS sendstorge_$groupname (tag TEXT, num TEXT, port TEXT, senderid TEXT);"
     sqlite3 "$DB_PATH" "INSERT INTO sendstorge_$groupname (tag,num,port,senderid) VALUES ('$tag', '$num','$port','$senderid');"
-    echo "success" > ./presend_out_fifo
 }
 
 # 获取暂存的投稿列表
@@ -335,15 +384,28 @@ send_to_qzone() {
         local cookies
         cookies=$(cat "./cookies-$qqid.json")
         
-        local post_status ipc_mode
-        ipc_mode=${QZONE_IPC:-fifo}
-        if [[ "$ipc_mode" == "uds" ]]; then
-            post_status=$(printf '%s' "{\"text\":\"$message\",\"image\":$image_list,\"cookies\":$cookies}" \
-                | python3 SendQzone/qzone_uds_client.py)
-        else
-            echo "{\"text\":\"$message\",\"image\":$image_list,\"cookies\":$cookies}" > ./qzone_in_fifo
-            post_status=$(cat ./qzone_out_fifo)
+        local post_status
+        # 通过 UDS 使用 socat 与服务交互（一次请求一次连接，等待服务端回包）
+        if ! command -v socat >/dev/null 2>&1; then
+            log_error "未检测到 socat，请安装后再试"
+            return 1
         fi
+
+        # 使用 jq 构造 JSON，正确处理转义与嵌套结构
+        local json_payload
+        json_payload=$(jq -nc \
+            --arg text "$message" \
+            --argjson image "$image_list" \
+            --argjson cookies "$cookies" \
+            '{text:$text, image:$image, cookies:$cookies}') || {
+            log_error "构造投稿 JSON 失败(可能是 image/cookies 非法 JSON)"
+            return 1
+        }
+
+        local uds_path
+        uds_path="${QZONE_UDS_PATH:-./qzone_uds.sock}"
+        post_status=$(printf '%s' "$json_payload" \
+            | socat -t 60 -T 180 - UNIX-CONNECT:"$uds_path" 2>/dev/null)
         
         if echo "$post_status" | grep -q "success"; then
             echo "$qqid发送完毕"
@@ -748,14 +810,15 @@ log_error() {
 initialize() {
     # 加载基础配置
     load_base_config
-    
-    # 创建FIFO管道
-    [[ ! -p ./presend_in_fifo ]] && mkfifo ./presend_in_fifo
-    [[ ! -p ./presend_out_fifo ]] && mkfifo ./presend_out_fifo
-    
+    # 依赖自检
+    if ! command -v socat >/dev/null 2>&1; then
+        echo "[ERR] sendcontrol 需要 socat，请先安装（apt/pacman/dnf/yum/brew/pkg）。" >&2
+        return 1
+    fi
+    # 加载运行环境（NapCat 相关工具）
+    ensure_runtime_env
     # 启动定时调度
     start_scheduler
-    
     echo "sendcontrol初始化完成"
 }
 
@@ -763,68 +826,112 @@ initialize() {
 # 主循环模块
 # =============================================================================
 
-# 主循环
-main_loop() {
-    while true; do
-        # 清空循环变量
-        unset tag numfinal initsendstatue senderid receiver comment json_data need_priv groupname group_info groupid mainqqid mainqq_http_port minorqq_http_ports minorqqid port message file_arr goingtosendid
-        groupname=""
-        initsendstatue=""
-        
-        {
-            local in_json_data
-            in_json_data=$(cat ./presend_in_fifo)
-            
-            # 解析输入JSON
-            local action
-            action=$(jq -r '.action // empty' <<<"$in_json_data")
-            
-            if [[ "$action" == "flush" ]]; then
-                local target_group
-                target_group=$(jq -r '.group // empty' <<<"$in_json_data")
-                
-                if flush_staged_posts "$target_group"; then
-                    echo "success" > ./presend_out_fifo
-                else
-                    echo "failed" > ./presend_out_fifo
-                fi
-                continue
-            fi
-            
-            # 解析投稿信息
-            tag=$(echo "$in_json_data" | jq -r '.tag // empty')
-            # 清理 tag 的不可见字符，避免 WHERE 不命中
-            tag=$(printf '%s' "$tag" | tr -d '\r\n\t ')
-            numfinal=$(echo "$in_json_data" | jq -r '.numb // empty')
-            initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue // empty')
+# 单次连接处理：从 STDIN 读取一条 JSON，请求结束以 EOF 表示；将结果写回 STDOUT
+handle_connection() {
+    # 清空循环变量
+    unset tag numfinal initsendstatue senderid receiver comment json_data need_priv groupname group_info groupid mainqqid mainqq_http_port minorqq_http_ports minorqqid port message file_arr goingtosendid
+    groupname=""
+    initsendstatue=""
 
-            # 基本校验：tag 必须存在
-            if [[ -z "$tag" ]]; then
-                log_error "收到的投稿JSON缺少tag字段或为空，原始输入: $in_json_data"
-                echo "failed" > ./presend_out_fifo
-                continue
-            fi
-            
-            # 获取发送信息并执行
-            if ! get_send_info "$tag"; then
-                # 确保调用方不会一直阻塞等待
-                echo "failed" > ./presend_out_fifo
-                log_error "get_send_info 执行失败，tag: $tag"
-            fi
-            
-        } || {
-            log_error "主循环异常，输入数据: $in_json_data"
-            # 兜底：向调用方返回失败，避免首次运行阻塞
-            echo "failed" > ./presend_out_fifo
-            continue
-        }
-    done
+    local in_json_data
+    in_json_data=$(cat) || true
+    log_debug "recv raw=${in_json_data:0:200}..."
+
+    # 解析输入JSON
+    local action
+    action=$(jq -r '.action // empty' <<<"$in_json_data")
+
+    if [[ "$action" == "flush" ]]; then
+        local target_group
+        target_group=$(jq -r '.group // empty' <<<"$in_json_data")
+        log_debug "action=flush group=$target_group"
+        # 确保已加载运行环境与基础配置，避免 sendmsggroup/变量未绑定
+        ensure_runtime_env
+        load_base_config
+        if flush_staged_posts "$target_group"; then
+            log_debug "flush result=success"
+            printf '%s' "success"
+        else
+            log_debug "flush result=failed"
+            printf '%s' "failed"
+        fi
+        return 0
+    fi
+
+    # 解析投稿信息
+    tag=$(echo "$in_json_data" | jq -r '.tag // empty')
+    # 清理 tag 的不可见字符，避免 WHERE 不命中
+    tag=$(printf '%s' "$tag" | tr -d '\r\n\t ')
+    numfinal=$(echo "$in_json_data" | jq -r '.numb // empty')
+    initsendstatue=$(echo "$in_json_data" | jq -r '.initsendstatue // empty')
+
+    # 基本校验：tag 必须存在
+    if [[ -z "$tag" ]]; then
+        log_error "收到的投稿JSON缺少tag字段或为空，原始输入: $in_json_data"
+        printf '%s' "failed"
+        return 0
+    fi
+
+    # 立即应答 success，避免前台等待长任务（发送/调度）导致超时
+    # 随后在后台执行完整的 get_send_info/execute_send_rules 流程
+    printf '%s' "success"
+    log_debug "ack success tag=$tag num=$numfinal init=$initsendstatue"
+
+    # 后台处理：自包含调用，确保即使本进程退出也继续执行
+    # 使用脚本自身的 --run-tag 接口以在新进程中重建上下文
+    {
+      self_path=$(readlink -f "$0" 2>/dev/null || echo "$0")
+      nohup bash -lc "'${self_path}' --run-tag '$tag' '$numfinal' '$initsendstatue'" \
+        >/dev/null 2>&1 &
+    } >/dev/null 2>&1 || true
+    log_debug "spawn --run-tag for tag=$tag"
+    return 0
+}
+
+# UDS 服务器：将每个连接交给本脚本的 --handle-conn 模式处理
+run_uds_server() {
+    local uds_path
+    uds_path="${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}"
+    # 移除旧 socket 文件
+    [[ -e "$uds_path" ]] && rm -f -- "$uds_path"
+    echo "sendcontrol UDS 监听: $uds_path"
+    # 前台阻塞运行，fork 每个连接；使用 EXEC 的参数方式避免引号误传
+    # 每个连接派生：bash -lc ./Sendcontrol/sendcontrol.sh --handle-conn
+    exec socat -t 60 -T 180 UNIX-LISTEN:"$uds_path",fork,unlink-early \
+        EXEC:"./Sendcontrol/sendcontrol.sh --handle-conn",pipes
 }
 
 # =============================================================================
 # 启动脚本
 # =============================================================================
 
-# 启动sendcontrol模块
-initialize
-main_loop
+# 入口：
+case "${1:-}" in
+  --handle-conn)
+    handle_connection
+    ;;
+  --run-tag)
+    # 后台执行单个 tag 的完整发送/入栈流程
+    # 用法：sendcontrol.sh --run-tag <tag> <numfinal> <initsendstatue>
+    tag="$2"; numfinal="$3"; initsendstatue="$4"
+    log_debug "run-tag start tag=$tag num=$numfinal init=$initsendstatue"
+    # 需要 NapCat/工具函数环境
+    ensure_runtime_env
+    # 需要基础配置（避免未绑定变量）
+    load_base_config
+    if [[ -z "$tag" ]]; then
+      echo "[ERR] --run-tag 缺少 tag 参数" >&2
+      exit 1
+    fi
+    # 调用内部流程；失败也仅记录日志
+    if ! get_send_info "$tag"; then
+      log_error "--run-tag: get_send_info 失败，tag=$tag"
+    else
+      log_debug "run-tag done tag=$tag"
+    fi
+    ;;
+  *)
+    initialize
+    run_uds_server
+    ;;
+esac

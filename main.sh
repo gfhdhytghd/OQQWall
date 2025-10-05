@@ -175,7 +175,8 @@ ensure_system_packages() {
   declare -A pkgmap
 
   # 通用命令检查列表（命令名）
-  local cmds=(jq sqlite3 python3 curl perl pkill)
+  # 说明：新增 socat 作为 UDS 依赖（Sendcontrol 与 getmsgserv 通过 UDS 通信需用）
+  local cmds=(jq sqlite3 python3 curl perl pkill socat)
 
   # 追加 xvfb-run（仅在内部管理 NapCat 时需要），在调用处按需处理
 
@@ -189,6 +190,7 @@ ensure_system_packages() {
         [curl]=curl
         [perl]=perl
         [pkill]=procps
+        [socat]=socat
       )
       ;;
     arch)
@@ -199,6 +201,7 @@ ensure_system_packages() {
         [curl]=curl
         [perl]=perl
         [pkill]=procps-ng
+        [socat]=socat
       )
       ;;
     debian|ubuntu)
@@ -209,6 +212,7 @@ ensure_system_packages() {
         [curl]=curl
         [perl]=perl
         [pkill]=procps
+        [socat]=socat
       )
       ;;
     fedora|rhel|centos)
@@ -219,6 +223,7 @@ ensure_system_packages() {
         [curl]=curl
         [perl]=perl
         [pkill]=procps-ng
+        [socat]=socat
       )
       ;;
     macos)
@@ -229,6 +234,7 @@ ensure_system_packages() {
         [curl]=curl
         [perl]=perl
         [pkill]=""  # macOS 自带 pkill
+        [socat]=socat
       )
       ;;
     *)
@@ -726,7 +732,7 @@ check_linux_dependencies() {
   fi
 }
 
-# 逐包检查 Python 依赖：缺失则自动安装修复
+# 批量检查 Python 依赖：一次性检测缺失并集中安装
 ensure_python_packages() {
   # 使用激活的 venv 的 python/pip
   local pip_mirror="https://pypi.tuna.tsinghua.edu.cn/simple"
@@ -744,47 +750,82 @@ ensure_python_packages() {
     [urllib3]=urllib3
   )
 
+  # 组装需要检查的模块列表
+  local modules=()
   local mod
   for mod in "${!pkg_map[@]}"; do
-    if python - <<PY
+    modules+=("$mod")
+  done
+
+  # 一次性检查所有模块缺失情况
+  local missing_list
+  missing_list=$(printf '%s\n' "${modules[@]}" | python - <<'PY'
 import sys
-try:
-    import ${mod}
-except Exception:
-    sys.exit(1)
-sys.exit(0)
+mods = [line.strip() for line in sys.stdin if line.strip()]
+missing = []
+for m in mods:
+    try:
+        __import__(m)
+    except Exception:
+        missing.append(m)
+print('\n'.join(missing))
 PY
-    then
-      echo "[OK] Python 依赖可用: ${mod}"
-    else
+  )
+
+  # 将缺失模块放入集合，便于状态输出
+  declare -A missing_set=()
+  if [[ -n "$missing_list" ]]; then
+    while IFS= read -r m; do
+      [[ -n "$m" ]] && missing_set["$m"]=1
+    done <<< "$missing_list"
+  fi
+
+  # 输出状态并汇总需要安装的包
+  local to_install=()
+  for mod in "${modules[@]}"; do
+    if [[ -n "${missing_set[$mod]:-}" ]]; then
       echo "[FIX] 缺少 Python 依赖: ${mod} -> 安装包 ${pkg_map[$mod]}"
-      # 先尝试清华镜像，失败则回退到官方 PyPI，再次失败尝试添加 trusted-host
-      if ! python -m pip install "${pkg_map[$mod]}" -i "$pip_mirror" --retries 3 --timeout 30; then
-        echo "[WARN] 镜像安装失败，尝试官方 PyPI: ${pkg_map[$mod]}"
-        if ! python -m pip install "${pkg_map[$mod]}" --retries 3 --timeout 30; then
-          echo "[WARN] 官方 PyPI 安装失败，尝试添加 trusted-host: ${pkg_map[$mod]}"
-          if ! python -m pip install "${pkg_map[$mod]}" -i "$pip_mirror" --trusted-host pypi.tuna.tsinghua.edu.cn --retries 3 --timeout 60; then
-            echo "[ERR] 安装 Python 包失败: ${pkg_map[$mod]}"
-            exit 1
-          fi
-        fi
-      fi
-      # 二次校验
-      if ! python - <<PY
-import sys
-try:
-    import ${mod}
-except Exception:
-    sys.exit(1)
-sys.exit(0)
-PY
-      then
-        echo "[ERR] 仍无法导入: ${mod}，请手动检查环境。"
-        exit 1
-      fi
-      echo "[OK] 已修复 Python 依赖: ${mod}"
+      to_install+=("${pkg_map[$mod]}")
+    else
+      echo "[OK] Python 依赖可用: ${mod}"
     fi
   done
+
+  # 如有缺失，集中安装并重试一次检查
+  if (( ${#to_install[@]} > 0 )); then
+    echo "[INFO] 开始安装缺失的 Python 包: ${to_install[*]}"
+    if ! python -m pip install "${to_install[@]}" -i "$pip_mirror" --retries 3 --timeout 30; then
+      echo "[WARN] 镜像安装失败，尝试官方 PyPI: ${to_install[*]}"
+      if ! python -m pip install "${to_install[@]}" --retries 3 --timeout 30; then
+        echo "[WARN] 官方 PyPI 安装失败，尝试添加 trusted-host: ${to_install[*]}"
+        if ! python -m pip install "${to_install[@]}" -i "$pip_mirror" --trusted-host pypi.tuna.tsinghua.edu.cn --retries 3 --timeout 60; then
+          echo "[ERR] 安装 Python 包失败: ${to_install[*]}"
+          exit 1
+        fi
+      fi
+    fi
+
+    # 二次校验（只检查之前缺失的模块），一次性完成
+    local remain_missing
+    remain_missing=$(printf '%s\n' "${!missing_set[@]}" | python - <<'PY'
+import sys
+mods = [line.strip() for line in sys.stdin if line.strip()]
+failed = []
+for m in mods:
+    try:
+        __import__(m)
+    except Exception:
+        failed.append(m)
+print('\n'.join(failed))
+PY
+    )
+    if [[ -n "$remain_missing" ]]; then
+      echo "[ERR] 仍无法导入以下模块，请手动检查环境:"
+      echo "$remain_missing"
+      exit 1
+    fi
+    echo "[OK] 已修复所有缺失的 Python 依赖。"
+  fi
 }
 
 # ------------------
@@ -1031,7 +1072,7 @@ print_test_mode_hint() {
   cat <<'EOF'
 测试模式提示：核心服务已停止，需要按需手动启动：
 - 接收端：python3 getmsgserv/serv.py
-- QZone 管道（如需调试）：python3 SendQzone/qzone-serv-pipe.py
+- QZone UDS（如需调试）：python3 SendQzone/qzone-serv-UDS.py
 - 审核脚本：./Sendcontrol/sendcontrol.sh
 - NapCat 测试工具：python3 tests/napcat_replayer.py --target http://localhost:8082
 EOF
@@ -1073,10 +1114,12 @@ case "$mode" in
     fi
     echo "停止 getmsgserv/serv.py..."
     kill_pat "python3 getmsgserv/serv.py"
-    echo "停止 SendQzone/qzone-serv-pipe.py..."
-    kill_pat "python3 SendQzone/qzone-serv-pipe.py"
+    echo "停止 SendQzone qzone 发送服务..."
+    kill_pat "python3 SendQzone/qzone-serv-UDS.py"
     echo "停止 Sendcontrol/sendcontrol.sh..."
     kill_pat "/bin/bash ./Sendcontrol/sendcontrol.sh"
+    # 兼容 sendcontrol 以 socat 执行后的进程名
+    kill_pat "socat .*sendcontrol_uds.sock"
     echo "停止 web_review/web_review.py..."
     kill_pat "python3 web_review/web_review.py"
     ;;
@@ -1089,8 +1132,9 @@ case "$mode" in
       echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理 Napcat QQ 客户端。"
     fi
     kill_pat "python3 getmsgserv/serv.py"
-    kill_pat "python3 SendQzone/qzone-serv-pipe.py"
+    kill_pat "python3 SendQzone/qzone-serv-UDS.py"
     kill_pat "/bin/bash ./Sendcontrol/sendcontrol.sh"
+    kill_pat "socat .*sendcontrol_uds.sock"
     kill_pat "python3 web_review/web_review.py"
     ;;
   -h)
@@ -1112,8 +1156,9 @@ EOF
     ;;
   --test)
     echo "以测试模式启动OQQWall..."
-    kill_pat "python3 SendQzone/qzone-serv-pipe.py"
+    # 仅停止 UDS 版，pipe 模式已移除
     kill_pat "/bin/bash ./Sendcontrol/sendcontrol.sh"
+    kill_pat "socat .*sendcontrol_uds.sock"
     kill_pat "python3 getmsgserv/serv.py"
     print_test_mode_hint
     ;;
@@ -1133,7 +1178,7 @@ fi
 ensure_system_packages "false"
 
 # Linux 依赖逐包检查
-check_linux_dependencies jq sqlite3 python3 pkill curl perl
+check_linux_dependencies jq sqlite3 python3 pkill curl perl socat
 if ! command -v qq >/dev/null 2>&1 && ! command -v linuxqq >/dev/null 2>&1; then
   echo "警告：未检测到 qq 或 linuxqq 可执行文件，NapCat 内部管理可能无法启动 QQ 客户端。"
 fi
@@ -1156,11 +1201,7 @@ if [[ ! -f "getmsgserv/all/priv_post.jsonl" ]]; then
     echo "已创建文件: getmsgserv/all/priv_post.jsonl"
 fi
 
-# 初始化命名管道（若已存在但类型错误则更正）
-ensure_named_pipe "./qzone_in_fifo"
-ensure_named_pipe "./qzone_out_fifo"
-ensure_named_pipe "./presend_in_fifo"
-ensure_named_pipe "./presend_out_fifo"
+# 旧版 FIFO 管道已弃用（qzone_in/out_fifo、presend_in/out_fifo）；无需再创建
 if [[ ! -f "AcountGroupcfg.json" ]]; then
     if [[ -t 0 ]]; then
         echo "未检测到账户组配置文件，将启动账户组引导..."
@@ -1735,16 +1776,15 @@ else
     echo "serv.py started"
 fi
 
-if pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" > /dev/null
-then
-    echo "qzone-serv-pipe.py is already running"
+if pgrep -f "python3 ./SendQzone/qzone-serv-UDS.py" > /dev/null; then
+  echo "qzone-serv-UDS.py is already running"
 else
-    if [[ $1 == --test ]]; then
-      echo "请自行启动测试服务器"
-    else
-      python3 ./SendQzone/qzone-serv-pipe.py &
-      echo "qzone-serv-pipe.py started"
-    fi
+  if [[ $1 == --test ]]; then
+    echo "请自行启动测试服务器"
+  else
+    python3 ./SendQzone/qzone-serv-UDS.py &
+    echo "qzone-serv-UDS.py started"
+  fi
 fi
 
 if pgrep -f "./Sendcontrol/sendcontrol.sh" > /dev/null
@@ -1757,7 +1797,7 @@ fi
 
 # 启动网页审核（可选）
 if [[ "$use_web_review" == "true" ]]; then
-  if pgrep -f "python3 web_review/web_review.py" > /dev/null; then
+  if pgrep -f "python3 web_review.py" > /dev/null; then
     echo "web_review.py is already running"
   else
     echo "starting web_review on port $web_review_port"

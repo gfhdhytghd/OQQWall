@@ -24,6 +24,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+import stat as _stat
 from urllib.request import urlopen
 from urllib.error import URLError
 
@@ -413,12 +414,26 @@ def _sh_script_running(suffix: str) -> bool:
     return False
 
 
+def _uds_sock_exists(path: Optional[str] = None) -> bool:
+    try:
+        if not path:
+            path = os.environ.get("QZONE_UDS_PATH") or str(ROOT / "qzone_uds.sock")
+        st = os.stat(path)
+        return _stat.S_ISSOCK(st.st_mode)
+    except Exception:
+        return False
+
+
 def services_status() -> dict[str, bool]:
     """返回三个核心子服务状态。"""
     s = {
         "recv": _py_script_running("getmsgserv/serv.py"),
         "ctrl": _sh_script_running("Sendcontrol/sendcontrol.sh"),
-        "pipe": _py_script_running("SendQzone/qzone-serv-pipe.py"),
+        # QZone 发送服务（UDS）
+        # 判定策略：优先看进程，若未命中则看 UDS socket 是否存在
+        "pipe": (
+            _py_script_running("SendQzone/qzone-serv-UDS.py") or _uds_sock_exists()
+        ),
     }
     # 可选 web_review
     cfg = read_kv_config(CONFIG_FILE)
@@ -443,8 +458,9 @@ def kill_child_services() -> None:
     cmds = [
         "pkill -f -- 'python3 getmsgserv/serv.py' 2>/dev/null || true",
         "pkill -f -- 'Sendcontrol/sendcontrol.sh' 2>/dev/null || true",
-        "pkill -f -- 'python3 ./SendQzone/qzone-serv-pipe.py' 2>/dev/null || true",
-        "pkill -f -- 'python3 SendQzone/qzone-serv-pipe.py' 2>/dev/null || true",
+        # QZone 发送服务（UDS）
+        "pkill -f -- 'python3 ./SendQzone/qzone-serv-UDS.py' 2>/dev/null || true",
+        "pkill -f -- 'python3 SendQzone/qzone-serv-UDS.py' 2>/dev/null || true",
         "pkill -f -- 'python3 web_review/web_review.py' 2>/dev/null || true",
         "pkill -f -- 'python3 web_review.py' 2>/dev/null || true",
     ]
@@ -453,6 +469,14 @@ def kill_child_services() -> None:
             subprocess.run(["bash", "-lc", c], cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
+    # 确保清理遗留的 UDS 套接字文件，避免下次绑定失败
+    try:
+        uds_path = os.environ.get("QZONE_UDS_PATH") or str(ROOT / "qzone_uds.sock")
+        st = os.stat(uds_path)
+        if _stat.S_ISSOCK(st.st_mode):
+            os.unlink(uds_path)
+    except Exception:
+        pass
 
 
 @dataclass

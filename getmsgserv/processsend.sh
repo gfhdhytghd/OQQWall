@@ -24,15 +24,20 @@ sendmsggroup_prompt() {
 
 postqzone(){
     #传给sendcontrol
-    echo "开始传递给sendcontrol"
+    echo "开始通过UDS传递给sendcontrol"
     json_data=$(jq -n --arg tag "$object" --arg numb "$numfinal" --arg initsendstatue "$initsendstatus" \
         '{tag:$tag, numb: $numb, initsendstatue: $initsendstatue}')
     echo "$json_data"
-    echo "$json_data" > ./presend_in_fifo
-    echo 已传递给sendcontrol
-    # Check the status
-    post_statue=$(cat ./presend_out_fifo)
-    echo 已收到回报
+    local sc_sock
+    sc_sock="${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}"
+    # 发送并等待回包
+    # 发送并等待回包；捕获退出码以便诊断连接失败
+    post_statue=$(printf '%s' "$json_data" | socat -t 60 -T 120 - UNIX-CONNECT:"$sc_sock" 2>/dev/null)
+    sc_rc=$?
+    echo 已收到回报: $post_statue
+    if [[ $sc_rc -ne 0 || -z "$post_statue" ]]; then
+        log_and_continue "无法连接 sendcontrol UDS 或未收到响应 (sock=$sc_sock, rc=$sc_rc)"
+    fi
 
     if echo "$post_statue"  | grep -q "success"; then
         goingtosendid=("${goingtosendid[@]/$1}")

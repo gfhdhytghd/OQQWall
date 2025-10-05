@@ -256,8 +256,9 @@ $group_pending"
         fi
         ;;
     "发送暂存区")
-        jq -nc --arg group "$groupname" '{"action":"flush", "group":$group}' > ./presend_in_fifo
-        post_statue=$(cat ./presend_out_fifo)
+        sc_sock="${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}"
+        post_statue=$(jq -nc --arg group "$groupname" '{action:"flush", group:$group}' \
+            | socat -t 60 -T 60 - UNIX-CONNECT:"$sc_sock" 2>/dev/null)
         echo 已收到回报
 
         if echo "$post_statue"  | grep -q "success"; then
