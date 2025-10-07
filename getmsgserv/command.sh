@@ -318,7 +318,7 @@ $group_pending"
                 qz_payload='{"text":"UDS health-check","image":[],"cookies":{}}'
                 qz_out=$(printf '%s' "$qz_payload" | socat -t 5 -T 5 - UNIX-CONNECT:"$qz_sock" 2>/dev/null) || qz_out=""
                 if [[ -n "$qz_out" ]]; then
-                    printf -v syschecklist '%s空间发送服务正常\n' "$syschecklist" "$qz_out"
+                    printf -v syschecklist '%s空间发送服务正常\n' "$syschecklist"
                 else
                     printf -v syschecklist '%s空间发送服务不可用 (无响应)，正在尝试重启\n' "$syschecklist"
                     pgrep -f "python3 SendQzone/qzone-serv-UDS.py" | xargs kill -15 2>/dev/null
