@@ -91,6 +91,13 @@ is_snap_path() {
   if [[ "$real" == /snap/* ]]; then
     return 0
   fi
+  # 处理 Ubuntu/Deb 系中 /usr/bin/chromium-browser 等 wrapper 脚本指向 /snap/bin/* 的情况
+  # 若可读，且文件内容包含 /snap/ 路径，视为来自 snap
+  if [[ -r "$real" ]]; then
+    if grep -Ia -m1 -q '/snap/' -- "$real" 2>/dev/null; then
+      return 0
+    fi
+  fi
   return 1
 }
 
@@ -108,6 +115,76 @@ has_non_snap_chrome() {
   return 1
 }
 
+# 确保 ImageMagick 允许处理 PDF（部分发行版默认在 policy.xml 禁止 PDF/PS/EPS）
+ensure_imagemagick_pdf_enabled() {
+  # 未安装 ImageMagick 时跳过
+  local imcmd=""
+  if command -v magick >/dev/null 2>&1; then
+    imcmd=magick
+  elif command -v convert >/dev/null 2>&1; then
+    imcmd=convert
+  else
+    return 0
+  fi
+
+  detect_platform
+  get_sudo
+
+  # 常见 policy.xml 路径集合
+  local candidates=(
+    /etc/ImageMagick/policy.xml
+    /etc/ImageMagick-6/policy.xml
+    /etc/ImageMagick-7/policy.xml
+    /usr/local/etc/ImageMagick/policy.xml
+    /usr/local/etc/ImageMagick-6/policy.xml
+    /usr/local/etc/ImageMagick-7/policy.xml
+    /opt/homebrew/etc/ImageMagick/policy.xml
+    /opt/homebrew/etc/ImageMagick-7/policy.xml
+  )
+
+  local any_policy=0
+  local any_disabled=0
+  local f
+  for f in "${candidates[@]}"; do
+    [[ -f "$f" ]] || continue
+    any_policy=1
+    # 是否存在禁用 PDF/PS/EPS 的规则（attributes 顺序可能不同）
+    if grep -Ei 'pattern="(PDF|PS|EPS|PS2|PS3|EPS2)"' -- "$f" >/dev/null 2>&1; then
+      if grep -Ei '<policy[^>]*domain="coder"' -- "$f" | \
+         grep -Ei 'pattern="(PDF|PS|EPS|PS2|PS3|EPS2)"|rights="none"' >/dev/null 2>&1; then
+        # 备份一次
+        any_disabled=1
+        if [[ ! -f "$f.oqqwall.bak" ]]; then
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            cp -a -- "$f" "$f.oqqwall.bak" || true
+          else
+            echo "[HINT] 需要写入 $f 以启用 ImageMagick PDF 处理，请授予 root/sudo 权限。"
+            continue
+          fi
+        fi
+        # 删除禁用条目（两种属性顺序都兼容）
+        if [[ "$OS_FLAVOR" == "macos" ]]; then
+          "${SUDO_CMD[@]}" sed -i '' -E \
+            -e '/<policy[^>]*domain="coder"[^>]*pattern="(PDF|PS|EPS|PS2|PS3|EPS2)"[^>]*rights="none"[^>]*>/d' \
+            -e '/<policy[^>]*domain="coder"[^>]*rights="none"[^>]*pattern="(PDF|PS|EPS|PS2|PS3|EPS2)"[^>]*>/d' "$f" || true
+        else
+          "${SUDO_CMD[@]}" sed -i -E \
+            -e '/<policy[^>]*domain="coder"[^>]*pattern="(PDF|PS|EPS|PS2|PS3|EPS2)"[^>]*rights="none"[^>]*>/d' \
+            -e '/<policy[^>]*domain="coder"[^>]*rights="none"[^>]*pattern="(PDF|PS|EPS|PS2|PS3|EPS2)"[^>]*>/d' "$f" || true
+        fi
+        echo "[FIX] 调整 ImageMagick 策略，移除禁用 PDF/PS/EPS 的条目: $f"
+      fi
+    fi
+  done
+
+  if (( any_policy == 0 )); then
+    echo "[OK] Linux 依赖已满足: ImageMagick PDF 支持（未检测到 policy.xml 限制）"
+    return 0
+  fi
+  if (( any_disabled == 0 )); then
+    echo "[OK] Linux 依赖已满足: ImageMagick PDF 支持"
+  fi
+}
 # 获取 sudo（如可用）
 declare -a SUDO_CMD=()
 get_sudo() {
@@ -330,50 +407,78 @@ ensure_system_packages() {
   fi
   # macOS: brew 的 python 自带 venv
 
-  # Perl URI::Escape 模块检测（用于 Shell 中 URI 编码）
+  # Perl 本体与 URI::Escape 模块检测（用于 Shell 中 URI 编码）
   local need_perl_uri=0
   if command -v perl >/dev/null 2>&1; then
-    if ! perl -MURI::Escape -e 1 >/dev/null 2>&1; then
+    if perl -MURI::Escape -e 1 >/dev/null 2>&1; then
+      echo "[OK] Linux 依赖已满足: Perl URI::Escape"
+    else
       need_perl_uri=1
     fi
   fi
 
-  # 各发行版对应包名/安装策略
+  # 各发行版对应包名/安装策略（Perl URI 模块）
   if (( need_perl_uri )); then
+    local perl_uri_pkg=""
     case "$PKG_MGR" in
       apt)
-        # Debian/Ubuntu
-        local found=0
-        for existing in "${to_install[@]}"; do
-          [[ "$existing" == "liburi-perl" ]] && found=1 && break
-        done
-        (( found == 0 )) && to_install+=(liburi-perl)
+        perl_uri_pkg="liburi-perl"
         ;;
       pacman)
-        # Arch 系
-        local found=0
-        for existing in "${to_install[@]}"; do
-          [[ "$existing" == "perl-uri" ]] && found=1 && break
-        done
-        (( found == 0 )) && to_install+=(perl-uri)
+        perl_uri_pkg="perl-uri"
         ;;
       dnf|yum)
-        # Fedora/RHEL/CentOS
-        local found=0
-        for existing in "${to_install[@]}"; do
-          [[ "$existing" == "perl-URI" ]] && found=1 && break
-        done
-        (( found == 0 )) && to_install+=(perl-URI)
+        perl_uri_pkg="perl-URI"
         ;;
-      brew)
-        # Homebrew 无独立 perl-URI 包，后续用 cpanminus 安装 URI 模块
-        :
-        ;;
-      pkg)
-        # Termux 可能没有独立 perl-URI 包，后续尝试 cpanminus
-        :
+      brew|pkg)
+        perl_uri_pkg=""  # 后续用 cpanminus 处理
         ;;
     esac
+    if [[ -n "$perl_uri_pkg" ]]; then
+      local found=0
+      for existing in "${to_install[@]}"; do
+        [[ "$existing" == "$perl_uri_pkg" ]] && found=1 && break
+      done
+      if (( found == 0 )); then
+        echo "[FIX] 缺少 Linux 依赖: Perl URI::Escape -> 安装包 $perl_uri_pkg"
+        to_install+=("$perl_uri_pkg")
+      fi
+    fi
+  fi
+
+  # ImageMagick: 检测并输出/加入安装列表（各发行版包名）
+  # 判定标准：存在 magick 且版本输出含 ImageMagick；或存在 convert 且版本输出含 ImageMagick。
+  # 若两者都无或非 ImageMagick，则安排安装并提示。
+  local do_install_imagemagick=0
+  local im_pkg=""
+  if command -v magick >/dev/null 2>&1; then
+    if magick -version 2>/dev/null | grep -qi 'ImageMagick'; then
+      echo "[OK] Linux 依赖已满足: ImageMagick"
+    else
+      do_install_imagemagick=1
+    fi
+  elif command -v convert >/dev/null 2>&1; then
+    if convert -version 2>/dev/null | grep -qi 'ImageMagick'; then
+      echo "[OK] Linux 依赖已满足: ImageMagick"
+    else
+      do_install_imagemagick=1
+    fi
+  else
+    do_install_imagemagick=1
+  fi
+  if (( do_install_imagemagick )); then
+    case "$OS_FLAVOR" in
+      termux|arch|debian|ubuntu|macos)
+        im_pkg="imagemagick"
+        ;;
+      fedora|rhel|centos)
+        im_pkg="ImageMagick"
+        ;;
+    esac
+    if [[ -n "$im_pkg" ]]; then
+      echo "[FIX] 缺少 Linux 依赖: ImageMagick -> 安装包 $im_pkg"
+      to_install+=("$im_pkg")
+    fi
   fi
 
   if (( ${#to_install[@]} > 0 )); then
@@ -473,15 +578,84 @@ ensure_system_packages() {
     fi
   fi
 
-  # Ubuntu: 仅警告（不自动安装），要求非 snap 的 Chrome/Chromium
-  if [[ "$OS_FLAVOR" == "ubuntu" ]]; then
-    if ! has_non_snap_chrome; then
+  # 确保 ImageMagick 允许处理 PDF（必要时调整 policy.xml）
+  ensure_imagemagick_pdf_enabled
+
+  
+
+  # Chromium/Chrome: 检测并输出 OK；缺失时按策略提示/安装
+  local chrome_bin="" chrome_path=""
+  for c in google-chrome-stable google-chrome chromium-browser chromium; do
+    if command -v "$c" >/dev/null 2>&1; then
+      chrome_path=$(command -v "$c")
+      if ! is_snap_path "$chrome_path"; then
+        chrome_bin="$c"; break
+      fi
+    fi
+  done
+  if [[ -n "$chrome_bin" ]]; then
+    echo "[OK] Linux 依赖已满足: $chrome_bin"
+  else
+    # Ubuntu: 仅警告（不自动安装），要求非 snap 的 Chrome/Chromium
+    if [[ "$OS_FLAVOR" == "ubuntu" ]]; then
       echo "[WARN] 检测到 Ubuntu，系统未发现非 snap 的 Chrome/Chromium。"
       echo "       请手动安装非 snap 浏览器（推荐 google-chrome-stable），并确保命令不在 /snap/bin 下。"
       echo "       示例（手动执行）："
       echo "         curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg"
       echo "         echo \"deb [arch=$(dpkg --print-architecture 2>/dev/null || echo amd64) signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main\" | sudo tee /etc/apt/sources.list.d/google-chrome.list"
       echo "         sudo apt-get update && sudo apt-get install -y google-chrome-stable"
+    fi
+  fi
+
+  # 其他发行版：缺少非 snap 的 Chrome/Chromium 时尝试自动安装 chromium
+  if [[ "$OS_FLAVOR" != "ubuntu" ]]; then
+    if [[ -z "$chrome_bin" ]]; then
+      case "$OS_FLAVOR" in
+        debian)
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            echo "[INFO] 安装 chromium（Debian）..."
+            "${SUDO_CMD[@]}" apt-get update -y || true
+            "${SUDO_CMD[@]}" apt-get install -y chromium || true
+          else
+            echo "[HINT] 未检测到 Chromium，可安装：sudo apt-get install -y chromium"
+          fi
+          ;;
+        arch)
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            echo "[INFO] 安装 chromium（Arch）..."
+            "${SUDO_CMD[@]}" pacman -Sy --noconfirm || true
+            "${SUDO_CMD[@]}" pacman -S --noconfirm --needed chromium || true
+          else
+            echo "[HINT] 未检测到 Chromium，可安装：sudo pacman -S chromium"
+          fi
+          ;;
+        fedora)
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            echo "[INFO] 安装 chromium（Fedora）..."
+            "${SUDO_CMD[@]}" dnf -y install chromium || true
+          else
+            echo "[HINT] 未检测到 Chromium，可安装：sudo dnf -y install chromium"
+          fi
+          ;;
+        rhel|centos)
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            echo "[INFO] 安装 chromium（RHEL/CentOS，可能需要 EPEL）..."
+            if command -v dnf >/dev/null 2>&1; then
+              "${SUDO_CMD[@]}" dnf -y install chromium || true
+            else
+              "${SUDO_CMD[@]}" yum -y install chromium || true
+            fi
+          else
+            echo "[HINT] 未检测到 Chromium，可安装：sudo ${PKG_MGR} -y install chromium（可能需启用 EPEL）"
+          fi
+          ;;
+        macos)
+          echo "[HINT] 未检测到 Chromium/Chrome。macOS 可安装：brew install --cask chromium 或安装 Google Chrome。"
+          ;;
+        termux)
+          echo "[HINT] 未检测到 Chromium。Termux 需启用 x11-repo 后安装：pkg install x11-repo chromium"
+          ;;
+      esac
     fi
   fi
 
@@ -1070,11 +1244,11 @@ run_oobe() {
 
 print_test_mode_hint() {
   cat <<'EOF'
-测试模式提示：核心服务已停止，需要按需手动启动：
+测试模式提示：核心服务正在重启：
 - 接收端：python3 getmsgserv/serv.py
 - QZone UDS（如需调试）：python3 SendQzone/qzone-serv-UDS.py
 - 审核脚本：./Sendcontrol/sendcontrol.sh
-- NapCat 测试工具：python3 tests/napcat_replayer.py --target http://localhost:8082
+- NapCat 测试工具（暂不可用）：python3 tests/napcat_replayer.py --target http://localhost:8082
 EOF
 }
 

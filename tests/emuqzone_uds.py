@@ -236,6 +236,34 @@ class UDSQzoneEmu:
             images = payload.get('image') or []
             cookies = payload.get('cookies') or {}
             processed = [_process_image(x) for x in images]
+
+            # 过滤 UDS 健康检查/探测请求：
+            # 规则：
+            # - 明确字段指示：health/type/cmd 为 health/health-check/ping/probe
+            # - 或者文本为空且无图片（常见探活载荷）
+            try:
+                hv = str(payload.get('health', '')).strip().lower()
+            except Exception:
+                hv = ''
+            try:
+                tv = str(payload.get('type', '')).strip().lower()
+            except Exception:
+                tv = ''
+            try:
+                cv = str(payload.get('cmd', '')).strip().lower()
+            except Exception:
+                cv = ''
+
+            is_explicit_health = hv in {'1', 'true', 'ok', 'ping', 'health'} or 
+                                  tv in {'health', 'health-check', 'probe'} or 
+                                  cv in {'health', 'health-check', 'ping', 'probe'}
+            no_content = (not text.strip()) and (len([i for i in processed if i]) == 0)
+            if is_explicit_health or no_content:
+                try:
+                    conn.sendall(b"success")
+                finally:
+                    conn.close()
+                return
             item = {
                 'id': len(self.data) + 1,
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
