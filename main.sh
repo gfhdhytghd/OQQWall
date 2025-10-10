@@ -2019,19 +2019,29 @@ for mqqid in "${mainqqlist[@]}"; do
   fi
 done
 
+
+ran_today=""  # 记录当天是否已执行
+
 while true; do
-    now=$(date +%s)
-    next=$(date -d "next hour" +%s)
-    if [[ "$(date +%H:%M)" == "07:00" ]]; then
-        echo 'reach 7:00'
-        for qqid in "${runidlist[@]}"; do
-            echo "Like everyone with ID: $qqid"
-            if getinfo "$qqid"; then
-                python3 qqBot/likeeveryday.py "$port"
-            else
-                echo "警告：未找到 QQ $qqid 的端口配置，跳过点赞。"
-            fi
-        done
+  # 对齐到下一分钟再判断，避免错过 07:00
+  sleep $((60 - $(date +%s) % 60))
+
+  # 到了 07:00 且今天还没执行过 → 执行任务
+  if [[ "$(date +%H:%M)" == "07:00" ]]; then
+    today=$(date +%F)
+    if [[ "$ran_today" != "$today" ]]; then
+      echo 'reach 7:00'
+      for qqid in "${runidlist[@]}"; do
+        echo "Like everyone with ID: $qqid"
+        if getinfo "$qqid"; then
+          python3 qqBot/likeeveryday.py "$port"
+        else
+          echo "警告：未找到 QQ $qqid 的端口配置，跳过点赞。"
+        fi
+      done
+      ran_today="$today"
+      # 避免同一分钟重复触发
+      sleep 59
     fi
-    sleep "$(( next - now ))"
+  fi
 done
