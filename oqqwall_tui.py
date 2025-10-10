@@ -119,6 +119,7 @@ GROUP_CONFIG_ORDER: list[str] = [
     # 业务阈值
     "max_post_stack",
     "max_image_number_one_post",
+    "individual_image_in_posts",
     "send_schedule",
     # 展示与消息
     "watermark_text",
@@ -999,6 +1000,24 @@ class GroupConfigPage(Vertical):
         # 其余基础项
         row("max_post_stack", "发件调度发件阈值")
         row("max_image_number_one_post", "单条说说图片数量上限")
+        # 布尔开关：是否在 prepost 目录保留投稿原图（含中文说明，三行文本居中）
+        def _as_bool(v: Any) -> bool:
+            if isinstance(v, bool):
+                return v
+            s = str(v).strip().lower()
+            return s in ("1", "true", "yes", "on", "y")
+        sw = Switch(value=_as_bool(obj.get("individual_image_in_posts", True)), id=f"sw_individual_image_in_posts__{self._form_rev}")
+        self.inputs["individual_image_in_posts"] = sw  # type: ignore
+        title = Label("发件时单发图片", classes="cfg_key")
+        try:
+            tip_txt = "关闭：仅发送渲染消息记录；开启：同时发送渲染消息记录和用户发的图片"
+            title.tooltip = tip_txt
+            setattr(sw, 'tooltip', tip_txt)
+        except Exception:
+            pass
+        from rich.text import Text as _RText
+        desc = Static()
+        self.form.mount(Horizontal(title, sw, desc, Static("", classes="cfg_spacer"), classes="cfg_row"))
         # 发送计划（字符串时间 HH:MM 列表） — 放在快捷回复之前，便于“快捷回复 -> 管理员”收尾
         self.form.mount(Static("发送计划(send_schedule) - 时间(HH:MM)", classes="title"))
         sched_list = obj.get("send_schedule") or []
@@ -1063,6 +1082,7 @@ class GroupConfigPage(Vertical):
                 "mainqqid":"","mainqq_http_port":"",
                 "minorqqid":[],"minorqq_http_port":[],
                 "admins":[],"max_post_stack":"3","max_image_number_one_post":"18",
+                "individual_image_in_posts": True,
                 "friend_add_message":"","watermark_text":"",
                 "quick_replies":{}
             }
@@ -1079,13 +1099,24 @@ class GroupConfigPage(Vertical):
 
         def get_val(k: str) -> str:
             w = self.inputs.get(k)
-            return w.value if isinstance(w, Input) else str(obj.get(k, ""))
+            if isinstance(w, Input):
+                return w.value
+            return str(obj.get(k, ""))
 
         for k in [
             "mangroupid","mainqqid","mainqq_http_port","max_post_stack",
             "max_image_number_one_post","watermark_text","friend_add_message"
         ]:
             obj[k] = get_val(k)
+
+        # 布尔：individual_image_in_posts
+        sw = self.inputs.get("individual_image_in_posts")
+        try:
+            from textual.widgets import Switch as _Sw  # local alias
+        except Exception:
+            _Sw = Switch  # fallback
+        if isinstance(sw, _Sw):  # type: ignore
+            obj["individual_image_in_posts"] = bool(getattr(sw, "value", True))
 
         # 副账号
         minors: list[str] = []

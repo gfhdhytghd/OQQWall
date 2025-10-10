@@ -474,7 +474,10 @@ manage_posts() {
     echo "DEBUG: tags array: ${tags[*]}" >&2
     echo "DEBUG: comment: '$comment'" >&2
     
-    sendmsggroup "执行发送..."
+    # 仅在启用堆栈模式时提示“执行发送...”
+    if [[ "$max_post_stack" -ne 1 ]]; then
+        sendmsggroup "执行发送..."
+    fi
     
     # 生成发送列表
     local goingtosendid=()
@@ -562,6 +565,11 @@ execute_send_rules() {
     
     # 保存当前投稿
     save_to_storage "$tag" "$numfinal" "$port" "$senderid" "$groupname"
+    
+    # 提示入栈：在启用堆栈模式(max_post_stack!=1)且非立即发送时，通知已入暂存区
+    if [[ "$init_send_status" != "now" && "$max_post_stack" -ne 1 ]]; then
+        sendmsggroup "#${numfinal}投稿已存入暂存区"
+    fi
     
     if [[ "$init_send_status" == "now" ]]; then
         echo "立即发送..."

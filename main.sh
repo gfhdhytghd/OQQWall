@@ -1114,15 +1114,17 @@ guide_account_group_setup() {
   echo "是否现在配置组策略（发送限额、水印、加好友自动回复等）？"
   local do_policy
   do_policy=$(prompt_bool "配置组策略?" "no")
-  local max_stack max_imgs friend_msg watermark
+  local max_stack max_imgs friend_msg watermark indiv_images
   if [[ "$do_policy" == true ]]; then
     max_stack=$(prompt_with_default "每批最大发送条数(max_post_stack)" "1")
     max_imgs=$(prompt_with_default "每贴最多图片数(max_image_number_one_post)" "20")
+    indiv_images=$(prompt_bool "保留用户单独图片到预处理目录(individual_image_in_posts)" "yes")
     read -r -p "加好友自动回复(friend_add_message，可留空): " friend_msg
     read -r -p "水印文字(watermark_text，可留空): " watermark
   else
     max_stack="1"
     max_imgs="20"
+    indiv_images=true
     friend_msg=""
     watermark=""
   fi
@@ -1141,6 +1143,7 @@ guide_account_group_setup() {
     "minorqq_http_port": [],
     "max_post_stack": "$max_stack",
     "max_image_number_one_post": "$max_imgs",
+    "individual_image_in_posts": $indiv_images,
     "friend_add_message": "$friend_json",
     "send_schedule": [],
     "watermark_text": "$watermark_json",
@@ -1392,6 +1395,7 @@ if [[ ! -f "AcountGroupcfg.json" ]]; then
     "minorqq_http_port": [],
     "max_post_stack": "1",
     "max_image_number_one_post": "20",
+    "individual_image_in_posts": true,
     "friend_add_message": "",
     "send_schedule": [],
     "watermark_text": "",

@@ -28,6 +28,9 @@ mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
 minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
 mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
 minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
+# 组策略：是否将用户单独发送的图片拷贝到 prepost 目录
+# 缺省为 true（保持现有行为）。当为 false 时，仅拷贝渲染出的图片，不拷贝原始投稿图片。
+individual_image_in_posts=$(echo "$group_info" | jq -r '.value.individual_image_in_posts // "true"')
 
 
 # 拉黑检查：如果 senderid 在 blocklist 表中被拉黑，则删除 preprocess 表中的该 tag 行并退出
@@ -160,16 +163,21 @@ for ((i=0; i<$pages; i++)); do
 done
 existing_files=$(ls "$folder" | wc -l)
 next_file_index=$existing_files
-echo "$json_data" | jq -r '.messages[].message[] | select(.type == "image" and .data.sub_type == 0) | .data.url' | while read -r url; do
-    # 格式化文件索引
-    formatted_index=$(printf "%02d" $next_file_index)
+# 当 individual_image_in_posts 为 true 时，拷贝用户原始投稿图片；否则仅保留渲染图片
+if [[ "$individual_image_in_posts" == "true" ]]; then
+  echo "$json_data" | jq -r '.messages[].message[] | select(.type == "image" and .data.sub_type == 0) | .data.url' | while read -r url; do
+      # 格式化文件索引
+      formatted_index=$(printf "%02d" $next_file_index)
 
-    # 下载文件并保存
-    curl -o "$folder/$tag-${formatted_index}.jpg" "$url"
+      # 下载文件并保存
+      curl -o "$folder/$tag-${formatted_index}.jpg" "$url"
 
-    # 增加文件索引
-    next_file_index=$((next_file_index + 1))
-done
+      # 增加文件索引
+      next_file_index=$((next_file_index + 1))
+  done
+else
+  echo "组策略 individual_image_in_posts=false：仅拷贝渲染图片，跳过原始图片拷贝"
+fi
 } 200>/dev/shm/OQQWall/oqqwall.lock  
 
 # Lock the directory with a lock file
