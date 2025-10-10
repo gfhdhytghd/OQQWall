@@ -254,9 +254,11 @@ class UDSQzoneEmu:
             except Exception:
                 cv = ''
 
-            is_explicit_health = hv in {'1', 'true', 'ok', 'ping', 'health'} or 
-                                  tv in {'health', 'health-check', 'probe'} or 
-                                  cv in {'health', 'health-check', 'ping', 'probe'}
+            is_explicit_health = (
+                hv in {'1', 'true', 'ok', 'ping', 'health'} or
+                tv in {'health', 'health-check', 'probe'} or
+                cv in {'health', 'health-check', 'ping', 'probe'}
+            )
             no_content = (not text.strip()) and (len([i for i in processed if i]) == 0)
             if is_explicit_health or no_content:
                 try:

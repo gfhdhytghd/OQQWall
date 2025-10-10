@@ -124,7 +124,7 @@ COMMON_ARGS=(
     --headless
     --run-all-compositor-stages-before-draw
     --no-pdf-header-footer
-    --virtual-time-budget=20000
+    --virtual-time-budget=1000
     --pdf-page-orientation=portrait
     --no-margins
     --enable-background-graphics
@@ -170,7 +170,9 @@ echo "$json_data" | jq -r '.messages[].message[] | select(.type == "image" and .
     # 增加文件索引
     next_file_index=$((next_file_index + 1))
 done
-} 200>/dev/shm/OQQWall/oqqwall.lock  # Lock the directory with a lock file
+} 200>/dev/shm/OQQWall/oqqwall.lock  
+
+# Lock the directory with a lock file
 # 保留文件后缀，便于浏览器与前端按 MIME 正确识别与展示
 # 之前会去掉后缀，导致 review 页面扩展名缺失、识别困难
 
