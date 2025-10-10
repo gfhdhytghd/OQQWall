@@ -569,6 +569,7 @@ execute_send_rules() {
     # 提示入栈：在启用堆栈模式(max_post_stack!=1)且非立即发送时，通知已入暂存区
     if [[ "$init_send_status" != "now" && "$max_post_stack" -ne 1 ]]; then
         sendmsggroup "#${numfinal}投稿已存入暂存区"
+        sendmsgpriv_givenport "$senderid" "$port" "#${numfinal}投稿已存入暂存区(系统自动发送，请勿回复)"
     fi
     
     if [[ "$init_send_status" == "now" ]]; then

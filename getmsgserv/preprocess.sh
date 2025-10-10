@@ -30,7 +30,7 @@ mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
 minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
 # 组策略：是否将用户单独发送的图片拷贝到 prepost 目录
 # 缺省为 true（保持现有行为）。当为 false 时，仅拷贝渲染出的图片，不拷贝原始投稿图片。
-individual_image_in_posts=$(echo "$group_info" | jq -r '.value.individual_image_in_posts // "true"')
+individual_image_in_posts=$(echo "$group_info" | jq -r 'if (has("value") and (.value | has("individual_image_in_posts"))) then .value.individual_image_in_posts else true end')
 
 
 # 拉黑检查：如果 senderid 在 blocklist 表中被拉黑，则删除 preprocess 表中的该 tag 行并退出
