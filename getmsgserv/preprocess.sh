@@ -221,7 +221,6 @@ for f in "$folder_path"/*; do
   esac
   mv -- "$f" "$f.$ext" 2>/dev/null || true
 done
-echo $MSGcache
 for file_path in $(find "$folder_path" -maxdepth 1 -type f | sort); do
     echo "添加文件: $file_path"
     MSGcache+="[CQ:image,file=file://$file_path]"

@@ -41,8 +41,7 @@ postqzone(){
 
     if echo "$post_statue"  | grep -q "success"; then
         goingtosendid=("${goingtosendid[@]/$1}")
-        sendmsgpriv $senderid "#$numfinal 投稿已存入暂存区,你现在可以继续投稿(系统自动发送，请勿回复)"
-        sendmsggroup_ctx "#$numfinal 投稿已存入暂存区"
+        # 提示改由 sendcontrol 发送，避免重复发送
 
     elif echo "$post_statue"  | grep -q "failed"; then
         log_and_continue "空间发送调度服务发生错误"
