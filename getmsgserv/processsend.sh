@@ -5,6 +5,7 @@ log_and_continue() {
     mkdir -p ./cache
     echo "processsend $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/Processsend_CrashReport.txt
     echo "processsend 错误已记录: $errmsg"
+    sendmsggroup "$errmsg"
 }
 
 # 统一群提示：网页来源时添加前缀；某些“请发送指令”提示在网页场景下抑制

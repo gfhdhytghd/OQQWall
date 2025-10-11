@@ -263,7 +263,6 @@ $group_pending"
 
         if echo "$post_statue"  | grep -q "success"; then
             goingtosendid=("${goingtosendid[@]/$1}")
-            sendmsggroup_ctx "投稿已发送"
 
         elif echo "$post_statue"  | grep -q "failed"; then
             log_and_continue "空间发送调度服务发生错误"

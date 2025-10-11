@@ -5,6 +5,7 @@ log_and_continue() {
     mkdir -p ./cache
     echo "preprocess $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/Preprocess_CrashReport.txt
     echo "preprocess 错误已记录: $errmsg"
+    sendmsggroup "$errmsg"
 }
 tag=$1
 flag=$2
