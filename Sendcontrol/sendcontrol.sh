@@ -404,6 +404,18 @@ send_to_qzone() {
 
         local uds_path
         uds_path="${QZONE_UDS_PATH:-./qzone_uds.sock}"
+
+        # 等待 UDS 可用（系统修复/重启后需要重建）
+        local waited=0 max_wait=15
+        while [[ ! -S "$uds_path" && $waited -lt $max_wait ]]; do
+            log_debug "等待 QZone UDS 重建: $uds_path ($waited/$max_wait)"
+            sleep 1; ((waited++))
+        done
+        if [[ ! -S "$uds_path" ]]; then
+            log_error "QZone UDS 不可用: $uds_path"
+            return 1
+        fi
+
         post_status=$(printf '%s' "$json_payload" \
             | socat -t 60 -T 180 - UNIX-CONNECT:"$uds_path" 2>/dev/null)
         
@@ -901,13 +913,16 @@ handle_connection() {
 run_uds_server() {
     local uds_path
     uds_path="${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}"
-    # 移除旧 socket 文件
-    [[ -e "$uds_path" ]] && rm -f -- "$uds_path"
-    echo "sendcontrol UDS 监听: $uds_path"
-    # 前台阻塞运行，fork 每个连接；使用 EXEC 的参数方式避免引号误传
-    # 每个连接派生：bash -lc ./Sendcontrol/sendcontrol.sh --handle-conn
-    exec socat -t 60 -T 180 UNIX-LISTEN:"$uds_path",fork,unlink-early \
-        EXEC:"./Sendcontrol/sendcontrol.sh --handle-conn",pipes
+    echo "sendcontrol UDS 监听: $uds_path (带自愈)"
+    # 监督循环：socat 异常退出后 1s 内自动重监听并重建 UDS
+    while true; do
+        [[ -e "$uds_path" ]] && rm -f -- "$uds_path"
+        socat -t 60 -T 180 UNIX-LISTEN:"$uds_path",fork,unlink-early \
+            EXEC:"./Sendcontrol/sendcontrol.sh --handle-conn",pipes
+        rc=$?
+        echo "sendcontrol: socat 退出, rc=$rc，1s后自愈重启..."
+        sleep 1
+    done
 }
 
 # =============================================================================

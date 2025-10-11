@@ -875,6 +875,71 @@ kill_pat() {
     pkill -f -15 -- "$pattern" 2>/dev/null || true
 }
 
+# 递归杀死匹配进程及其所有子进程
+kill_tree_by_pattern() {
+  local pattern=$1
+  local pids
+  mapfile -t pids < <(pgrep -f -- "$pattern" || true)
+  [[ ${#pids[@]} -eq 0 ]] && return 0
+
+  # 递归杀子进程
+  _kill_descendants() {
+    local p=$1
+    local children
+    mapfile -t children < <(pgrep -P "$p" || true)
+    if (( ${#children[@]} > 0 )); then
+      for c in "${children[@]}"; do
+        _kill_descendants "$c"
+      done
+    fi
+    kill -TERM "$p" 2>/dev/null || true
+  }
+
+  for pid in "${pids[@]}"; do
+    _kill_descendants "$pid"
+  done
+
+  # 等待最多3秒，否则强杀
+  local deadline=$(( $(date +%s) + 3 ))
+  while IFS= read -r p; do
+    while kill -0 "$p" 2>/dev/null; do
+      if (( $(date +%s) >= deadline )); then
+        kill -KILL "$p" 2>/dev/null || true
+        break
+      fi
+      sleep 0.1
+    done
+  done < <(printf '%s\n' "${pids[@]}")
+}
+
+# 强制重启核心 UDS 服务（qzone-serv-UDS, sendcontrol），并删除残留套接字
+force_restart_uds_services() {
+  local is_test_mode=${1:-}
+  echo "[boot] 强制重启 UDS 服务..."
+
+  # 结束现有进程树
+  kill_tree_by_pattern "python3 SendQzone/qzone-serv-UDS.py"
+  kill_tree_by_pattern "/bin/bash ./Sendcontrol/sendcontrol.sh"
+  kill_tree_by_pattern "socat .*sendcontrol_uds.sock"
+
+  # 清理遗留 UDS 文件，避免 bind 失败
+  local qz_sock sc_sock
+  qz_sock=${QZONE_UDS_PATH:-./qzone_uds.sock}
+  sc_sock=${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}
+  [[ -S "$qz_sock" ]] && rm -f -- "$qz_sock" || true
+  [[ -S "$sc_sock" ]] && rm -f -- "$sc_sock" || true
+
+  # 启动服务
+  if [[ "$is_test_mode" == "--test" ]]; then
+    echo "[boot] test 模式：跳过启动 qzone-serv-UDS.py"
+  else
+    python3 ./SendQzone/qzone-serv-UDS.py &
+    echo "qzone-serv-UDS.py started"
+  fi
+  ./Sendcontrol/sendcontrol.sh &
+  echo "sendcontrol.sh started"
+}
+
 require_cmd() {
   local missing=0
   for cmd in "$@"; do
@@ -1954,24 +2019,8 @@ else
     echo "serv.py started"
 fi
 
-if pgrep -f "python3 ./SendQzone/qzone-serv-UDS.py" > /dev/null; then
-  echo "qzone-serv-UDS.py is already running"
-else
-  if [[ $1 == --test ]]; then
-    echo "请自行启动测试服务器"
-  else
-    python3 ./SendQzone/qzone-serv-UDS.py &
-    echo "qzone-serv-UDS.py started"
-  fi
-fi
-
-if pgrep -f "./Sendcontrol/sendcontrol.sh" > /dev/null
-then
-    echo "sendcontrol.sh is already running"
-else
-    ./Sendcontrol/sendcontrol.sh &
-    echo "sendcontrol.sh started"
-fi
+# 启动阶段强制重启两大 UDS 服务，确保连接新建
+force_restart_uds_services "$1"
 
 # 启动网页审核（可选）
 if [[ "$use_web_review" == "true" ]]; then

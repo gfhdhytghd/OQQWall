@@ -18,6 +18,41 @@ sendmsggroup_ctx() {
     fi
 }
 
+# 递归杀死匹配进程及其所有子进程（用于系统修复）
+kill_tree_by_pattern() {
+  local pattern=$1
+  local pids
+  mapfile -t pids < <(pgrep -f -- "$pattern" || true)
+  [[ ${#pids[@]} -eq 0 ]] && return 0
+
+  _kill_descendants() {
+    local p=$1
+    local children
+    mapfile -t children < <(pgrep -P "$p" || true)
+    if (( ${#children[@]} > 0 )); then
+      for c in "${children[@]}"; do
+        _kill_descendants "$c"
+      done
+    fi
+    kill -TERM "$p" 2>/dev/null || true
+  }
+
+  for pid in "${pids[@]}"; do
+    _kill_descendants "$pid"
+  done
+
+  local deadline=$(( $(date +%s) + 3 ))
+  while IFS= read -r p; do
+    while kill -0 "$p" 2>/dev/null; do
+      if (( $(date +%s) >= deadline )); then
+        kill -KILL "$p" 2>/dev/null || true
+        break
+      fi
+      sleep 0.1
+    done
+  done < <(printf '%s\n' "${pids[@]}")
+}
+
 file_to_watch="./getmsgserv/all/priv_post.jsonl"
 legacy_priv="./getmsgserv/all/priv_post.json"
 if [[ -f "$legacy_priv" && ! -f "$file_to_watch" ]]; then
@@ -340,6 +375,40 @@ $group_pending"
         # 7. 调用已存在的发送函数，注意这里不修改 sendmsggroup 的定义
         sendmsggroup_ctx "$syschecklist"
         ;;
+    "系统修复")
+        # 强制重启 serv.py 以外的全部服务（含其子进程），并删除重建 UDS
+        sendmsggroup_ctx "正在执行系统修复（重启除serv.py外服务，重建UDS）..."
+
+        # 停服务：qzone-serv-UDS / sendcontrol 及其子进程；顺带清理 socat fork
+        kill_tree_by_pattern "python3 SendQzone/qzone-serv-UDS.py"
+        kill_tree_by_pattern "/bin/bash ./Sendcontrol/sendcontrol.sh"
+        kill_tree_by_pattern "socat .*sendcontrol_uds.sock"
+        # 可选：网页审核
+        kill_tree_by_pattern "python3 web_review.py"
+
+        # 清理 UDS 套接字
+        qz_sock="${QZONE_UDS_PATH:-./qzone_uds.sock}"
+        sc_sock="${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}"
+        [[ -S "$qz_sock" ]] && rm -f -- "$qz_sock"
+        [[ -S "$sc_sock" ]] && rm -f -- "$sc_sock"
+
+        # 重启（serv.py 保持不动）
+        if ! pgrep -f "python3 getmsgserv/serv.py" >/dev/null 2>&1; then
+          python3 ./getmsgserv/serv.py &
+          echo "serv.py started"
+        fi
+        python3 ./SendQzone/qzone-serv-UDS.py &
+        ./Sendcontrol/sendcontrol.sh &
+
+        # 可选：网页审核（如有启用）
+        if [[ "${use_web_review:-false}" == "true" ]]; then
+          if ! pgrep -f "python3 web_review.py" >/dev/null 2>&1; then
+            (cd web_review && PORT="${web_review_port:-8088}" HOST="0.0.0.0" nohup python3 web_review.py --host 0.0.0.0 --port "${web_review_port:-8088}" > web_review.log 2>&1 &)
+          fi
+        fi
+
+        sendmsggroup_ctx "系统修复完成（UDS 已重建，服务已重启）"
+        ;;
     "取消拉黑")
         if [[ -z "$command" ]]; then
             sendmsggroup_ctx "请提供要取消拉黑的 senderid"
@@ -515,6 +584,9 @@ $group_pending"
 
 自检：
 系统与服务自检
+
+系统修复：
+强制重启serv.py以外的全部服务，删除并重建UDS
 
 
 
