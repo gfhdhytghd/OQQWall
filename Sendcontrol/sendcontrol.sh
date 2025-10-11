@@ -913,7 +913,7 @@ handle_connection() {
 run_uds_server() {
     local uds_path
     uds_path="${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}"
-    echo "sendcontrol UDS 监听: $uds_path (带自愈)"
+    echo "sendcontrol UDS 监听: $uds_path "
     # 监督循环：socat 异常退出后 1s 内自动重监听并重建 UDS
     while true; do
         [[ -e "$uds_path" ]] && rm -f -- "$uds_path"
