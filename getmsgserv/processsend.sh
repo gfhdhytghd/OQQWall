@@ -277,8 +277,33 @@ EOF
         getmsgserv/preprocess.sh $object randeronly
         ;;
     消息全选)
-        # 将本次投稿对应的原始消息(rawmsg)全部作为投稿内容写入 AfterLM.messages
-        # 1) 取原始消息（基于当前 tag 定位 sender+receiver）
+        # 将本次投稿全部消息设为投稿内容：优先用 progress-lite 生成标准化 messages，失败时回退 rawmsg
+        exist_json=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+
+        # 先尝试标准化（含 forward 展开、file->image、下载资源等）
+        processed_json=$(getmsgserv/LM_work/progress-lite-json.sh "$object" "$port" 2>/dev/null || true)
+        if [[ -n "$processed_json" ]]; then
+            if updated=$(jq -n --arg base "${exist_json}" --argjson proc "$processed_json" '
+                (try ($base|fromjson) catch {})
+                + {messages: ($proc.messages // [])}
+                + {notregular: ($proc.notregular // "false")}
+            '); then
+                escaped_updated=$(printf "%s" "$updated" | sed "s/'/''/g")
+                if timeout 10s sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET AfterLM='$escaped_updated' WHERE tag = '$object';"; then
+                    sendmsggroup_ctx "已将本次投稿的所有消息设为投稿内容，正在渲染..."
+                    getmsgserv/preprocess.sh $object randeronly
+                else
+                    sendmsggroup_ctx "全选失败：数据库写入异常"
+                    sendmsggroup "内部编号$object, 请发送指令"
+                fi
+                break
+            else
+                # fallthrough to raw 回退
+                :
+            fi
+        fi
+
+        # 回退：直接使用原始 rawmsg（不展开 forward，不转换 file）
         raw_json=$(timeout 10s sqlite3 'cache/OQQWall.db' "
             SELECT s.rawmsg
               FROM sender s
@@ -288,14 +313,9 @@ EOF
             sendmsggroup_ctx "未找到原始消息，无法全选"
             sendmsggroup "内部编号$object, 请发送指令"
         else
-            # 2) 读取现有 AfterLM（若无则用空对象），仅替换 messages 字段
-            exist_json=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
-            # 使用 jq fromjson 容错解析已有 JSON，合并后写回
-            if updated=$(jq -n --arg base "${exist_json}" --argjson msgs "$raw_json" '((try $base|fromjson catch {}) + {messages:$msgs})'); then
-                # 3) 写回数据库（转义单引号）
+            if updated=$(jq -n --arg base "${exist_json}" --argjson msgs "$raw_json" '((try ($base|fromjson) catch {}) + {messages:$msgs})'); then
                 escaped_updated=$(printf "%s" "$updated" | sed "s/'/''/g")
                 if timeout 10s sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET AfterLM='$escaped_updated' WHERE tag = '$object';"; then
-                    # 4) 仅重渲染（不触发发送）
                     getmsgserv/preprocess.sh $object randeronly
                     sendmsggroup_ctx "已将本次投稿的所有消息设为投稿内容"
                     sendmsggroup "内部编号$object, 请发送指令"
