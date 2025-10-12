@@ -1169,7 +1169,7 @@ class GroupConfigPage(Vertical):
         http_ports: set[str] = set()
 
         # 审核指令冲突列表
-        audit_cmds = {"是","否","匿","等","删","拒","立即","刷新","重渲染","扩列审查","评论","回复","展示","拉黑"}
+        audit_cmds = {"是","否","匿","等","删","拒","立即","刷新","重渲染","扩列审查","评论","回复","展示","拉黑","消息全选"}
 
         for group in data.keys():
             if not group or not all(c.isalnum() or c == '_' for c in group):

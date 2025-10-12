@@ -1850,7 +1850,7 @@ while read -r group; do
       errors+=("错误：在 $group 中，quick_replies 必须是对象（当前为 $quick_replies_type）。")
     else
       # 检查每个快捷回复指令是否与审核指令冲突
-      audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "评论" "回复" "展示" "拉黑")
+      audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "评论" "回复" "展示" "拉黑" "消息全选")
       while IFS= read -r entry; do
         cmd_name=$(jq -r '.key' <<<"$entry")
         cmd_type=$(jq -r '.value | type' <<<"$entry")
