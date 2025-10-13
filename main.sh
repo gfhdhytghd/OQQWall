@@ -798,6 +798,7 @@ http-serv-port=
 apikey=""
 process_waittime=120
 manage_napcat_internal=true
+renewcookies_use_napcat=true
 max_attempts_qzone_autologin=3
 text_model=qwen-plus-latest
 vision_model=qwen-vl-max-latest
@@ -1111,12 +1112,14 @@ prompt_port() {
 write_oqq_config() {
   local http_port="$1" apikey_val="$2" process_wait="$3" manage_q="$4" max_auto="$5" \
         text_m="$6" vision_m="$7" vision_px="$8" vision_mb="$9" at_unpriv="${10}" \
-        fr_win="${11}" no_sandbox="${12}" use_review="${13}" review_port="${14}" token="${15}"
+        fr_win="${11}" no_sandbox="${12}" use_review="${13}" review_port="${14}" token="${15}" \
+        renew_use_nc="${16}"
   cat > "$CFG" <<EOF
 http-serv-port=$http_port
 apikey="$apikey_val"
 process_waittime=$process_wait
 manage_napcat_internal=$manage_q
+renewcookies_use_napcat=${renew_use_nc:-true}
 max_attempts_qzone_autologin=$max_auto
 text_model=$text_m
 vision_model=$vision_m
@@ -1249,7 +1252,7 @@ run_oobe() {
   echo "欢迎使用 OQQWall 首次运行向导 (OOBE)"
   echo "本向导将帮你生成 oqqwall.config，并可选创建 AcountGroupcfg.json。"
 
-  local http_port apikey_val process_wait manage_q max_auto text_m vision_m vision_px vision_mb at_unpriv fr_win no_sandbox use_review review_port token
+  local http_port apikey_val process_wait manage_q max_auto text_m vision_m vision_px vision_mb at_unpriv fr_win no_sandbox use_review review_port token renew_use_nc
 
   local http_def
   http_def=$(find_next_free_port 8082)
@@ -1271,6 +1274,7 @@ run_oobe() {
   fi
   manage_q=$(prompt_bool "是否由本程序管理 NapCat/QQ (manage_napcat_internal)" "${_manage_def}")
   max_auto=$(prompt_with_default "QZone 自动登录最大尝试次数(max_attempts_qzone_autologin)" "3")
+  renew_use_nc=$(prompt_bool "续 Cookies 使用 NapCat 版(renewcookies_use_napcat)" "yes")
   text_m=$(prompt_with_default "文本模型(text_model)" "qwen-plus-latest")
   vision_m=$(prompt_with_default "多模模型(vision_model)" "qwen-vl-max-latest")
   vision_px=$(prompt_with_default "视觉像素上限(vision_pixel_limit)" "12000000")
@@ -1303,7 +1307,7 @@ run_oobe() {
 
   write_oqq_config "$http_port" "$apikey_val" "$process_wait" "$manage_q" "$max_auto" \
                    "$text_m" "$vision_m" "$vision_px" "$vision_mb" "$at_unpriv" \
-                   "$fr_win" "$no_sandbox" "$use_review" "$review_port" "$token"
+                   "$fr_win" "$no_sandbox" "$use_review" "$review_port" "$token" "$renew_use_nc"
   echo "已创建文件: $CFG"
   echo "请将 napcat_access_token 同步到 NapCat/OneBot 侧的鉴权配置中。"
 
@@ -1478,6 +1482,7 @@ check_variable "http-serv-port" "8082"
 check_variable "apikey"  "sk-"
 check_variable "process_waittime" "120"
 check_variable "manage_napcat_internal" "true"
+check_variable "renewcookies_use_napcat" "true"
 check_variable "max_attempts_qzone_autologin"  "3"
 check_variable "at_unprived_sender" "true"
 check_variable "text_model" "qwen-plus-latest"

@@ -7,6 +7,13 @@ if [[ -z "$NAPCAT_ACCESS_TOKEN" ]]; then
     exit 1
 fi
 
+# 续 Cookie 实现选择：
+# renewcookies_use_napcat=true(默认) 使用 NapCat 版；false 使用非 NapCat 版
+RENEWCOOKIES_USE_NAPCAT=$(grep -m1 '^renewcookies_use_napcat=' oqqwall.config | cut -d'=' -f2- | tr -d '"')
+if [[ -z "$RENEWCOOKIES_USE_NAPCAT" ]]; then
+    RENEWCOOKIES_USE_NAPCAT="true"
+fi
+
 NAPCAT_AUTH_HEADER="Authorization: Bearer $NAPCAT_ACCESS_TOKEN"
 
 sendmsggroup() {
@@ -114,14 +121,24 @@ renewqzoneloginauto() {
         echo "[ERR] renewqzoneloginauto: 找不到 QQ $qqid 对应端口"
         return 1
     fi
-    echo "[INFO] renewqzoneloginauto: qq=$qqid  port=$qport"
+    echo "[INFO] renewqzoneloginauto: qq=$qqid  port=$qport  use_napcat=$RENEWCOOKIES_USE_NAPCAT"
 
-    #▶ 执行续登脚本
-    python3 ./SendQzone/qzonerenewcookies-napcat.py "$qport"
-    local ret=$?
-    if [[ $ret -ne 0 ]]; then
-        echo "[ERR] qzonerenewcookies-napcat.py 失败 (exit=$ret)"
-        return $ret
+    #▶ 执行续登脚本（根据配置选择实现）
+    if [[ "$RENEWCOOKIES_USE_NAPCAT" == "true" ]]; then
+        python3 ./SendQzone/qzonerenewcookies-napcat.py "$qport"
+        local ret=$?
+        if [[ $ret -ne 0 ]]; then
+            echo "[ERR] qzonerenewcookies-napcat.py 失败 (exit=$ret)"
+            return $ret
+        fi
+    else
+        # 非 NapCat 实现按 QQ 号参数
+        python3 ./SendQzone/qzonerenewcookies.py "$qqid"
+        local ret=$?
+        if [[ $ret -ne 0 ]]; then
+            echo "[ERR] qzonerenewcookies.py 失败 (exit=$ret)"
+            return $ret
+        fi
     fi
     echo "[OK] cookie 刷新成功"
 }
