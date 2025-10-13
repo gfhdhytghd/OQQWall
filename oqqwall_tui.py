@@ -69,6 +69,7 @@ CONFIG_TOOLTIPS: dict[str, str] = {
     "apikey": "调用大模型时使用的 API Key",
     "process_waittime": "等待图片/处理的超时秒数",
     "manage_napcat_internal": "是否由本程序管理 NapCat/QQ",
+    "renewcookies_use_napcat": "续 Cookies 使用 NapCat 版(true)/非 NapCat 版(false)",
     "max_attempts_qzone_autologin": "QZone 自动登录重试次数",
     "text_model": "文本模型名称（如 qwen-plus-latest）",
     "vision_model": "多模态模型名称",
@@ -91,6 +92,8 @@ CONFIG_ORDER: list[str] = [
     # NapCat/登录
     "napcat_access_token",
     "manage_napcat_internal",
+    # QZone/续 Cookie 实现选择
+    "renewcookies_use_napcat",
     # QZone/浏览器
     "max_attempts_qzone_autologin",
     "force_chromium_no-sandbox",
@@ -737,6 +740,9 @@ class GlobalConfigPage(Vertical):
                     pass
         self.inputs.clear()
         cfg = read_kv_config(CONFIG_FILE)
+        # 确保新增布尔项在旧配置也可见（默认 true）
+        if "renewcookies_use_napcat" not in cfg:
+            cfg["renewcookies_use_napcat"] = "true"
         if not cfg:
             self.form.mount(Static("未找到 oqqwall.config 或为空", classes="hint"))
             return

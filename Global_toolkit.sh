@@ -9,7 +9,7 @@ fi
 
 # 续 Cookie 实现选择：
 # renewcookies_use_napcat=true(默认) 使用 NapCat 版；false 使用非 NapCat 版
-RENEWCOOKIES_USE_NAPCAT=$(grep -m1 '^renewcookies_use_napcat=' oqqwall.config | cut -d'=' -f2- | tr -d '"')
+RENEWCOOKIES_USE_NAPCAT=$(grep -m1 '^renewcookies_use_napcat=' oqqwall.config | cut -d'=' -f2- | tr -d '"' | tr '[:upper:]' '[:lower:]')
 if [[ -z "$RENEWCOOKIES_USE_NAPCAT" ]]; then
     RENEWCOOKIES_USE_NAPCAT="true"
 fi

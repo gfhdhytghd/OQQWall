@@ -1274,7 +1274,7 @@ run_oobe() {
   fi
   manage_q=$(prompt_bool "是否由本程序管理 NapCat/QQ (manage_napcat_internal)" "${_manage_def}")
   max_auto=$(prompt_with_default "QZone 自动登录最大尝试次数(max_attempts_qzone_autologin)" "3")
-  renew_use_nc=$(prompt_bool "续 Cookies 使用 NapCat 版(renewcookies_use_napcat)" "yes")
+  renew_use_nc=$(prompt_bool "续 Cookies 使用 NapCat 版(renewcookies_use_napcat)" "true")
   text_m=$(prompt_with_default "文本模型(text_model)" "qwen-plus-latest")
   vision_m=$(prompt_with_default "多模模型(vision_model)" "qwen-vl-max-latest")
   vision_px=$(prompt_with_default "视觉像素上限(vision_pixel_limit)" "12000000")
