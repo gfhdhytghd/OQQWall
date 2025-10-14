@@ -900,10 +900,13 @@ handle_connection() {
     log_debug "ack success tag=$tag num=$numfinal init=$initsendstatue"
 
     # 后台处理：自包含调用，确保即使本进程退出也继续执行
-    # 使用脚本自身的 --run-tag 接口以在新进程中重建上下文
+    # 注意：bash -lc 会将工作目录切到 $HOME；脚本内部使用了相对路径
+    # 因此这里显式切换到仓库根目录（sendcontrol.sh 的上级上级目录）再执行。
     {
       self_path=$(readlink -f "$0" 2>/dev/null || echo "$0")
-      nohup bash -lc "'${self_path}' --run-tag '$tag' '$numfinal' '$initsendstatue'" \
+      self_dir=$(dirname "$self_path")
+      repo_root=$(cd "$self_dir/.." 2>/dev/null && pwd || echo ".")
+      nohup bash -lc "cd '${repo_root}' && '${self_path}' --run-tag '$tag' '$numfinal' '$initsendstatue'" \
         >/dev/null 2>&1 &
     } >/dev/null 2>&1 || true
     log_debug "spawn --run-tag for tag=$tag"
