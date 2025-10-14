@@ -871,10 +871,10 @@ handle_connection() {
         load_base_config
         if flush_staged_posts "$target_group"; then
             log_debug "flush result=success"
-            printf '%s' "success"
+            printf '%s\n' "success"
         else
             log_debug "flush result=failed"
-            printf '%s' "failed"
+            printf '%s\n' "failed"
         fi
         return 0
     fi
@@ -889,20 +889,24 @@ handle_connection() {
     # 基本校验：tag 必须存在
     if [[ -z "$tag" ]]; then
         log_error "收到的投稿JSON缺少tag字段或为空，原始输入: $in_json_data"
-        printf '%s' "failed"
+        printf '%s\n' "failed"
         return 0
     fi
 
     # 立即应答 success，避免前台等待长任务（发送/调度）导致超时
     # 随后在后台执行完整的 get_send_info/execute_send_rules 流程
-    printf '%s' "success"
+    # 输出换行，避免某些场景下 pty/行缓冲不立刻刷出
+    printf '%s\n' "success"
     log_debug "ack success tag=$tag num=$numfinal init=$initsendstatue"
 
     # 后台处理：自包含调用，确保即使本进程退出也继续执行
-    # 使用脚本自身的 --run-tag 接口以在新进程中重建上下文
+    # 注意：bash -lc 会将工作目录切到 $HOME；脚本内部使用了相对路径
+    # 因此这里显式切换到仓库根目录（sendcontrol.sh 的上级上级目录）再执行。
     {
       self_path=$(readlink -f "$0" 2>/dev/null || echo "$0")
-      nohup bash -lc "'${self_path}' --run-tag '$tag' '$numfinal' '$initsendstatue'" \
+      self_dir=$(dirname "$self_path")
+      repo_root=$(cd "$self_dir/.." 2>/dev/null && pwd || echo ".")
+      nohup bash -lc "cd '${repo_root}' && '${self_path}' --run-tag '$tag' '$numfinal' '$initsendstatue'" \
         >/dev/null 2>&1 &
     } >/dev/null 2>&1 || true
     log_debug "spawn --run-tag for tag=$tag"
@@ -931,7 +935,8 @@ run_uds_server() {
 
 # 入口：
 case "${1:-}" in
-  --handle-conn)
+  # 兼容历史误引号调用（例如 --handle-conn,pipes 被当作单个参数传入）
+  --handle-conn*)
     handle_connection
     ;;
   --run-tag)

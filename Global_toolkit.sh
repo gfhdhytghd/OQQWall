@@ -1,8 +1,9 @@
-if [[ -z "$NAPCAT_ACCESS_TOKEN" ]]; then
+# 兼容 set -u：引用环境变量使用默认值占位，避免“未绑定的变量”
+if [[ -z "${NAPCAT_ACCESS_TOKEN:-}" ]]; then
     NAPCAT_ACCESS_TOKEN=$(grep -m1 '^napcat_access_token=' oqqwall.config | cut -d'=' -f2- | tr -d '"')
 fi
 
-if [[ -z "$NAPCAT_ACCESS_TOKEN" ]]; then
+if [[ -z "${NAPCAT_ACCESS_TOKEN:-}" ]]; then
     echo "[ERR] 未在 oqqwall.config 中找到 napcat_access_token，请先运行 main.sh 初始化。" >&2
     exit 1
 fi
