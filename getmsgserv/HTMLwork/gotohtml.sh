@@ -848,7 +848,7 @@ html_content=$(cat <<EOF
 <body>
     <div class="container">
         <div class="header">
-            <img src="http://q.qlogo.cn/headimg_dl?dst_uin=${userid}&spec=640&img_type=jpg" alt="Profile Image">
+            <img src="https://qlogo2.store.qq.com/qzone/${userid}/${userid}/640" alt="Profile Image">
             <div class="header-text">
                 <h1>${nickname}</h1>
                 <h2>${userid_show}</h2>

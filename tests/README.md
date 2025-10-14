@@ -17,7 +17,8 @@
 | `napcat_recorder.py` | HTTP POST录制器，捕获napcat发送的请求 |
 | `napcat_replayer.py` | 高级重放器，支持详细的重放控制 |
 | `napcat_controller.py` | 简化控制器，实现"按Enter发送"功能 |
-| `emuqzoneserv.py` | QZone服务模拟器 (已存在) |
+| `emuqzone_uds.py` | QZone UDS 服务模拟器（通过 Unix Domain Socket 通讯） |
+| `emuqzoneserv.py` | QZone 管道服务模拟器（旧版 FIFO 方案） |
 
 ## 🚀 快速开始
 
@@ -231,3 +232,23 @@ python3 napcat_recorder.py --port 8083 2>&1 | tee recorder.log
 ---
 
 💡 **提示**: 建议先在测试环境熟悉工具使用，再用于生产环境的调试和测试。
+### UDS 模拟器 (emuqzone_uds.py)
+
+用于与 UDS 版 QZone 发送服务联调：
+
+```bash
+# 启动 UDS 模拟器（默认套接字 ./qzone_uds.sock，Web 8086）
+python3 tests/emuqzone_uds.py --sock ./qzone_uds.sock --port 8086
+
+# 发送一条请求（使用 socat）
+printf '%s' '{
+  "text": "UDS hello",
+  "image": ["file:///path/to/img.jpg"],
+  "cookies": {"uin":"o123456"}
+}' | socat - UNIX-CONNECT:./qzone_uds.sock
+
+# 浏览最近请求（预览图片/文本）
+xdg-open http://localhost:8086 || true
+```
+
+返回值：`success`/`failed`。模拟器不会调用真实 QZone，仅记录并在 Web 页面展示最近请求。

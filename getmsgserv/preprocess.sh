@@ -5,6 +5,7 @@ log_and_continue() {
     mkdir -p ./cache
     echo "preprocess $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/Preprocess_CrashReport.txt
     echo "preprocess 错误已记录: $errmsg"
+    sendmsggroup "$errmsg"
 }
 tag=$1
 flag=$2
@@ -28,6 +29,9 @@ mainqqid=$(echo "$group_info" | jq -r '.value.mainqqid')
 minorqqid=$(echo "$group_info" | jq -r '.value.minorqqid[]')
 mainqq_http_port=$(echo "$group_info" | jq -r '.value.mainqq_http_port')
 minorqq_http_ports=$(echo "$group_info" | jq -r '.value.minorqq_http_port[]')
+# 组策略：是否将用户单独发送的图片拷贝到 prepost 目录
+# 缺省为 true（保持现有行为）。当为 false 时，仅拷贝渲染出的图片，不拷贝原始投稿图片。
+individual_image_in_posts=$(echo "$group_info" | jq -r 'if (has("value") and (.value | has("individual_image_in_posts"))) then .value.individual_image_in_posts else true end')
 
 
 # 拉黑检查：如果 senderid 在 blocklist 表中被拉黑，则删除 preprocess 表中的该 tag 行并退出
@@ -124,7 +128,7 @@ COMMON_ARGS=(
     --headless
     --run-all-compositor-stages-before-draw
     --no-pdf-header-footer
-    --virtual-time-budget=20000
+    --virtual-time-budget=1000
     --pdf-page-orientation=portrait
     --no-margins
     --enable-background-graphics
@@ -160,17 +164,24 @@ for ((i=0; i<$pages; i++)); do
 done
 existing_files=$(ls "$folder" | wc -l)
 next_file_index=$existing_files
-echo "$json_data" | jq -r '.messages[].message[] | select(.type == "image" and .data.sub_type == 0) | .data.url' | while read -r url; do
-    # 格式化文件索引
-    formatted_index=$(printf "%02d" $next_file_index)
+# 当 individual_image_in_posts 为 true 时，拷贝用户原始投稿图片；否则仅保留渲染图片
+if [[ "$individual_image_in_posts" == "true" ]]; then
+  echo "$json_data" | jq -r '.messages[].message[] | select(.type == "image" and .data.sub_type == 0) | .data.url' | while read -r url; do
+      # 格式化文件索引
+      formatted_index=$(printf "%02d" $next_file_index)
 
-    # 下载文件并保存
-    curl -o "$folder/$tag-${formatted_index}.jpg" "$url"
+      # 下载文件并保存
+      curl -o "$folder/$tag-${formatted_index}.jpg" "$url"
 
-    # 增加文件索引
-    next_file_index=$((next_file_index + 1))
-done
-} 200>/dev/shm/OQQWall/oqqwall.lock  # Lock the directory with a lock file
+      # 增加文件索引
+      next_file_index=$((next_file_index + 1))
+  done
+else
+  echo "组策略 individual_image_in_posts=false：仅拷贝渲染图片，跳过原始图片拷贝"
+fi
+} 200>/dev/shm/OQQWall/oqqwall.lock  
+
+# Lock the directory with a lock file
 # 保留文件后缀，便于浏览器与前端按 MIME 正确识别与展示
 # 之前会去掉后缀，导致 review 页面扩展名缺失、识别困难
 
@@ -219,7 +230,6 @@ for f in "$folder_path"/*; do
   esac
   mv -- "$f" "$f.$ext" 2>/dev/null || true
 done
-echo $MSGcache
 for file_path in $(find "$folder_path" -maxdepth 1 -type f | sort); do
     echo "添加文件: $file_path"
     MSGcache+="[CQ:image,file=file://$file_path]"

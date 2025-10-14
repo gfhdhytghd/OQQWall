@@ -5,6 +5,7 @@ log_and_continue() {
     mkdir -p ./cache
     echo "processsend $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/Processsend_CrashReport.txt
     echo "processsend 错误已记录: $errmsg"
+    sendmsggroup "$errmsg"
 }
 
 # 统一群提示：网页来源时添加前缀；某些“请发送指令”提示在网页场景下抑制
@@ -24,20 +25,24 @@ sendmsggroup_prompt() {
 
 postqzone(){
     #传给sendcontrol
-    echo "开始传递给sendcontrol"
+    echo "开始通过UDS传递给sendcontrol"
     json_data=$(jq -n --arg tag "$object" --arg numb "$numfinal" --arg initsendstatue "$initsendstatus" \
         '{tag:$tag, numb: $numb, initsendstatue: $initsendstatue}')
     echo "$json_data"
-    echo "$json_data" > ./presend_in_fifo
-    echo 已传递给sendcontrol
-    # Check the status
-    post_statue=$(cat ./presend_out_fifo)
-    echo 已收到回报
+    local sc_sock
+    sc_sock="${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}"
+    # 发送并等待回包
+    # 发送并等待回包；捕获退出码以便诊断连接失败
+    post_statue=$(printf '%s' "$json_data" | socat -t 60 -T 120 - UNIX-CONNECT:"$sc_sock" 2>/dev/null)
+    sc_rc=$?
+    echo 已收到回报: $post_statue
+    if [[ $sc_rc -ne 0 || -z "$post_statue" ]]; then
+        log_and_continue "无法连接 sendcontrol UDS 或未收到响应 (sock=$sc_sock, rc=$sc_rc)"
+    fi
 
     if echo "$post_statue"  | grep -q "success"; then
         goingtosendid=("${goingtosendid[@]/$1}")
-        sendmsgpriv $senderid "#$numfinal 投稿已存入暂存区,你现在可以继续投稿(系统自动发送，请勿回复)"
-        sendmsggroup_ctx "#$numfinal 投稿已存入暂存区"
+        # 提示改由 sendcontrol 发送，避免重复发送
 
     elif echo "$post_statue"  | grep -q "failed"; then
         log_and_continue "空间发送调度服务发生错误"
@@ -102,7 +107,8 @@ check_quick_reply_conflict() {
     local json_file="$3"
     
     # 定义所有审核指令
-    local audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "扩列" "查" "查成分" "评论" "回复" "展示" "拉黑")
+    # 新增："消息全选" 用于强制将本次投稿的所有消息作为投稿内容
+    local audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "扩列" "查" "查成分" "评论" "回复" "展示" "拉黑" "消息全选")
     
     # 检查是否与审核指令冲突
     for audit_cmd in "${audit_commands[@]}"; do
@@ -269,6 +275,59 @@ EOF
         ;;
     重渲染)
         getmsgserv/preprocess.sh $object randeronly
+        ;;
+    消息全选)
+        # 将本次投稿全部消息设为投稿内容：优先用 progress-lite 生成标准化 messages，失败时回退 rawmsg
+        exist_json=$(timeout 10s sqlite3 'cache/OQQWall.db' "SELECT AfterLM FROM preprocess WHERE tag = '$object';")
+
+        # 先尝试标准化（含 forward 展开、file->image、下载资源等）
+        processed_json=$(getmsgserv/LM_work/progress-lite-json.sh "$object" "$port" 2>/dev/null || true)
+        if [[ -n "$processed_json" ]]; then
+            if updated=$(jq -n --arg base "${exist_json}" --argjson proc "$processed_json" '
+                (try ($base|fromjson) catch {})
+                + {messages: ($proc.messages // [])}
+                + {notregular: ($proc.notregular // "false")}
+            '); then
+                escaped_updated=$(printf "%s" "$updated" | sed "s/'/''/g")
+                if timeout 10s sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET AfterLM='$escaped_updated' WHERE tag = '$object';"; then
+                    sendmsggroup_ctx "已将本次投稿的所有消息设为投稿内容，正在渲染..."
+                    getmsgserv/preprocess.sh $object randeronly
+                else
+                    sendmsggroup_ctx "全选失败：数据库写入异常"
+                    sendmsggroup "内部编号$object, 请发送指令"
+                fi
+                break
+            else
+                # fallthrough to raw 回退
+                :
+            fi
+        fi
+
+        # 回退：直接使用原始 rawmsg（不展开 forward，不转换 file）
+        raw_json=$(timeout 10s sqlite3 'cache/OQQWall.db' "
+            SELECT s.rawmsg
+              FROM sender s
+              JOIN preprocess p ON s.senderid = p.senderid AND s.receiver = p.receiver
+             WHERE p.tag = '$object';")
+        if [[ -z "$raw_json" ]]; then
+            sendmsggroup_ctx "未找到原始消息，无法全选"
+            sendmsggroup "内部编号$object, 请发送指令"
+        else
+            if updated=$(jq -n --arg base "${exist_json}" --argjson msgs "$raw_json" '((try ($base|fromjson) catch {}) + {messages:$msgs})'); then
+                escaped_updated=$(printf "%s" "$updated" | sed "s/'/''/g")
+                if timeout 10s sqlite3 'cache/OQQWall.db' "UPDATE preprocess SET AfterLM='$escaped_updated' WHERE tag = '$object';"; then
+                    getmsgserv/preprocess.sh $object randeronly
+                    sendmsggroup_ctx "已将本次投稿的所有消息设为投稿内容"
+                    sendmsggroup "内部编号$object, 请发送指令"
+                else
+                    sendmsggroup_ctx "全选失败：数据库写入异常"
+                    sendmsggroup "内部编号$object, 请发送指令"
+                fi
+            else
+                sendmsggroup_ctx "全选失败：JSON处理异常"
+                sendmsggroup "内部编号$object, 请发送指令"
+            fi
+        fi
         ;;
     扩列审查|扩列|查|查成分)
         response=$(curl -s -H "$NAPCAT_AUTH_HEADER" "http://127.0.0.1:$port/get_stranger_info?user_id=$senderid")

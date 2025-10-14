@@ -18,6 +18,41 @@ sendmsggroup_ctx() {
     fi
 }
 
+# 递归杀死匹配进程及其所有子进程（用于系统修复）
+kill_tree_by_pattern() {
+  local pattern=$1
+  local pids
+  mapfile -t pids < <(pgrep -f -- "$pattern" || true)
+  [[ ${#pids[@]} -eq 0 ]] && return 0
+
+  _kill_descendants() {
+    local p=$1
+    local children
+    mapfile -t children < <(pgrep -P "$p" || true)
+    if (( ${#children[@]} > 0 )); then
+      for c in "${children[@]}"; do
+        _kill_descendants "$c"
+      done
+    fi
+    kill -TERM "$p" 2>/dev/null || true
+  }
+
+  for pid in "${pids[@]}"; do
+    _kill_descendants "$pid"
+  done
+
+  local deadline=$(( $(date +%s) + 3 ))
+  while IFS= read -r p; do
+    while kill -0 "$p" 2>/dev/null; do
+      if (( $(date +%s) >= deadline )); then
+        kill -KILL "$p" 2>/dev/null || true
+        break
+      fi
+      sleep 0.1
+    done
+  done < <(printf '%s\n' "${pids[@]}")
+}
+
 file_to_watch="./getmsgserv/all/priv_post.jsonl"
 legacy_priv="./getmsgserv/all/priv_post.json"
 if [[ -f "$legacy_priv" && ! -f "$file_to_watch" ]]; then
@@ -256,13 +291,13 @@ $group_pending"
         fi
         ;;
     "发送暂存区")
-        jq -nc --arg group "$groupname" '{"action":"flush", "group":$group}' > ./presend_in_fifo
-        post_statue=$(cat ./presend_out_fifo)
+        sc_sock="${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}"
+        post_statue=$(jq -nc --arg group "$groupname" '{action:"flush", group:$group}' \
+            | socat -t 60 -T 60 - UNIX-CONNECT:"$sc_sock" 2>/dev/null)
         echo 已收到回报
 
         if echo "$post_statue"  | grep -q "success"; then
             goingtosendid=("${goingtosendid[@]/$1}")
-            sendmsggroup_ctx "投稿已发送"
 
         elif echo "$post_statue"  | grep -q "failed"; then
             log_and_continue "空间发送调度服务发生错误"
@@ -310,13 +345,28 @@ $group_pending"
             echo "sendcontrol.sh started"
         fi
 
-        if pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" > /dev/null; then
-            printf -v syschecklist '%s空间发送服务已在运行\n' "$syschecklist"
+        # 改为检查 UDS（qzone-serv-UDS.py）而非 pipe
+        qz_sock="${QZONE_UDS_PATH:-./qzone_uds.sock}"
+        if [[ -S "$qz_sock" ]]; then
+            if command -v socat >/dev/null 2>&1; then
+                qz_payload='{"text":"UDS health-check","image":[],"cookies":{}}'
+                qz_out=$(printf '%s' "$qz_payload" | socat -t 5 -T 5 - UNIX-CONNECT:"$qz_sock" 2>/dev/null) || qz_out=""
+                if [[ -n "$qz_out" ]]; then
+                    printf -v syschecklist '%s空间发送服务正常\n' "$syschecklist"
+                else
+                    printf -v syschecklist '%s空间发送服务不可用 (无响应)，正在尝试重启\n' "$syschecklist"
+                    pgrep -f "python3 SendQzone/qzone-serv-UDS.py" | xargs kill -15 2>/dev/null
+                    python3 ./SendQzone/qzone-serv-UDS.py &
+                    echo "qzone-serv-UDS.py started"
+                fi
+            else
+                printf -v syschecklist '%s空间发送服务已监听 (未安装 socat，跳过连通性探测)\n' "$syschecklist"
+            fi
         else
-            printf -v syschecklist '%s空间发送服务不在运行，正在尝试重启\n' "$syschecklist"
-            pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" | xargs kill -15
-            python3 ./SendQzone/qzone-serv-pipe.py &
-            echo "qzone-serv-pipe.py started"
+            printf -v syschecklist '%s空间发送服务未监听 (socket 不存在)，正在尝试重启\n' "$syschecklist"
+            pgrep -f "python3 SendQzone/qzone-serv-UDS.py" | xargs kill -15 2>/dev/null
+            python3 ./SendQzone/qzone-serv-UDS.py &
+            echo "qzone-serv-UDS.py started"
         fi
 
         # 6. 添加结尾
@@ -324,6 +374,40 @@ $group_pending"
 
         # 7. 调用已存在的发送函数，注意这里不修改 sendmsggroup 的定义
         sendmsggroup_ctx "$syschecklist"
+        ;;
+    "系统修复")
+        # 强制重启 serv.py 以外的全部服务（含其子进程），并删除重建 UDS
+        sendmsggroup_ctx "正在执行系统修复（重启除serv.py外服务，重建UDS）..."
+
+        # 停服务：qzone-serv-UDS / sendcontrol 及其子进程；顺带清理 socat fork
+        kill_tree_by_pattern "python3 SendQzone/qzone-serv-UDS.py"
+        kill_tree_by_pattern "/bin/bash ./Sendcontrol/sendcontrol.sh"
+        kill_tree_by_pattern "socat .*sendcontrol_uds.sock"
+        # 可选：网页审核
+        kill_tree_by_pattern "python3 web_review.py"
+
+        # 清理 UDS 套接字
+        qz_sock="${QZONE_UDS_PATH:-./qzone_uds.sock}"
+        sc_sock="${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}"
+        [[ -S "$qz_sock" ]] && rm -f -- "$qz_sock"
+        [[ -S "$sc_sock" ]] && rm -f -- "$sc_sock"
+
+        # 重启（serv.py 保持不动）
+        if ! pgrep -f "python3 getmsgserv/serv.py" >/dev/null 2>&1; then
+          python3 ./getmsgserv/serv.py &
+          echo "serv.py started"
+        fi
+        python3 ./SendQzone/qzone-serv-UDS.py &
+        ./Sendcontrol/sendcontrol.sh &
+
+        # 可选：网页审核（如有启用）
+        if [[ "${use_web_review:-false}" == "true" ]]; then
+          if ! pgrep -f "python3 web_review.py" >/dev/null 2>&1; then
+            (cd web_review && PORT="${web_review_port:-8088}" HOST="0.0.0.0" nohup python3 web_review.py --host 0.0.0.0 --port "${web_review_port:-8088}" > web_review.log 2>&1 &)
+          fi
+        fi
+
+        sendmsggroup_ctx "系统修复完成（UDS 已重建，服务已重启）"
         ;;
     "取消拉黑")
         if [[ -z "$command" ]]; then
@@ -501,6 +585,9 @@ $group_pending"
 自检：
 系统与服务自检
 
+系统修复：
+强制重启serv.py以外的全部服务，删除并重建UDS
+
 
 
 审核指令:
@@ -534,6 +621,9 @@ $group_pending"
 
 重渲染：
 重新进行 聊天记录->图片 的过程，但是不重新进行AI分段步骤（通常仅用于调试渲染管道）
+
+消息全选：
+将本次投稿的所有用户消息全部作为投稿内容（用于分段判断错误时的强制全选），并重新渲染；处理完毕后会再次询问指令
 
 扩列审查：
 扩列审核流程，系统会自动获取对方QQ等级，空间开放状态和qq名片，并尝试寻找和扫描二维码，然后将相关信息发送到群中

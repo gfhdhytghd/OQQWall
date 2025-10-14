@@ -91,6 +91,13 @@ is_snap_path() {
   if [[ "$real" == /snap/* ]]; then
     return 0
   fi
+  # 处理 Ubuntu/Deb 系中 /usr/bin/chromium-browser 等 wrapper 脚本指向 /snap/bin/* 的情况
+  # 若可读，且文件内容包含 /snap/ 路径，视为来自 snap
+  if [[ -r "$real" ]]; then
+    if grep -Ia -m1 -q '/snap/' -- "$real" 2>/dev/null; then
+      return 0
+    fi
+  fi
   return 1
 }
 
@@ -108,6 +115,76 @@ has_non_snap_chrome() {
   return 1
 }
 
+# 确保 ImageMagick 允许处理 PDF（部分发行版默认在 policy.xml 禁止 PDF/PS/EPS）
+ensure_imagemagick_pdf_enabled() {
+  # 未安装 ImageMagick 时跳过
+  local imcmd=""
+  if command -v magick >/dev/null 2>&1; then
+    imcmd=magick
+  elif command -v convert >/dev/null 2>&1; then
+    imcmd=convert
+  else
+    return 0
+  fi
+
+  detect_platform
+  get_sudo
+
+  # 常见 policy.xml 路径集合
+  local candidates=(
+    /etc/ImageMagick/policy.xml
+    /etc/ImageMagick-6/policy.xml
+    /etc/ImageMagick-7/policy.xml
+    /usr/local/etc/ImageMagick/policy.xml
+    /usr/local/etc/ImageMagick-6/policy.xml
+    /usr/local/etc/ImageMagick-7/policy.xml
+    /opt/homebrew/etc/ImageMagick/policy.xml
+    /opt/homebrew/etc/ImageMagick-7/policy.xml
+  )
+
+  local any_policy=0
+  local any_disabled=0
+  local f
+  for f in "${candidates[@]}"; do
+    [[ -f "$f" ]] || continue
+    any_policy=1
+    # 是否存在禁用 PDF/PS/EPS 的规则（attributes 顺序可能不同）
+    if grep -Ei 'pattern="(PDF|PS|EPS|PS2|PS3|EPS2)"' -- "$f" >/dev/null 2>&1; then
+      if grep -Ei '<policy[^>]*domain="coder"' -- "$f" | \
+         grep -Ei 'pattern="(PDF|PS|EPS|PS2|PS3|EPS2)"|rights="none"' >/dev/null 2>&1; then
+        # 备份一次
+        any_disabled=1
+        if [[ ! -f "$f.oqqwall.bak" ]]; then
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            cp -a -- "$f" "$f.oqqwall.bak" || true
+          else
+            echo "[HINT] 需要写入 $f 以启用 ImageMagick PDF 处理，请授予 root/sudo 权限。"
+            continue
+          fi
+        fi
+        # 删除禁用条目（两种属性顺序都兼容）
+        if [[ "$OS_FLAVOR" == "macos" ]]; then
+          "${SUDO_CMD[@]}" sed -i '' -E \
+            -e '/<policy[^>]*domain="coder"[^>]*pattern="(PDF|PS|EPS|PS2|PS3|EPS2)"[^>]*rights="none"[^>]*>/d' \
+            -e '/<policy[^>]*domain="coder"[^>]*rights="none"[^>]*pattern="(PDF|PS|EPS|PS2|PS3|EPS2)"[^>]*>/d' "$f" || true
+        else
+          "${SUDO_CMD[@]}" sed -i -E \
+            -e '/<policy[^>]*domain="coder"[^>]*pattern="(PDF|PS|EPS|PS2|PS3|EPS2)"[^>]*rights="none"[^>]*>/d' \
+            -e '/<policy[^>]*domain="coder"[^>]*rights="none"[^>]*pattern="(PDF|PS|EPS|PS2|PS3|EPS2)"[^>]*>/d' "$f" || true
+        fi
+        echo "[FIX] 调整 ImageMagick 策略，移除禁用 PDF/PS/EPS 的条目: $f"
+      fi
+    fi
+  done
+
+  if (( any_policy == 0 )); then
+    echo "[OK] Linux 依赖已满足: ImageMagick PDF 支持（未检测到 policy.xml 限制）"
+    return 0
+  fi
+  if (( any_disabled == 0 )); then
+    echo "[OK] Linux 依赖已满足: ImageMagick PDF 支持"
+  fi
+}
 # 获取 sudo（如可用）
 declare -a SUDO_CMD=()
 get_sudo() {
@@ -175,7 +252,8 @@ ensure_system_packages() {
   declare -A pkgmap
 
   # 通用命令检查列表（命令名）
-  local cmds=(jq sqlite3 python3 curl perl pkill)
+  # 说明：新增 socat 作为 UDS 依赖（Sendcontrol 与 getmsgserv 通过 UDS 通信需用）
+  local cmds=(jq sqlite3 python3 curl perl pkill socat)
 
   # 追加 xvfb-run（仅在内部管理 NapCat 时需要），在调用处按需处理
 
@@ -189,6 +267,7 @@ ensure_system_packages() {
         [curl]=curl
         [perl]=perl
         [pkill]=procps
+        [socat]=socat
       )
       ;;
     arch)
@@ -199,6 +278,7 @@ ensure_system_packages() {
         [curl]=curl
         [perl]=perl
         [pkill]=procps-ng
+        [socat]=socat
       )
       ;;
     debian|ubuntu)
@@ -209,6 +289,7 @@ ensure_system_packages() {
         [curl]=curl
         [perl]=perl
         [pkill]=procps
+        [socat]=socat
       )
       ;;
     fedora|rhel|centos)
@@ -219,6 +300,7 @@ ensure_system_packages() {
         [curl]=curl
         [perl]=perl
         [pkill]=procps-ng
+        [socat]=socat
       )
       ;;
     macos)
@@ -229,6 +311,7 @@ ensure_system_packages() {
         [curl]=curl
         [perl]=perl
         [pkill]=""  # macOS 自带 pkill
+        [socat]=socat
       )
       ;;
     *)
@@ -324,50 +407,78 @@ ensure_system_packages() {
   fi
   # macOS: brew 的 python 自带 venv
 
-  # Perl URI::Escape 模块检测（用于 Shell 中 URI 编码）
+  # Perl 本体与 URI::Escape 模块检测（用于 Shell 中 URI 编码）
   local need_perl_uri=0
   if command -v perl >/dev/null 2>&1; then
-    if ! perl -MURI::Escape -e 1 >/dev/null 2>&1; then
+    if perl -MURI::Escape -e 1 >/dev/null 2>&1; then
+      echo "[OK] Linux 依赖已满足: Perl URI::Escape"
+    else
       need_perl_uri=1
     fi
   fi
 
-  # 各发行版对应包名/安装策略
+  # 各发行版对应包名/安装策略（Perl URI 模块）
   if (( need_perl_uri )); then
+    local perl_uri_pkg=""
     case "$PKG_MGR" in
       apt)
-        # Debian/Ubuntu
-        local found=0
-        for existing in "${to_install[@]}"; do
-          [[ "$existing" == "liburi-perl" ]] && found=1 && break
-        done
-        (( found == 0 )) && to_install+=(liburi-perl)
+        perl_uri_pkg="liburi-perl"
         ;;
       pacman)
-        # Arch 系
-        local found=0
-        for existing in "${to_install[@]}"; do
-          [[ "$existing" == "perl-uri" ]] && found=1 && break
-        done
-        (( found == 0 )) && to_install+=(perl-uri)
+        perl_uri_pkg="perl-uri"
         ;;
       dnf|yum)
-        # Fedora/RHEL/CentOS
-        local found=0
-        for existing in "${to_install[@]}"; do
-          [[ "$existing" == "perl-URI" ]] && found=1 && break
-        done
-        (( found == 0 )) && to_install+=(perl-URI)
+        perl_uri_pkg="perl-URI"
         ;;
-      brew)
-        # Homebrew 无独立 perl-URI 包，后续用 cpanminus 安装 URI 模块
-        :
-        ;;
-      pkg)
-        # Termux 可能没有独立 perl-URI 包，后续尝试 cpanminus
-        :
+      brew|pkg)
+        perl_uri_pkg=""  # 后续用 cpanminus 处理
         ;;
     esac
+    if [[ -n "$perl_uri_pkg" ]]; then
+      local found=0
+      for existing in "${to_install[@]}"; do
+        [[ "$existing" == "$perl_uri_pkg" ]] && found=1 && break
+      done
+      if (( found == 0 )); then
+        echo "[FIX] 缺少 Linux 依赖: Perl URI::Escape -> 安装包 $perl_uri_pkg"
+        to_install+=("$perl_uri_pkg")
+      fi
+    fi
+  fi
+
+  # ImageMagick: 检测并输出/加入安装列表（各发行版包名）
+  # 判定标准：存在 magick 且版本输出含 ImageMagick；或存在 convert 且版本输出含 ImageMagick。
+  # 若两者都无或非 ImageMagick，则安排安装并提示。
+  local do_install_imagemagick=0
+  local im_pkg=""
+  if command -v magick >/dev/null 2>&1; then
+    if magick -version 2>/dev/null | grep -qi 'ImageMagick'; then
+      echo "[OK] Linux 依赖已满足: ImageMagick"
+    else
+      do_install_imagemagick=1
+    fi
+  elif command -v convert >/dev/null 2>&1; then
+    if convert -version 2>/dev/null | grep -qi 'ImageMagick'; then
+      echo "[OK] Linux 依赖已满足: ImageMagick"
+    else
+      do_install_imagemagick=1
+    fi
+  else
+    do_install_imagemagick=1
+  fi
+  if (( do_install_imagemagick )); then
+    case "$OS_FLAVOR" in
+      termux|arch|debian|ubuntu|macos)
+        im_pkg="imagemagick"
+        ;;
+      fedora|rhel|centos)
+        im_pkg="ImageMagick"
+        ;;
+    esac
+    if [[ -n "$im_pkg" ]]; then
+      echo "[FIX] 缺少 Linux 依赖: ImageMagick -> 安装包 $im_pkg"
+      to_install+=("$im_pkg")
+    fi
   fi
 
   if (( ${#to_install[@]} > 0 )); then
@@ -467,15 +578,84 @@ ensure_system_packages() {
     fi
   fi
 
-  # Ubuntu: 仅警告（不自动安装），要求非 snap 的 Chrome/Chromium
-  if [[ "$OS_FLAVOR" == "ubuntu" ]]; then
-    if ! has_non_snap_chrome; then
+  # 确保 ImageMagick 允许处理 PDF（必要时调整 policy.xml）
+  ensure_imagemagick_pdf_enabled
+
+  
+
+  # Chromium/Chrome: 检测并输出 OK；缺失时按策略提示/安装
+  local chrome_bin="" chrome_path=""
+  for c in google-chrome-stable google-chrome chromium-browser chromium; do
+    if command -v "$c" >/dev/null 2>&1; then
+      chrome_path=$(command -v "$c")
+      if ! is_snap_path "$chrome_path"; then
+        chrome_bin="$c"; break
+      fi
+    fi
+  done
+  if [[ -n "$chrome_bin" ]]; then
+    echo "[OK] Linux 依赖已满足: $chrome_bin"
+  else
+    # Ubuntu: 仅警告（不自动安装），要求非 snap 的 Chrome/Chromium
+    if [[ "$OS_FLAVOR" == "ubuntu" ]]; then
       echo "[WARN] 检测到 Ubuntu，系统未发现非 snap 的 Chrome/Chromium。"
       echo "       请手动安装非 snap 浏览器（推荐 google-chrome-stable），并确保命令不在 /snap/bin 下。"
       echo "       示例（手动执行）："
       echo "         curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg"
       echo "         echo \"deb [arch=$(dpkg --print-architecture 2>/dev/null || echo amd64) signed-by=/usr/share/keyrings/google-chrome.gpg] https://dl.google.com/linux/chrome/deb/ stable main\" | sudo tee /etc/apt/sources.list.d/google-chrome.list"
       echo "         sudo apt-get update && sudo apt-get install -y google-chrome-stable"
+    fi
+  fi
+
+  # 其他发行版：缺少非 snap 的 Chrome/Chromium 时尝试自动安装 chromium
+  if [[ "$OS_FLAVOR" != "ubuntu" ]]; then
+    if [[ -z "$chrome_bin" ]]; then
+      case "$OS_FLAVOR" in
+        debian)
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            echo "[INFO] 安装 chromium（Debian）..."
+            "${SUDO_CMD[@]}" apt-get update -y || true
+            "${SUDO_CMD[@]}" apt-get install -y chromium || true
+          else
+            echo "[HINT] 未检测到 Chromium，可安装：sudo apt-get install -y chromium"
+          fi
+          ;;
+        arch)
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            echo "[INFO] 安装 chromium（Arch）..."
+            "${SUDO_CMD[@]}" pacman -Sy --noconfirm || true
+            "${SUDO_CMD[@]}" pacman -S --noconfirm --needed chromium || true
+          else
+            echo "[HINT] 未检测到 Chromium，可安装：sudo pacman -S chromium"
+          fi
+          ;;
+        fedora)
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            echo "[INFO] 安装 chromium（Fedora）..."
+            "${SUDO_CMD[@]}" dnf -y install chromium || true
+          else
+            echo "[HINT] 未检测到 Chromium，可安装：sudo dnf -y install chromium"
+          fi
+          ;;
+        rhel|centos)
+          if (( ${#SUDO_CMD[@]} )) || [[ $(id -u) -eq 0 ]]; then
+            echo "[INFO] 安装 chromium（RHEL/CentOS，可能需要 EPEL）..."
+            if command -v dnf >/dev/null 2>&1; then
+              "${SUDO_CMD[@]}" dnf -y install chromium || true
+            else
+              "${SUDO_CMD[@]}" yum -y install chromium || true
+            fi
+          else
+            echo "[HINT] 未检测到 Chromium，可安装：sudo ${PKG_MGR} -y install chromium（可能需启用 EPEL）"
+          fi
+          ;;
+        macos)
+          echo "[HINT] 未检测到 Chromium/Chrome。macOS 可安装：brew install --cask chromium 或安装 Google Chrome。"
+          ;;
+        termux)
+          echo "[HINT] 未检测到 Chromium。Termux 需启用 x11-repo 后安装：pkg install x11-repo chromium"
+          ;;
+      esac
     fi
   fi
 
@@ -618,6 +798,7 @@ http-serv-port=
 apikey=""
 process_waittime=120
 manage_napcat_internal=true
+renewcookies_use_napcat=true
 max_attempts_qzone_autologin=3
 text_model=qwen-plus-latest
 vision_model=qwen-vl-max-latest
@@ -695,6 +876,71 @@ kill_pat() {
     pkill -f -15 -- "$pattern" 2>/dev/null || true
 }
 
+# 递归杀死匹配进程及其所有子进程
+kill_tree_by_pattern() {
+  local pattern=$1
+  local pids
+  mapfile -t pids < <(pgrep -f -- "$pattern" || true)
+  [[ ${#pids[@]} -eq 0 ]] && return 0
+
+  # 递归杀子进程
+  _kill_descendants() {
+    local p=$1
+    local children
+    mapfile -t children < <(pgrep -P "$p" || true)
+    if (( ${#children[@]} > 0 )); then
+      for c in "${children[@]}"; do
+        _kill_descendants "$c"
+      done
+    fi
+    kill -TERM "$p" 2>/dev/null || true
+  }
+
+  for pid in "${pids[@]}"; do
+    _kill_descendants "$pid"
+  done
+
+  # 等待最多3秒，否则强杀
+  local deadline=$(( $(date +%s) + 3 ))
+  while IFS= read -r p; do
+    while kill -0 "$p" 2>/dev/null; do
+      if (( $(date +%s) >= deadline )); then
+        kill -KILL "$p" 2>/dev/null || true
+        break
+      fi
+      sleep 0.1
+    done
+  done < <(printf '%s\n' "${pids[@]}")
+}
+
+# 强制重启核心 UDS 服务（qzone-serv-UDS, sendcontrol），并删除残留套接字
+force_restart_uds_services() {
+  local is_test_mode=${1:-}
+  echo "[boot] 强制重启 UDS 服务..."
+
+  # 结束现有进程树
+  kill_tree_by_pattern "python3 SendQzone/qzone-serv-UDS.py"
+  kill_tree_by_pattern "/bin/bash ./Sendcontrol/sendcontrol.sh"
+  kill_tree_by_pattern "socat .*sendcontrol_uds.sock"
+
+  # 清理遗留 UDS 文件，避免 bind 失败
+  local qz_sock sc_sock
+  qz_sock=${QZONE_UDS_PATH:-./qzone_uds.sock}
+  sc_sock=${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}
+  [[ -S "$qz_sock" ]] && rm -f -- "$qz_sock" || true
+  [[ -S "$sc_sock" ]] && rm -f -- "$sc_sock" || true
+
+  # 启动服务
+  if [[ "$is_test_mode" == "--test" ]]; then
+    echo "[boot] test 模式：跳过启动 qzone-serv-UDS.py"
+  else
+    python3 ./SendQzone/qzone-serv-UDS.py &
+    echo "qzone-serv-UDS.py started"
+  fi
+  ./Sendcontrol/sendcontrol.sh &
+  echo "sendcontrol.sh started"
+}
+
 require_cmd() {
   local missing=0
   for cmd in "$@"; do
@@ -726,7 +972,7 @@ check_linux_dependencies() {
   fi
 }
 
-# 逐包检查 Python 依赖：缺失则自动安装修复
+# 批量检查 Python 依赖：一次性检测缺失并集中安装
 ensure_python_packages() {
   # 使用激活的 venv 的 python/pip
   local pip_mirror="https://pypi.tuna.tsinghua.edu.cn/simple"
@@ -744,47 +990,82 @@ ensure_python_packages() {
     [urllib3]=urllib3
   )
 
+  # 组装需要检查的模块列表
+  local modules=()
   local mod
   for mod in "${!pkg_map[@]}"; do
-    if python - <<PY
+    modules+=("$mod")
+  done
+
+  # 一次性检查所有模块缺失情况
+  local missing_list
+  missing_list=$(printf '%s\n' "${modules[@]}" | python - <<'PY'
 import sys
-try:
-    import ${mod}
-except Exception:
-    sys.exit(1)
-sys.exit(0)
+mods = [line.strip() for line in sys.stdin if line.strip()]
+missing = []
+for m in mods:
+    try:
+        __import__(m)
+    except Exception:
+        missing.append(m)
+print('\n'.join(missing))
 PY
-    then
-      echo "[OK] Python 依赖可用: ${mod}"
-    else
+  )
+
+  # 将缺失模块放入集合，便于状态输出
+  declare -A missing_set=()
+  if [[ -n "$missing_list" ]]; then
+    while IFS= read -r m; do
+      [[ -n "$m" ]] && missing_set["$m"]=1
+    done <<< "$missing_list"
+  fi
+
+  # 输出状态并汇总需要安装的包
+  local to_install=()
+  for mod in "${modules[@]}"; do
+    if [[ -n "${missing_set[$mod]:-}" ]]; then
       echo "[FIX] 缺少 Python 依赖: ${mod} -> 安装包 ${pkg_map[$mod]}"
-      # 先尝试清华镜像，失败则回退到官方 PyPI，再次失败尝试添加 trusted-host
-      if ! python -m pip install "${pkg_map[$mod]}" -i "$pip_mirror" --retries 3 --timeout 30; then
-        echo "[WARN] 镜像安装失败，尝试官方 PyPI: ${pkg_map[$mod]}"
-        if ! python -m pip install "${pkg_map[$mod]}" --retries 3 --timeout 30; then
-          echo "[WARN] 官方 PyPI 安装失败，尝试添加 trusted-host: ${pkg_map[$mod]}"
-          if ! python -m pip install "${pkg_map[$mod]}" -i "$pip_mirror" --trusted-host pypi.tuna.tsinghua.edu.cn --retries 3 --timeout 60; then
-            echo "[ERR] 安装 Python 包失败: ${pkg_map[$mod]}"
-            exit 1
-          fi
-        fi
-      fi
-      # 二次校验
-      if ! python - <<PY
-import sys
-try:
-    import ${mod}
-except Exception:
-    sys.exit(1)
-sys.exit(0)
-PY
-      then
-        echo "[ERR] 仍无法导入: ${mod}，请手动检查环境。"
-        exit 1
-      fi
-      echo "[OK] 已修复 Python 依赖: ${mod}"
+      to_install+=("${pkg_map[$mod]}")
+    else
+      echo "[OK] Python 依赖可用: ${mod}"
     fi
   done
+
+  # 如有缺失，集中安装并重试一次检查
+  if (( ${#to_install[@]} > 0 )); then
+    echo "[INFO] 开始安装缺失的 Python 包: ${to_install[*]}"
+    if ! python -m pip install "${to_install[@]}" -i "$pip_mirror" --retries 3 --timeout 30; then
+      echo "[WARN] 镜像安装失败，尝试官方 PyPI: ${to_install[*]}"
+      if ! python -m pip install "${to_install[@]}" --retries 3 --timeout 30; then
+        echo "[WARN] 官方 PyPI 安装失败，尝试添加 trusted-host: ${to_install[*]}"
+        if ! python -m pip install "${to_install[@]}" -i "$pip_mirror" --trusted-host pypi.tuna.tsinghua.edu.cn --retries 3 --timeout 60; then
+          echo "[ERR] 安装 Python 包失败: ${to_install[*]}"
+          exit 1
+        fi
+      fi
+    fi
+
+    # 二次校验（只检查之前缺失的模块），一次性完成
+    local remain_missing
+    remain_missing=$(printf '%s\n' "${!missing_set[@]}" | python - <<'PY'
+import sys
+mods = [line.strip() for line in sys.stdin if line.strip()]
+failed = []
+for m in mods:
+    try:
+        __import__(m)
+    except Exception:
+        failed.append(m)
+print('\n'.join(failed))
+PY
+    )
+    if [[ -n "$remain_missing" ]]; then
+      echo "[ERR] 仍无法导入以下模块，请手动检查环境:"
+      echo "$remain_missing"
+      exit 1
+    fi
+    echo "[OK] 已修复所有缺失的 Python 依赖。"
+  fi
 }
 
 # ------------------
@@ -831,12 +1112,14 @@ prompt_port() {
 write_oqq_config() {
   local http_port="$1" apikey_val="$2" process_wait="$3" manage_q="$4" max_auto="$5" \
         text_m="$6" vision_m="$7" vision_px="$8" vision_mb="$9" at_unpriv="${10}" \
-        fr_win="${11}" no_sandbox="${12}" use_review="${13}" review_port="${14}" token="${15}"
+        fr_win="${11}" no_sandbox="${12}" use_review="${13}" review_port="${14}" token="${15}" \
+        renew_use_nc="${16}"
   cat > "$CFG" <<EOF
 http-serv-port=$http_port
 apikey="$apikey_val"
 process_waittime=$process_wait
 manage_napcat_internal=$manage_q
+renewcookies_use_napcat=${renew_use_nc:-true}
 max_attempts_qzone_autologin=$max_auto
 text_model=$text_m
 vision_model=$vision_m
@@ -899,15 +1182,17 @@ guide_account_group_setup() {
   echo "是否现在配置组策略（发送限额、水印、加好友自动回复等）？"
   local do_policy
   do_policy=$(prompt_bool "配置组策略?" "no")
-  local max_stack max_imgs friend_msg watermark
+  local max_stack max_imgs friend_msg watermark indiv_images
   if [[ "$do_policy" == true ]]; then
     max_stack=$(prompt_with_default "每批最大发送条数(max_post_stack)" "1")
     max_imgs=$(prompt_with_default "每贴最多图片数(max_image_number_one_post)" "20")
+    indiv_images=$(prompt_bool "保留用户单独图片到预处理目录(individual_image_in_posts)" "yes")
     read -r -p "加好友自动回复(friend_add_message，可留空): " friend_msg
     read -r -p "水印文字(watermark_text，可留空): " watermark
   else
     max_stack="1"
     max_imgs="20"
+    indiv_images=true
     friend_msg=""
     watermark=""
   fi
@@ -926,6 +1211,7 @@ guide_account_group_setup() {
     "minorqq_http_port": [],
     "max_post_stack": "$max_stack",
     "max_image_number_one_post": "$max_imgs",
+    "individual_image_in_posts": $indiv_images,
     "friend_add_message": "$friend_json",
     "send_schedule": [],
     "watermark_text": "$watermark_json",
@@ -966,7 +1252,7 @@ run_oobe() {
   echo "欢迎使用 OQQWall 首次运行向导 (OOBE)"
   echo "本向导将帮你生成 oqqwall.config，并可选创建 AcountGroupcfg.json。"
 
-  local http_port apikey_val process_wait manage_q max_auto text_m vision_m vision_px vision_mb at_unpriv fr_win no_sandbox use_review review_port token
+  local http_port apikey_val process_wait manage_q max_auto text_m vision_m vision_px vision_mb at_unpriv fr_win no_sandbox use_review review_port token renew_use_nc
 
   local http_def
   http_def=$(find_next_free_port 8082)
@@ -988,6 +1274,7 @@ run_oobe() {
   fi
   manage_q=$(prompt_bool "是否由本程序管理 NapCat/QQ (manage_napcat_internal)" "${_manage_def}")
   max_auto=$(prompt_with_default "QZone 自动登录最大尝试次数(max_attempts_qzone_autologin)" "3")
+  renew_use_nc=$(prompt_bool "续 Cookies 使用 NapCat 版(renewcookies_use_napcat)" "true")
   text_m=$(prompt_with_default "文本模型(text_model)" "qwen-plus-latest")
   vision_m=$(prompt_with_default "多模模型(vision_model)" "qwen-vl-max-latest")
   vision_px=$(prompt_with_default "视觉像素上限(vision_pixel_limit)" "12000000")
@@ -1020,7 +1307,7 @@ run_oobe() {
 
   write_oqq_config "$http_port" "$apikey_val" "$process_wait" "$manage_q" "$max_auto" \
                    "$text_m" "$vision_m" "$vision_px" "$vision_mb" "$at_unpriv" \
-                   "$fr_win" "$no_sandbox" "$use_review" "$review_port" "$token"
+                   "$fr_win" "$no_sandbox" "$use_review" "$review_port" "$token" "$renew_use_nc"
   echo "已创建文件: $CFG"
   echo "请将 napcat_access_token 同步到 NapCat/OneBot 侧的鉴权配置中。"
 
@@ -1029,11 +1316,11 @@ run_oobe() {
 
 print_test_mode_hint() {
   cat <<'EOF'
-测试模式提示：核心服务已停止，需要按需手动启动：
+测试模式提示：核心服务正在重启：
 - 接收端：python3 getmsgserv/serv.py
-- QZone 管道（如需调试）：python3 SendQzone/qzone-serv-pipe.py
+- QZone UDS（如需调试）：python3 SendQzone/qzone-serv-UDS.py
 - 审核脚本：./Sendcontrol/sendcontrol.sh
-- NapCat 测试工具：python3 tests/napcat_replayer.py --target http://localhost:8082
+- NapCat 测试工具（暂不可用）：python3 tests/napcat_replayer.py --target http://localhost:8082
 EOF
 }
 
@@ -1073,10 +1360,12 @@ case "$mode" in
     fi
     echo "停止 getmsgserv/serv.py..."
     kill_pat "python3 getmsgserv/serv.py"
-    echo "停止 SendQzone/qzone-serv-pipe.py..."
-    kill_pat "python3 SendQzone/qzone-serv-pipe.py"
+    echo "停止 SendQzone qzone 发送服务..."
+    kill_pat "python3 SendQzone/qzone-serv-UDS.py"
     echo "停止 Sendcontrol/sendcontrol.sh..."
     kill_pat "/bin/bash ./Sendcontrol/sendcontrol.sh"
+    # 兼容 sendcontrol 以 socat 执行后的进程名
+    kill_pat "socat .*sendcontrol_uds.sock"
     echo "停止 web_review/web_review.py..."
     kill_pat "python3 web_review/web_review.py"
     ;;
@@ -1089,8 +1378,9 @@ case "$mode" in
       echo "manage_napcat_internal != true，QQ相关进程未自动管理。请自行处理 Napcat QQ 客户端。"
     fi
     kill_pat "python3 getmsgserv/serv.py"
-    kill_pat "python3 SendQzone/qzone-serv-pipe.py"
+    kill_pat "python3 SendQzone/qzone-serv-UDS.py"
     kill_pat "/bin/bash ./Sendcontrol/sendcontrol.sh"
+    kill_pat "socat .*sendcontrol_uds.sock"
     kill_pat "python3 web_review/web_review.py"
     ;;
   -h)
@@ -1112,8 +1402,9 @@ EOF
     ;;
   --test)
     echo "以测试模式启动OQQWall..."
-    kill_pat "python3 SendQzone/qzone-serv-pipe.py"
+    # 仅停止 UDS 版，pipe 模式已移除
     kill_pat "/bin/bash ./Sendcontrol/sendcontrol.sh"
+    kill_pat "socat .*sendcontrol_uds.sock"
     kill_pat "python3 getmsgserv/serv.py"
     print_test_mode_hint
     ;;
@@ -1133,7 +1424,7 @@ fi
 ensure_system_packages "false"
 
 # Linux 依赖逐包检查
-check_linux_dependencies jq sqlite3 python3 pkill curl perl
+check_linux_dependencies jq sqlite3 python3 pkill curl perl socat
 if ! command -v qq >/dev/null 2>&1 && ! command -v linuxqq >/dev/null 2>&1; then
   echo "警告：未检测到 qq 或 linuxqq 可执行文件，NapCat 内部管理可能无法启动 QQ 客户端。"
 fi
@@ -1156,11 +1447,7 @@ if [[ ! -f "getmsgserv/all/priv_post.jsonl" ]]; then
     echo "已创建文件: getmsgserv/all/priv_post.jsonl"
 fi
 
-# 初始化命名管道（若已存在但类型错误则更正）
-ensure_named_pipe "./qzone_in_fifo"
-ensure_named_pipe "./qzone_out_fifo"
-ensure_named_pipe "./presend_in_fifo"
-ensure_named_pipe "./presend_out_fifo"
+# 旧版 FIFO 管道已弃用（qzone_in/out_fifo、presend_in/out_fifo）；无需再创建
 if [[ ! -f "AcountGroupcfg.json" ]]; then
     if [[ -t 0 ]]; then
         echo "未检测到账户组配置文件，将启动账户组引导..."
@@ -1177,6 +1464,7 @@ if [[ ! -f "AcountGroupcfg.json" ]]; then
     "minorqq_http_port": [],
     "max_post_stack": "1",
     "max_image_number_one_post": "20",
+    "individual_image_in_posts": true,
     "friend_add_message": "",
     "send_schedule": [],
     "watermark_text": "",
@@ -1194,6 +1482,7 @@ check_variable "http-serv-port" "8082"
 check_variable "apikey"  "sk-"
 check_variable "process_waittime" "120"
 check_variable "manage_napcat_internal" "true"
+check_variable "renewcookies_use_napcat" "true"
 check_variable "max_attempts_qzone_autologin"  "3"
 check_variable "at_unprived_sender" "true"
 check_variable "text_model" "qwen-plus-latest"
@@ -1566,7 +1855,7 @@ while read -r group; do
       errors+=("错误：在 $group 中，quick_replies 必须是对象（当前为 $quick_replies_type）。")
     else
       # 检查每个快捷回复指令是否与审核指令冲突
-      audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "评论" "回复" "展示" "拉黑")
+      audit_commands=("是" "否" "匿" "等" "删" "拒" "立即" "刷新" "重渲染" "扩列审查" "评论" "回复" "展示" "拉黑" "消息全选")
       while IFS= read -r entry; do
         cmd_name=$(jq -r '.key' <<<"$entry")
         cmd_type=$(jq -r '.value | type' <<<"$entry")
@@ -1735,29 +2024,12 @@ else
     echo "serv.py started"
 fi
 
-if pgrep -f "python3 ./SendQzone/qzone-serv-pipe.py" > /dev/null
-then
-    echo "qzone-serv-pipe.py is already running"
-else
-    if [[ $1 == --test ]]; then
-      echo "请自行启动测试服务器"
-    else
-      python3 ./SendQzone/qzone-serv-pipe.py &
-      echo "qzone-serv-pipe.py started"
-    fi
-fi
-
-if pgrep -f "./Sendcontrol/sendcontrol.sh" > /dev/null
-then
-    echo "sendcontrol.sh is already running"
-else
-    ./Sendcontrol/sendcontrol.sh &
-    echo "sendcontrol.sh started"
-fi
+# 启动阶段强制重启两大 UDS 服务，确保连接新建
+force_restart_uds_services "$1"
 
 # 启动网页审核（可选）
 if [[ "$use_web_review" == "true" ]]; then
-  if pgrep -f "python3 web_review/web_review.py" > /dev/null; then
+  if pgrep -f "python3 web_review.py" > /dev/null; then
     echo "web_review.py is already running"
   else
     echo "starting web_review on port $web_review_port"
@@ -1801,19 +2073,29 @@ for mqqid in "${mainqqlist[@]}"; do
   fi
 done
 
+
+ran_today=""  # 记录当天是否已执行
+
 while true; do
-    now=$(date +%s)
-    next=$(date -d "next hour" +%s)
-    if [[ "$(date +%H:%M)" == "07:00" ]]; then
-        echo 'reach 7:00'
-        for qqid in "${runidlist[@]}"; do
-            echo "Like everyone with ID: $qqid"
-            if getinfo "$qqid"; then
-                python3 qqBot/likeeveryday.py "$port"
-            else
-                echo "警告：未找到 QQ $qqid 的端口配置，跳过点赞。"
-            fi
-        done
+  # 对齐到下一分钟再判断，避免错过 07:00
+  sleep $((60 - $(date +%s) % 60))
+
+  # 到了 07:00 且今天还没执行过 → 执行任务
+  if [[ "$(date +%H:%M)" == "07:00" ]]; then
+    today=$(date +%F)
+    if [[ "$ran_today" != "$today" ]]; then
+      echo 'reach 7:00'
+      for qqid in "${runidlist[@]}"; do
+        echo "Like everyone with ID: $qqid"
+        if getinfo "$qqid"; then
+          python3 qqBot/likeeveryday.py "$port"
+        else
+          echo "警告：未找到 QQ $qqid 的端口配置，跳过点赞。"
+        fi
+      done
+      ran_today="$today"
+      # 避免同一分钟重复触发
+      sleep 59
     fi
-    sleep "$(( next - now ))"
+  fi
 done

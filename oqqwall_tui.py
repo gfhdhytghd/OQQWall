@@ -24,6 +24,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+import stat as _stat
 from urllib.request import urlopen
 from urllib.error import URLError
 
@@ -68,6 +69,7 @@ CONFIG_TOOLTIPS: dict[str, str] = {
     "apikey": "调用大模型时使用的 API Key",
     "process_waittime": "等待图片/处理的超时秒数",
     "manage_napcat_internal": "是否由本程序管理 NapCat/QQ",
+    "renewcookies_use_napcat": "续 Cookies 使用 NapCat 版(true)/非 NapCat 版(false)",
     "max_attempts_qzone_autologin": "QZone 自动登录重试次数",
     "text_model": "文本模型名称（如 qwen-plus-latest）",
     "vision_model": "多模态模型名称",
@@ -90,6 +92,8 @@ CONFIG_ORDER: list[str] = [
     # NapCat/登录
     "napcat_access_token",
     "manage_napcat_internal",
+    # QZone/续 Cookie 实现选择
+    "renewcookies_use_napcat",
     # QZone/浏览器
     "max_attempts_qzone_autologin",
     "force_chromium_no-sandbox",
@@ -118,6 +122,7 @@ GROUP_CONFIG_ORDER: list[str] = [
     # 业务阈值
     "max_post_stack",
     "max_image_number_one_post",
+    "individual_image_in_posts",
     "send_schedule",
     # 展示与消息
     "watermark_text",
@@ -413,12 +418,26 @@ def _sh_script_running(suffix: str) -> bool:
     return False
 
 
+def _uds_sock_exists(path: Optional[str] = None) -> bool:
+    try:
+        if not path:
+            path = os.environ.get("QZONE_UDS_PATH") or str(ROOT / "qzone_uds.sock")
+        st = os.stat(path)
+        return _stat.S_ISSOCK(st.st_mode)
+    except Exception:
+        return False
+
+
 def services_status() -> dict[str, bool]:
     """返回三个核心子服务状态。"""
     s = {
         "recv": _py_script_running("getmsgserv/serv.py"),
         "ctrl": _sh_script_running("Sendcontrol/sendcontrol.sh"),
-        "pipe": _py_script_running("SendQzone/qzone-serv-pipe.py"),
+        # QZone 发送服务（UDS）
+        # 判定策略：优先看进程，若未命中则看 UDS socket 是否存在
+        "pipe": (
+            _py_script_running("SendQzone/qzone-serv-UDS.py") or _uds_sock_exists()
+        ),
     }
     # 可选 web_review
     cfg = read_kv_config(CONFIG_FILE)
@@ -443,8 +462,9 @@ def kill_child_services() -> None:
     cmds = [
         "pkill -f -- 'python3 getmsgserv/serv.py' 2>/dev/null || true",
         "pkill -f -- 'Sendcontrol/sendcontrol.sh' 2>/dev/null || true",
-        "pkill -f -- 'python3 ./SendQzone/qzone-serv-pipe.py' 2>/dev/null || true",
-        "pkill -f -- 'python3 SendQzone/qzone-serv-pipe.py' 2>/dev/null || true",
+        # QZone 发送服务（UDS）
+        "pkill -f -- 'python3 ./SendQzone/qzone-serv-UDS.py' 2>/dev/null || true",
+        "pkill -f -- 'python3 SendQzone/qzone-serv-UDS.py' 2>/dev/null || true",
         "pkill -f -- 'python3 web_review/web_review.py' 2>/dev/null || true",
         "pkill -f -- 'python3 web_review.py' 2>/dev/null || true",
     ]
@@ -453,6 +473,14 @@ def kill_child_services() -> None:
             subprocess.run(["bash", "-lc", c], cwd=str(ROOT), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
+    # 确保清理遗留的 UDS 套接字文件，避免下次绑定失败
+    try:
+        uds_path = os.environ.get("QZONE_UDS_PATH") or str(ROOT / "qzone_uds.sock")
+        st = os.stat(uds_path)
+        if _stat.S_ISSOCK(st.st_mode):
+            os.unlink(uds_path)
+    except Exception:
+        pass
 
 
 @dataclass
@@ -712,6 +740,9 @@ class GlobalConfigPage(Vertical):
                     pass
         self.inputs.clear()
         cfg = read_kv_config(CONFIG_FILE)
+        # 确保新增布尔项在旧配置也可见（默认 true）
+        if "renewcookies_use_napcat" not in cfg:
+            cfg["renewcookies_use_napcat"] = "true"
         if not cfg:
             self.form.mount(Static("未找到 oqqwall.config 或为空", classes="hint"))
             return
@@ -975,6 +1006,24 @@ class GroupConfigPage(Vertical):
         # 其余基础项
         row("max_post_stack", "发件调度发件阈值")
         row("max_image_number_one_post", "单条说说图片数量上限")
+        # 布尔开关：是否在 prepost 目录保留投稿原图（含中文说明，三行文本居中）
+        def _as_bool(v: Any) -> bool:
+            if isinstance(v, bool):
+                return v
+            s = str(v).strip().lower()
+            return s in ("1", "true", "yes", "on", "y")
+        sw = Switch(value=_as_bool(obj.get("individual_image_in_posts", True)), id=f"sw_individual_image_in_posts__{self._form_rev}")
+        self.inputs["individual_image_in_posts"] = sw  # type: ignore
+        title = Label("发件时单发图片", classes="cfg_key")
+        try:
+            tip_txt = "关闭：仅发送渲染消息记录；开启：同时发送渲染消息记录和用户发的图片"
+            title.tooltip = tip_txt
+            setattr(sw, 'tooltip', tip_txt)
+        except Exception:
+            pass
+        from rich.text import Text as _RText
+        desc = Static()
+        self.form.mount(Horizontal(title, sw, desc, Static("", classes="cfg_spacer"), classes="cfg_row"))
         # 发送计划（字符串时间 HH:MM 列表） — 放在快捷回复之前，便于“快捷回复 -> 管理员”收尾
         self.form.mount(Static("发送计划(send_schedule) - 时间(HH:MM)", classes="title"))
         sched_list = obj.get("send_schedule") or []
@@ -1039,6 +1088,7 @@ class GroupConfigPage(Vertical):
                 "mainqqid":"","mainqq_http_port":"",
                 "minorqqid":[],"minorqq_http_port":[],
                 "admins":[],"max_post_stack":"3","max_image_number_one_post":"18",
+                "individual_image_in_posts": True,
                 "friend_add_message":"","watermark_text":"",
                 "quick_replies":{}
             }
@@ -1055,13 +1105,24 @@ class GroupConfigPage(Vertical):
 
         def get_val(k: str) -> str:
             w = self.inputs.get(k)
-            return w.value if isinstance(w, Input) else str(obj.get(k, ""))
+            if isinstance(w, Input):
+                return w.value
+            return str(obj.get(k, ""))
 
         for k in [
             "mangroupid","mainqqid","mainqq_http_port","max_post_stack",
             "max_image_number_one_post","watermark_text","friend_add_message"
         ]:
             obj[k] = get_val(k)
+
+        # 布尔：individual_image_in_posts
+        sw = self.inputs.get("individual_image_in_posts")
+        try:
+            from textual.widgets import Switch as _Sw  # local alias
+        except Exception:
+            _Sw = Switch  # fallback
+        if isinstance(sw, _Sw):  # type: ignore
+            obj["individual_image_in_posts"] = bool(getattr(sw, "value", True))
 
         # 副账号
         minors: list[str] = []
@@ -1114,7 +1175,7 @@ class GroupConfigPage(Vertical):
         http_ports: set[str] = set()
 
         # 审核指令冲突列表
-        audit_cmds = {"是","否","匿","等","删","拒","立即","刷新","重渲染","扩列审查","评论","回复","展示","拉黑"}
+        audit_cmds = {"是","否","匿","等","删","拒","立即","刷新","重渲染","扩列审查","评论","回复","展示","拉黑","消息全选"}
 
         for group in data.keys():
             if not group or not all(c.isalnum() or c == '_' for c in group):
