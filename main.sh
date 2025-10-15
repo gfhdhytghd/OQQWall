@@ -253,7 +253,8 @@ ensure_system_packages() {
 
   # 通用命令检查列表（命令名）
   # 说明：新增 socat 作为 UDS 依赖（Sendcontrol 与 getmsgserv 通过 UDS 通信需用）
-  local cmds=(jq sqlite3 python3 curl perl pkill socat)
+  #       新增 qrencode 作为 HTML 生成二维码依赖（getmsgserv/HTMLwork/gotohtml.sh 使用）
+  local cmds=(jq sqlite3 python3 curl perl pkill socat qrencode)
 
   # 追加 xvfb-run（仅在内部管理 NapCat 时需要），在调用处按需处理
 
@@ -268,6 +269,7 @@ ensure_system_packages() {
         [perl]=perl
         [pkill]=procps
         [socat]=socat
+        [qrencode]=qrencode
       )
       ;;
     arch)
@@ -279,6 +281,7 @@ ensure_system_packages() {
         [perl]=perl
         [pkill]=procps-ng
         [socat]=socat
+        [qrencode]=qrencode
       )
       ;;
     debian|ubuntu)
@@ -290,6 +293,7 @@ ensure_system_packages() {
         [perl]=perl
         [pkill]=procps
         [socat]=socat
+        [qrencode]=qrencode
       )
       ;;
     fedora|rhel|centos)
@@ -301,6 +305,7 @@ ensure_system_packages() {
         [perl]=perl
         [pkill]=procps-ng
         [socat]=socat
+        [qrencode]=qrencode
       )
       ;;
     macos)
@@ -312,6 +317,7 @@ ensure_system_packages() {
         [perl]=perl
         [pkill]=""  # macOS 自带 pkill
         [socat]=socat
+        [qrencode]=qrencode
       )
       ;;
     *)
@@ -1424,7 +1430,7 @@ fi
 ensure_system_packages "false"
 
 # Linux 依赖逐包检查
-check_linux_dependencies jq sqlite3 python3 pkill curl perl socat
+check_linux_dependencies jq sqlite3 python3 pkill curl perl socat qrencode
 if ! command -v qq >/dev/null 2>&1 && ! command -v linuxqq >/dev/null 2>&1; then
   echo "警告：未检测到 qq 或 linuxqq 可执行文件，NapCat 内部管理可能无法启动 QQ 客户端。"
 fi

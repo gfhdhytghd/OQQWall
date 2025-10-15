@@ -540,15 +540,24 @@ manage_posts() {
         done
     done
     
-    # 发送反馈
-    send_feedback "$groupname"
-    
-    # 清理工作
+    # 按发送结果反馈
     if [[ $send_failed -eq 0 ]]; then
+        # 仅在所有发布均成功时通知“投稿已发送”
+        send_feedback "$groupname"
+        # 清理缓存与暂存
         clear_storage "$groupname"
         cleanup_cache_dirs "${tags[@]}"
     else
+        # 发布失败时，不要发送“已发送”提示；改为失败提示并保留缓存
         echo "部分发送失败，保留缓存目录"
+        sendmsggroup "投稿发送失败，已保留缓存，稍后将自动重试或请管理员处理"
+        # 逐条私聊告知失败
+        sqlite3 -separator '|' "$DB_PATH" \
+            "SELECT senderid, port, num FROM sendstorge_$groupname;" |
+        while IFS='|' read -r senderid port num; do
+            [[ -z "$senderid" || -z "$port" || -z "$num" ]] && continue
+            sendmsgpriv_givenport "$senderid" "$port" "#${num} 投稿发送失败，请稍后重试"
+        done
     fi
     
     return $send_failed
