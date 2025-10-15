@@ -126,6 +126,13 @@ if [[ "$needpriv" == "true" ]]; then
     userid_show=""
 fi
 
+# === Avatar image (respect privacy) ===
+if [[ "$needpriv" == "true" ]]; then
+    avatar_img="file://$(pwd)/getmsgserv/HTMLwork/source/Anonymous_avatar.png"
+else
+    avatar_img="https://qlogo2.store.qq.com/qzone/${userid}/${userid}/640"
+fi
+
 # === Icon dir (all pngs) ===
 icon_dir="file://$(pwd)/getmsgserv/HTMLwork/source"
 poke_icon="file://$(pwd)/getmsgserv/LM_work/source/poke.png"
@@ -848,7 +855,7 @@ html_content=$(cat <<EOF
 <body>
     <div class="container">
         <div class="header">
-            <img src="https://qlogo2.store.qq.com/qzone/${userid}/${userid}/640" alt="Profile Image">
+            <img src="${avatar_img}" alt="Profile Image">
             <div class="header-text">
                 <h1>${nickname}</h1>
                 <h2>${userid_show}</h2>
