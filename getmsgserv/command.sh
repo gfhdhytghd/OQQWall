@@ -24,11 +24,12 @@ kill_tree_by_pattern() {
   local pids
   mapfile -t pids < <(pgrep -f -- "$pattern" || true)
   [[ ${#pids[@]} -eq 0 ]] && return 0
-
+    echo "Killing processes matching pattern: $pattern"
   _kill_descendants() {
     local p=$1
     local children
     mapfile -t children < <(pgrep -P "$p" || true)
+    echo "Killing PID $p with children: ${children[*]}"
     if (( ${#children[@]} > 0 )); then
       for c in "${children[@]}"; do
         _kill_descendants "$c"
@@ -45,6 +46,7 @@ kill_tree_by_pattern() {
   while IFS= read -r p; do
     while kill -0 "$p" 2>/dev/null; do
       if (( $(date +%s) >= deadline )); then
+        echo "Force killing PID $p"
         kill -KILL "$p" 2>/dev/null || true
         break
       fi
@@ -380,11 +382,11 @@ $group_pending"
         sendmsggroup_ctx "正在执行系统修复（重启除serv.py外服务，重建UDS）..."
 
         # 停服务：qzone-serv-UDS / sendcontrol 及其子进程；顺带清理 socat fork
-        kill_tree_by_pattern "python3 SendQzone/qzone-serv-UDS.py"
-        kill_tree_by_pattern "/bin/bash ./Sendcontrol/sendcontrol.sh"
-        kill_tree_by_pattern "socat .*sendcontrol_uds.sock"
+        kill_tree_by_pattern "SendQzone/qzone-serv-UDS.py"
+        kill_tree_by_pattern "./Sendcontrol/sendcontrol.sh"
+        #kill_tree_by_pattern "socat .*sendcontrol_uds.sock"
         # 可选：网页审核
-        kill_tree_by_pattern "python3 web_review.py"
+        kill_tree_by_pattern "web_review.py"
 
         # 清理 UDS 套接字
         qz_sock="${QZONE_UDS_PATH:-./qzone_uds.sock}"

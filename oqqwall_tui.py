@@ -24,6 +24,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+import socket as _socket
 import stat as _stat
 from urllib.request import urlopen
 from urllib.error import URLError
@@ -419,11 +420,36 @@ def _sh_script_running(suffix: str) -> bool:
 
 
 def _uds_sock_exists(path: Optional[str] = None) -> bool:
+    """Return True if path exists and is a socket file."""
     try:
         if not path:
             path = os.environ.get("QZONE_UDS_PATH") or str(ROOT / "qzone_uds.sock")
         st = os.stat(path)
         return _stat.S_ISSOCK(st.st_mode)
+    except Exception:
+        return False
+
+
+def _uds_sock_listening(path: Optional[str] = None, timeout: float = 0.2) -> bool:
+    """Probe the UDS endpoint by attempting a connect.
+
+    Returns True only if a process is actively listening on the socket.
+    This avoids false positives from stale socket files left after crashes.
+    """
+    try:
+        uds_path = path or os.environ.get("QZONE_UDS_PATH") or str(ROOT / "qzone_uds.sock")
+        if not _uds_sock_exists(uds_path):
+            return False
+        s = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+        try:
+            s.settimeout(timeout)
+            s.connect(uds_path)
+            return True
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
     except Exception:
         return False
 
@@ -434,9 +460,10 @@ def services_status() -> dict[str, bool]:
         "recv": _py_script_running("getmsgserv/serv.py"),
         "ctrl": _sh_script_running("Sendcontrol/sendcontrol.sh"),
         # QZone 发送服务（UDS）
-        # 判定策略：优先看进程，若未命中则看 UDS socket 是否存在
+        # 判定策略：优先看进程，其次实际探测 UDS 是否可连接
+        # 避免进程崩溃后遗留的 socket 文件导致误判
         "pipe": (
-            _py_script_running("SendQzone/qzone-serv-UDS.py") or _uds_sock_exists()
+            _py_script_running("SendQzone/qzone-serv-UDS.py") or _uds_sock_listening()
         ),
     }
     # 可选 web_review
