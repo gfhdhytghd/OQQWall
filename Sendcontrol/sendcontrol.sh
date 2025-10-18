@@ -382,8 +382,8 @@ send_to_qzone() {
     
     local attempt=1
     while [[ "$attempt" -le "$max_attempts" ]]; do
-        local cookies
-        cookies=$(cat "./cookies-$qqid.json")
+        local cookies_file
+        cookies_file="./cookies-$qqid.json"
         
         local post_status
         # 通过 UDS 使用 socat 与服务交互（一次请求一次连接，等待服务端回包）
@@ -392,37 +392,52 @@ send_to_qzone() {
             return 1
         fi
 
-        # 发送前进行 JSON 输入校验
-        # 1) 校验 cookies 是否为合法 JSON
-        if ! printf '%s' "$cookies" | jq -e . >/dev/null 2>&1; then
-            log_error "cookies JSON 无效或损坏: ./cookies-$qqid.json"
-            if [[ "$attempt" -lt "$max_attempts" ]]; then
-                renewqzoneloginauto "$qqid"
-                ((attempt++))
-                continue
-            else
-                log_error "cookies JSON 检查失败且已达最大重试次数，账号: $qqid"
-                return 1
-            fi
-        fi
-
-        # 2) 校验 image_list 是否为 JSON 数组
-        if ! printf '%s' "$image_list" | jq -e 'type=="array"' >/dev/null 2>&1; then
-            log_error "image_list 非法（应为 JSON 数组），前200字节: ${image_list:0:200}"
-            return 1
-        fi
-
-        # 使用 jq 构造 JSON，正确处理转义与嵌套结构
+        # 首次轻量尝试构造 JSON；失败后才进行更严格的校验与重试
         local json_payload
+        local jq_err
+        jq_err=$(mktemp 2>/dev/null || echo "/tmp/jq_err_$$")
         json_payload=$(jq -nc \
             --arg text "$message" \
             --argjson image "$image_list" \
-            --argjson cookies "$cookies" \
-            '{text:$text, image:$image, cookies:$cookies}') || {
-            log_error "构造投稿 JSON 失败（非 cookies/image_list 校验问题）"
-            log_error "message: ${message:0:120}, image_list前200字节: ${image_list:0:200}"
-            return 1
+            --slurpfile cookies "$cookies_file" \
+            '{text:$text, image:$image, cookies:$cookies[0]}') 2>"$jq_err" || {
+            local errfirst
+            errfirst=$(head -n1 "$jq_err" 2>/dev/null || true)
+            rm -f "$jq_err" 2>/dev/null || true
+            if (( attempt == 1 )); then
+                log_error "构造投稿 JSON 首次失败，进入诊断重试: ${errfirst:-unknown}"
+                # 1) cookies 文件 JSON 校验
+                if ! jq -e . "$cookies_file" >/dev/null 2>&1; then
+                    log_error "cookies JSON 无效或损坏: ./cookies-$qqid.json"
+                    renewqzoneloginauto "$qqid"
+                fi
+                # 2) image_list 必须为数组
+                if ! printf '%s' "$image_list" | jq -e 'type=="array"' >/dev/null 2>&1; then
+                    log_error "image_list 非法（应为 JSON 数组），前200字节: ${image_list:0:200}"
+                    ((attempt++))
+                    continue
+                fi
+                # 3) message UTF-8 清洗
+                if command -v iconv >/dev/null 2>&1; then
+                    if ! printf '%s' "$message" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then
+                        log_error "message 包含非法 UTF-8，已自动清洗后重试构造 JSON"
+                        message=$(printf '%s' "$message" | iconv -f UTF-8 -t UTF-8 -c)
+                    fi
+                fi
+                # 4) 打印概要参数
+                local image_count cookies_size
+                image_count=$(printf '%s' "$image_list" | jq -r 'length' 2>/dev/null || echo "unknown")
+                cookies_size=$(wc -c < "$cookies_file" 2>/dev/null | tr -d ' ' || echo "unknown")
+                log_debug "构造JSON参数(重试): text_len=${#message}, images=${image_count}, cookies_size=${cookies_size}B"
+                ((attempt++))
+                continue
+            else
+                log_error "构造投稿 JSON 失败: ${errfirst:-unknown}"
+                log_error "message前120字: ${message:0:120}, image_list前200字节: ${image_list:0:200}"
+                return 1
+            fi
         }
+        rm -f "$jq_err" 2>/dev/null || true
 
         local uds_path
         uds_path="${QZONE_UDS_PATH:-./qzone_uds.sock}"
