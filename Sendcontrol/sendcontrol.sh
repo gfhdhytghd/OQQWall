@@ -437,9 +437,19 @@ send_to_qzone() {
             return 1
         fi
 
-        post_status=$(printf '%s' "$json_payload" \
-            | socat -t 60 -T 180 - UNIX-CONNECT:"$uds_path" 2>/dev/null)
-        
+        if ! post_status=$(printf '%s' "$json_payload" \
+            | socat -t 60 -T 180 - UNIX-CONNECT:"$uds_path" 2>/dev/null); then
+            log_error "投稿传输失败，尝试第${attempt}次，账号: $qqid"
+            if [[ "$attempt" -lt "$max_attempts" ]]; then
+                renewqzoneloginauto "$qqid"
+                ((attempt++))
+                continue
+            else
+                log_error "投稿传输失败，已达最大重试次数，账号: $qqid"
+                return 1
+            fi
+        fi
+
         if echo "$post_status" | grep -q "success"; then
             echo "$qqid发送完毕"
             sendmsggroup "$qqid已发送"
@@ -447,19 +457,22 @@ send_to_qzone() {
         elif echo "$post_status" | grep -q "failed"; then
             if [[ "$attempt" -lt "$max_attempts" ]]; then
                 renewqzoneloginauto "$qqid"
+                ((attempt++))
+                continue
             else
-                log_error "空间发送错误，可能需要重新登录，出错账号$qqid"
+                log_error "空间发送错误，已达最大重试次数，出错账号$qqid"
                 return 1
             fi
         else
             if [[ "$attempt" -lt "$max_attempts" ]]; then
                 renewqzoneloginauto "$qqid"
+                ((attempt++))
+                continue
             else
                 log_error "系统错误：$post_status"
                 return 1
             fi
         fi
-        ((attempt++))
     done
     
     return 1
@@ -744,16 +757,18 @@ flush_staged_posts() {
     mapfile -t tags < <(get_stored_posts "$target_group")
     
     if [[ -z "${tags[*]// }" ]]; then
-        sendmsggroup "暂存区调度器: 组 ${target_group} 暂存为空，无需发送"
+        printf '%s' "no pending posts"
         return 0
     fi
     
     # 发送所有暂存内容
     if manage_posts "${tags[@]}"; then
         sendmsggroup "暂存区调度器: 组 ${target_group} 暂存内容已全部发送"
+        printf '%s' "success"
         return 0
     else
         log_error "flush_staged_posts: 发送失败（组：$target_group）"
+        printf '%s' "failed"
         return 1
     fi
 }
@@ -899,12 +914,15 @@ handle_connection() {
         # 确保已加载运行环境与基础配置，避免 sendmsggroup/变量未绑定
         ensure_runtime_env
         load_base_config
-        if flush_staged_posts "$target_group"; then
-            log_debug "flush result=success"
-            printf '%s\n' "success"
+        local flush_output
+        if flush_output=$(flush_staged_posts "$target_group"); then
+            log_debug "flush result=$flush_output"
+            [[ -n "$flush_output" ]] || flush_output="success"
+            printf '%s\n' "$flush_output"
         else
             log_debug "flush result=failed"
-            printf '%s\n' "failed"
+            [[ -n "$flush_output" ]] || flush_output="failed"
+            printf '%s\n' "$flush_output"
         fi
         return 0
     fi
@@ -985,8 +1003,10 @@ case "${1:-}" in
     # 调用内部流程；失败也仅记录日志
     if ! get_send_info "$tag"; then
       log_error "--run-tag: get_send_info 失败，tag=$tag"
+      exit 1
     else
       log_debug "run-tag done tag=$tag"
+      exit 0
     fi
     ;;
   *)
