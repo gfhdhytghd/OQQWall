@@ -5,6 +5,7 @@
 # 功能：管理QQ空间投稿的发送控制
 # =============================================================================
 
+# Test with python3 -m unittest Sendcontrol.tests.test_sendcontrol
 # 服务说明（UDS）
 # - 本脚本既是发送调度器，又作为一个基于 Unix Domain Socket 的服务端对外提供接口。
 # - 监听方式：AF_UNIX/STREAM，使用 socat 在前台监听并为每个连接派生一次处理进程。
