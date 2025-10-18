@@ -391,6 +391,26 @@ send_to_qzone() {
             return 1
         fi
 
+        # 发送前进行 JSON 输入校验
+        # 1) 校验 cookies 是否为合法 JSON
+        if ! printf '%s' "$cookies" | jq -e . >/dev/null 2>&1; then
+            log_error "cookies JSON 无效或损坏: ./cookies-$qqid.json"
+            if [[ "$attempt" -lt "$max_attempts" ]]; then
+                renewqzoneloginauto "$qqid"
+                ((attempt++))
+                continue
+            else
+                log_error "cookies JSON 检查失败且已达最大重试次数，账号: $qqid"
+                return 1
+            fi
+        fi
+
+        # 2) 校验 image_list 是否为 JSON 数组
+        if ! printf '%s' "$image_list" | jq -e 'type=="array"' >/dev/null 2>&1; then
+            log_error "image_list 非法（应为 JSON 数组），前200字节: ${image_list:0:200}"
+            return 1
+        fi
+
         # 使用 jq 构造 JSON，正确处理转义与嵌套结构
         local json_payload
         json_payload=$(jq -nc \
@@ -398,7 +418,8 @@ send_to_qzone() {
             --argjson image "$image_list" \
             --argjson cookies "$cookies" \
             '{text:$text, image:$image, cookies:$cookies}') || {
-            log_error "构造投稿 JSON 失败(可能是 image/cookies 非法 JSON)"
+            log_error "构造投稿 JSON 失败（非 cookies/image_list 校验问题）"
+            log_error "message: ${message:0:120}, image_list前200字节: ${image_list:0:200}"
             return 1
         }
 
