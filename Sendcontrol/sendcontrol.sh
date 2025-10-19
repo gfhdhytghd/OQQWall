@@ -635,12 +635,19 @@ execute_send_rules() {
     fi
     
     # 保存当前投稿
-    save_to_storage "$tag" "$numfinal" "$port" "$senderid" "$groupname"
+    if ! save_to_storage "$tag" "$numfinal" "$port" "$senderid" "$groupname"; then
+        log_error "保存投稿失败，tag: $tag, numfinal: $numfinal, port: $port, senderid: $senderid, groupname: $groupname"
+        return 1
+    fi
     
     # 提示入栈：在启用堆栈模式(max_post_stack!=1)且非立即发送时，通知已入暂存区
     if [[ "$init_send_status" != "now" && "$max_post_stack" -ne 1 ]]; then
-        sendmsggroup "#${numfinal}投稿已存入暂存区"
-        sendmsgpriv_givenport "$senderid" "$port" "#${numfinal}投稿已存入暂存区(系统自动发送，请勿回复)"
+        if ! sendmsggroup "#${numfinal}投稿已存入暂存区"; then
+            log_error "发送群组消息失败，numfinal: $numfinal"
+        fi
+        if ! sendmsgpriv_givenport "$senderid" "$port" "#${numfinal}投稿已存入暂存区(系统自动发送，请勿回复)"; then
+            log_error "发送私聊消息失败，senderid: $senderid, port: $port, numfinal: $numfinal"
+        fi
     fi
     
     if [[ "$init_send_status" == "now" ]]; then
@@ -648,18 +655,30 @@ execute_send_rules() {
         
         # 发送所有暂存内容（包括刚保存的）
         local stored_tags=()
-        mapfile -t stored_tags < <(get_stored_posts "$groupname")
+        if ! mapfile -t stored_tags < <(get_stored_posts "$groupname"); then
+            log_error "获取暂存投稿失败，groupname: $groupname"
+            return 1
+        fi
         
         if (( ${#stored_tags[@]} > 0 )); then
-            manage_posts "${stored_tags[@]}" "$comment"
+            if ! manage_posts "${stored_tags[@]}" "$comment"; then
+                log_error "管理投稿失败，tags: ${stored_tags[*]}, comment: $comment"
+                return 1
+            fi
         fi
     else
         # 获取所有暂存投稿（包括刚保存的）
         local tags=()
-        mapfile -t tags < <(get_stored_posts "$groupname")
+        if ! mapfile -t tags < <(get_stored_posts "$groupname"); then
+            log_error "获取暂存投稿失败，groupname: $groupname"
+            return 1
+        fi
         local current_post_num=${#tags[@]}
         local current_image_num
-        current_image_num=$(count_images "${tags[@]}")
+        if ! current_image_num=$(count_images "${tags[@]}"); then
+            log_error "计算图片总数失败，tags: ${tags[*]}"
+            return 1
+        fi
         
         echo "当前投稿数: $current_post_num"
         echo "当前总图片数: $current_image_num"
@@ -668,7 +687,10 @@ execute_send_rules() {
         # 检查是否需要发送
         if [[ $current_post_num -ge $max_post_stack ]] || [[ $current_image_num -gt $max_image_number_one_post ]]; then
             # 达到发送条件
-            manage_posts "${tags[@]}"
+            if ! manage_posts "${tags[@]}"; then
+                log_error "管理投稿失败，tags: ${tags[*]}"
+                return 1
+            fi
         fi
     fi
 }
@@ -731,7 +753,7 @@ get_send_info() {
     
     # 执行发送规则
     execute_send_rules "$tag" "$numfinal" "$port" "$senderid" "$comment" "$initsendstatue" || {
-        log_error "execute_send_rules 执行失败，tag: $tag"
+        log_error "execute_send_rules 执行失败，tag: $tag, numfinal: $numfinal, port: $port, senderid: $senderid, comment: $comment, init_send_status: $initsendstatue"
         return 1
     }
 }
