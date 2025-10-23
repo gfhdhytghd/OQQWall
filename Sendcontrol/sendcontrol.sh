@@ -913,7 +913,7 @@ log_error() {
     local errmsg="$1"
     echo "sendcontrol $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/SendControl_CrashReport.txt
     echo "sendcontrol 错误已记录: $errmsg"
-    sendmsggroup
+    sendmsggroup "sendcontrol 错误: $errmsg"
 }
 
 # =============================================================================
