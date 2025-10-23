@@ -466,22 +466,31 @@ send_to_qzone() {
             fi
         fi
 
-        if echo "$post_status" | grep -q "success"; then
+        log_debug "QZone回包(qqid=$qqid, attempt=$attempt): ${post_status:0:200}"
+        local status_lc
+        status_lc=$(printf '%s' "$post_status" | tr '[:upper:]' '[:lower:]')
+        if printf '%s' "$status_lc" | grep -qE '(success|ok|已发送)'; then
             echo "$qqid发送完毕"
             sendmsggroup "$qqid已发送"
             return 0
-        elif echo "$post_status" | grep -q "failed"; then
-            if [[ "$attempt" -lt "$max_attempts" ]]; then
+        elif printf '%s' "$status_lc" | grep -qE '(failed|失败|error|错误|图像|图片|文本|解析)'; then
+            # 仅在疑似登录/鉴权问题时重登；内容类错误不重登
+            if printf '%s' "$status_lc" | grep -qE '(cookie|登录|login|token|auth|鉴权|expired)'; then
+                log_debug "检测到可能的登录问题，执行 renewqzoneloginauto"
                 renewqzoneloginauto "$qqid"
+            fi
+            if [[ "$attempt" -lt "$max_attempts" ]]; then
                 ((attempt++))
+                sleep 1
                 continue
             else
                 log_error "空间发送错误，已达最大重试次数，出错账号$qqid"
                 return 1
             fi
         else
+            # 未知状态也当作失败
             if [[ "$attempt" -lt "$max_attempts" ]]; then
-                renewqzoneloginauto "$qqid"
+                sleep 1
                 ((attempt++))
                 continue
             else
@@ -904,6 +913,7 @@ log_error() {
     local errmsg="$1"
     echo "sendcontrol $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/SendControl_CrashReport.txt
     echo "sendcontrol 错误已记录: $errmsg"
+    sendmsggroup
 }
 
 # =============================================================================
