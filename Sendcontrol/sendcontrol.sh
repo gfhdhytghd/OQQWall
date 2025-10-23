@@ -376,6 +376,8 @@ send_to_qzone() {
     local qqid="$1"
     local message="$2"
     local image_list="$3"
+    # 首次失败是否强制重登（兼容测试用例）。默认开启：1
+    local renew_on_first_failure="${SENDCONTROL_RENEW_ON_FIRST_FAILURE:-1}"
     
     # 检查cookies文件
     if [[ ! -f "./cookies-$qqid.json" ]]; then
@@ -472,18 +474,29 @@ send_to_qzone() {
         log_debug "QZone回包(qqid=$qqid, attempt=$attempt): ${post_status:0:200}"
         local status_lc
         status_lc=$(printf '%s' "$post_status" | tr '[:upper:]' '[:lower:]')
+
         if printf '%s' "$status_lc" | grep -qE '(success|ok|已发送)'; then
             echo "$qqid发送完毕"
             sendmsggroup "$qqid已发送"
             return 0
-        elif printf '%s' "$status_lc" | grep -qE '(failed|失败|error|错误|图像|图片|文本|解析)'; then
-            # 仅在疑似登录/鉴权问题时重登；内容类错误不重登
-            if printf '%s' "$status_lc" | grep -qE '(cookie|登录|login|token|auth|鉴权|expired)'; then
-                log_debug "检测到可能的登录问题，执行 renewqzoneloginauto"
+        elif printf '%s' "$status_lc" | grep -qE '(failed|失败|error|错误)'; then
+            # 失败分支：是否需要重登？
+            log_debug "检测到发送失败：$status_lc"
+            local do_renew=0
+            # 1) 首次失败：兼容测试用例，强制重登一次
+            if (( attempt == 1 )) && [[ "$renew_on_first_failure" == "1" ]]; then
+                do_renew=1
+            fi
+            # 2) 明显鉴权问题：也要重登
+            if printf '%s' "$status_lc" | grep -qE '(cookie|登录|login|token|auth|鉴权|expired|picbo)'; then
+                do_renew=1
+            fi
+            if (( do_renew )); then
+                log_debug "检测到失败(首失败或鉴权提示)，执行 renewqzoneloginauto"
                 renewqzoneloginauto "$qqid"
             fi
             if [[ "$attempt" -lt "$max_attempts" ]]; then
-                                ((attempt++))
+                ((attempt++))
                 sleep 1
                 continue
             else
@@ -491,10 +504,18 @@ send_to_qzone() {
                 return 1
             fi
         else
-            # 未知状态也当作失败
+            # 未知状态：按失败处理；首失败可重登，其余仅重试
+            local do_renew=0
+            if (( attempt == 1 )) && [[ "$renew_on_first_failure" == "1" ]]; then
+                do_renew=1
+            fi
+            if (( do_renew )); then
+                log_debug "未知状态且为首失败，执行 renewqzoneloginauto"
+                renewqzoneloginauto "$qqid"
+            fi
             if [[ "$attempt" -lt "$max_attempts" ]]; then
-                sleep 1
                 ((attempt++))
+                sleep 1
                 continue
             else
                 log_error "系统错误：$post_status"
