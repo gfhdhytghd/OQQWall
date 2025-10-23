@@ -223,7 +223,8 @@ count_images() {
     for tag in "$@"; do
         local dir="./cache/prepost/$tag"
         if [[ -d "$dir" ]]; then
-            local count=$(find "$dir" -type f | wc -l)
+            local count
+            count=$(find "$dir" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.gif' -o -iname '*.webp' -o -iname '*.bmp' \) -size +0c | wc -l | tr -d ' ')
             total_count=$((total_count + count))
         fi
     done
@@ -238,10 +239,12 @@ generate_image_list() {
     for tag in "${tags[@]}"; do
         local dir="./cache/prepost/$tag"
         [[ -d "$dir" ]] || continue
-        
-        for f in "$dir"/*; do
-            [[ -f "$f" ]] && filelist+=("file://$f")
-        done
+        # 仅采集有效图片，使用绝对路径并排除空文件
+        while IFS= read -r -d '' f; do
+            local abs
+            abs=$(readlink -f "$f" 2>/dev/null || echo "$f")
+            filelist+=("file://$abs")
+        done < <(find "$dir" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.gif' -o -iname '*.webp' -o -iname '*.bmp' \) -size +0c -print0 | sort --zero-terminated)
     done
     
     printf '%s\n' "${filelist[@]}"
@@ -480,7 +483,7 @@ send_to_qzone() {
                 renewqzoneloginauto "$qqid"
             fi
             if [[ "$attempt" -lt "$max_attempts" ]]; then
-                ((attempt++))
+                                ((attempt++))
                 sleep 1
                 continue
             else
@@ -580,13 +583,25 @@ manage_posts() {
     local file_arr=()
     mapfile -t file_arr < <(generate_image_list "${tags[@]}")
     local total=${#file_arr[@]}
-    (( total == 0 )) && file_arr+=( )
+    # 若未发现图片，短暂等待以应对落盘延迟（最多约3秒）
+    if (( total == 0 )); then
+        for i in {1..15}; do  # 15*0.2s=3s
+            sleep 0.2
+            mapfile -t file_arr < <(generate_image_list "${tags[@]}")
+            total=${#file_arr[@]}
+            (( total > 0 )) && break
+        done
+    fi
+    if (( total == 0 )); then
+        log_error "图像为空：tags=${tags[*]}，放弃本次发送以避免 QZone『图像处理错误』"
+        return 1
+    fi
     
     # 发送到每个QQ号
     for qqid in "${goingtosendid[@]}"; do
         echo "Sending Qzone use id: $qqid (total images: $total)"
         
-        for (( start=0; start<total || start==0; start+=max_image_number_one_post )); do
+        for (( start=0; start<total; start+=max_image_number_one_post )); do
             local slice=("${file_arr[@]:start:max_image_number_one_post}")
             local sub_filelist
             sub_filelist=$(printf '%s\n' "${slice[@]}" | jq -R . | jq -sc .)
@@ -913,7 +928,10 @@ log_error() {
     local errmsg="$1"
     echo "sendcontrol $(date '+%Y-%m-%d %H:%M:%S') $errmsg" >> ./cache/SendControl_CrashReport.txt
     echo "sendcontrol 错误已记录: $errmsg"
-    sendmsggroup "sendcontrol 错误: $errmsg"
+    # 仅在工具函数可用且未显式禁用时，才通知到群
+    if [[ "${TOOLKIT_EXPECT_NO_CALLS:-0}" != "1" ]] && declare -f sendmsggroup >/dev/null 2>&1; then
+        sendmsggroup "sendcontrol 错误: $errmsg"
+    fi
 }
 
 # =============================================================================

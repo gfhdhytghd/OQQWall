@@ -50,7 +50,8 @@ logs/http_body_1754880442806.resp
 logs/http_body_1754880443977.resp
 logs/http_body_1754880444680.resp
 logs/qzone.log
-*/__pycache__/*
+*/__pycache__/
 tests/recordings/*
 testmsg*
 web_review/web_review.log
+Sendcontrol/tests/__pycache__/test_sendcontrol.cpython-313-pytest-8.4.2.pyc
