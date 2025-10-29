@@ -399,8 +399,9 @@ $group_pending"
           python3 ./getmsgserv/serv.py &
           echo "serv.py started"
         fi
-        python3 ./SendQzone/qzone-serv-UDS.py &
         ./Sendcontrol/sendcontrol.sh &
+        sleep 2
+        python3 ./SendQzone/qzone-serv-UDS.py &
 
         # 可选：网页审核（如有启用）
         if [[ "${use_web_review:-false}" == "true" ]]; then

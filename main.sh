@@ -935,7 +935,9 @@ force_restart_uds_services() {
   sc_sock=${SENDCONTROL_UDS_PATH:-./sendcontrol_uds.sock}
   [[ -S "$qz_sock" ]] && rm -f -- "$qz_sock" || true
   [[ -S "$sc_sock" ]] && rm -f -- "$sc_sock" || true
-
+  ./Sendcontrol/sendcontrol.sh &
+  echo "sendcontrol.sh started"
+  sleep 2
   # 启动服务
   if [[ "$is_test_mode" == "--test" ]]; then
     echo "[boot] test 模式：跳过启动 qzone-serv-UDS.py"
@@ -943,8 +945,6 @@ force_restart_uds_services() {
     python3 ./SendQzone/qzone-serv-UDS.py &
     echo "qzone-serv-UDS.py started"
   fi
-  ./Sendcontrol/sendcontrol.sh &
-  echo "sendcontrol.sh started"
 }
 
 require_cmd() {

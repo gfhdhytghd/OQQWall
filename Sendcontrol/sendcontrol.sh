@@ -862,7 +862,8 @@ readonly SCHED_LOG="./cache/scheduler.log"
 
 _log() {
   # 统一日志：时间 + 进程 + 内容
-  printf '%s [%s] %s\n' "$(date '+%F %T')" "$$" "$*" | tee -a "$SCHED_LOG" >/dev/null
+  printf '%s [%s] %s\n' "$(date '+%F %T')" "$$" "$*"
+  # | tee -a "$SCHED_LOG" >/dev/null
 }
 
 _sched_trap_err() {
