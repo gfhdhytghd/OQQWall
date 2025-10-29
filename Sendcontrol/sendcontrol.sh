@@ -855,90 +855,162 @@ flush_staged_posts() {
         return 1
     fi
 }
-# =============================================================================
-# 定时调度模块（单实例 + 分钟锁 + 当日标记）
-# =============================================================================
 
 readonly SCHED_GLOBAL_LOCK="./cache/.sched.global.lock"
 readonly SCHED_PID_FILE="./cache/.sched.pid"
+readonly SCHED_LOG="./cache/scheduler.log"
+
+_log() {
+  # 统一日志：时间 + 进程 + 内容
+  printf '%s [%s] %s\n' "$(date '+%F %T')" "$$" "$*" | tee -a "$SCHED_LOG" >/dev/null
+}
+
+_sched_trap_err() {
+  local rc="${1:-0}"
+  local cmd="${2:-<none>}"
+  _log "ERR: scheduler 捕获错误 rc=$rc cmd=$cmd"
+}
+
+_sched_trap_exit() {
+  local rc="${1:-0}"
+  rm -f "$SCHED_PID_FILE"
+  _log "EXIT: scheduler 退出 rc=$rc"
+}
 
 # 读取：每行  <group>\t<HH:MM,HH:MM,...>
 _load_schedules() {
+  if [[ -z "${ACCOUNT_CONFIG_FILE:-}" || ! -f "${ACCOUNT_CONFIG_FILE:-/__none__}" ]]; then
+    _log "WARN: ACCOUNT_CONFIG_FILE 未设置或文件不存在：'${ACCOUNT_CONFIG_FILE:-}'"
+    return 0
+  fi
   jq -r '
     to_entries[]
     | select(.value.send_schedule? and (.value.send_schedule|length)>0)
     | [ (.value.acgroup // .key), (.value.send_schedule | map(gsub("\\s+"; "")) | join(",")) ]
     | @tsv
-  ' "$ACCOUNT_CONFIG_FILE" 2>/dev/null
+  ' "$ACCOUNT_CONFIG_FILE" 2>>"$SCHED_LOG"
 }
 
 # 当日只触发一次 + 同一分钟互斥
 _fire_once() {
   local g="$1" hm="$2"
-  local today markfile lockdir
+  local today markfile lockdir tmpmark
   today=$(date +%F)
   markfile="./cache/.sched.fired.${g}.${hm}.${today}"
   lockdir="./cache/.sched.lock.${g}.${hm}"
+  tmpmark="${markfile}.pending"
 
   # 已触发过：直接返回
-  [[ -f "$markfile" ]] && return 0
+  [[ -f "$markfile" ]] && { _log "SKIP: 已触发 ${g}@${hm} (${today})"; return 0; }
 
-  # 同一分钟锁
+  # 同一分钟锁（避免同分多次）
   if mkdir "$lockdir" 2>/dev/null; then
-    : > "$markfile"  # 先落地“已触发”标记，避免失败后重复
-    if ! flush_staged_posts "$g"; then
+    _log "FIRE: ${g}@${hm} -> flush_staged_posts"
+    : > "$tmpmark"   # 先写 pending，成功后再原子替换为正式 mark
+    if flush_staged_posts "$g"; then
+      mv -f "$tmpmark" "$markfile"
+      _log "OK: ${g}@${hm} 已标记为当日已发送"
+    else
+      rm -f "$tmpmark"
+      _log "ERR: ${g}@${hm} 发送失败，保留未触发状态；详见 SendControl_CrashReport.txt"
       echo "sendcontrol $(date '+%F %T') 定时发送失败：组 ${g} @ ${hm}" >> ./cache/SendControl_CrashReport.txt
     fi
-    # 锁保持到分钟跳变
+    # 锁保持到分钟跳变，避免同分重复
     while [[ "$(date +%H:%M)" == "$hm" ]]; do sleep 1; done
     rmdir "$lockdir" 2>/dev/null || true
+  else
+    _log "LOCKED: 跳过 ${g}@${hm}（同一分钟已触发）"
   fi
 }
 
-# 单实例守护的 scheduler（不要再另起旧的 scheduler_loop）
+# 单实例守护的 scheduler
 _run_scheduler() {
   mkdir -p ./cache
-
-  # 全局单实例锁：整个进程生命周期持有
-  exec {__sched_fd}> "$SCHED_GLOBAL_LOCK" || true
+  # 全局单实例锁：整个进程生命周期持有。失败则直接退出，避免假启动
+  if ! exec {__sched_fd}> "$SCHED_GLOBAL_LOCK"; then
+    _log "ERR: 无法打开全局锁文件 $SCHED_GLOBAL_LOCK"
+    return 1
+  fi
   if ! flock -n "${__sched_fd}"; then
-    echo "scheduler 已在运行（跳过重复启动）"
+    _log "INFO: 已有实例在运行，当前进程退出"
     return 0
   fi
-  echo $$ > "$SCHED_PID_FILE"
 
-  # 正常循环：对齐到整分
+  echo $$ > "$SCHED_PID_FILE"
+  _log "START: scheduler 启动，PID=$(cat "$SCHED_PID_FILE")"
+
+  # 在退出时清理 PID（正常/异常）
+  trap '_sched_trap_exit $?' EXIT
+  trap '_sched_trap_err $? "$BASH_COMMAND"' ERR
+
   while true; do
     local nowHM; nowHM=$(date +%H:%M)
+    _log "TICK: now=$nowHM"
 
-    while IFS=$'\t' read -r g times; do
-      [[ -z "$g" || -z "$times" ]] && continue
+    # 获取计划，容错处理 JSON 临时损坏等场景
+    local schedules=()
+    if ! mapfile -t schedules < <(_load_schedules); then
+      local load_rc=$?
+      _log "ERR: 读取 send_schedule 失败，rc=$load_rc（等待 5s 后重试）"
+      sleep 5
+      continue
+    fi
+
+    local had_any=false
+    local sched_line
+    for sched_line in "${schedules[@]}"; do
+      [[ -z "${sched_line:-}" ]] && continue
+      local g times
+      IFS=$'\t' read -r g times <<< "$sched_line" || continue
+      [[ -z "${g:-}" || -z "${times:-}" ]] && continue
+      had_any=true
+      local -a arr=()
       IFS=',' read -r -a arr <<< "$times"
+      local hm
       for hm in "${arr[@]}"; do
-        [[ "$hm" == "$nowHM" ]] && _fire_once "$g" "$hm"
+        if [[ "$hm" == "$nowHM" ]]; then
+          _fire_once "$g" "$hm"
+        fi
       done
-    done < <(_load_schedules)
+    done
 
-    sleep $((60-10#$(date +%S)))
+    if [[ "$had_any" == false ]]; then
+      _log "WARN: 本轮没有读到任何 send_schedule（检查 ACCOUNT_CONFIG_FILE 与 JSON 结构）"
+    fi
+
+    # 对齐到下一整分
+    local ss; ss=$(date +%S)
+    local remain=$((60-10#$ss))
+    sleep "$remain"
   done
 }
 
 # 对外启动函数：确保旧实例被清掉、且只启动一次
 start_scheduler() {
   mkdir -p ./cache
-  # 如果有残留 PID 但进程已不存在，清理
+  # 清理无效 PID
   if [[ -f "$SCHED_PID_FILE" ]]; then
     local oldpid; oldpid=$(cat "$SCHED_PID_FILE" 2>/dev/null || true)
-    if [[ -n "$oldpid" && ! -d "/proc/$oldpid" ]]; then
+    if [[ -n "${oldpid:-}" && ! -d "/proc/$oldpid" ]]; then
+      _log "CLEAN: 移除残留 PID ${oldpid}"
       rm -f "$SCHED_PID_FILE"
     fi
   fi
 
-  # 后台启动单实例调度器
-  _run_scheduler &
-  echo "scheduler 已启动(单实例)"
-}
+  # 背景启动
+  (_run_scheduler) &
+  disown || true
 
+  # 等待 150ms 看看是不是“已有实例”直接退出了
+  sleep 0.15
+  if [[ -f "$SCHED_PID_FILE" && -d "/proc/$(cat "$SCHED_PID_FILE")" ]]; then
+    _log "READY: scheduler 已在后台运行"
+    echo "scheduler 已启动(单实例)"
+  else
+    _log "INFO: 未启动新的实例（可能已有实例在运行）"
+    echo "scheduler 已在运行（跳过重复启动）"
+  fi
+}
 
 # =============================================================================
 # 错误处理模块
