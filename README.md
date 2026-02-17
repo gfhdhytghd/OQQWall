@@ -1,6 +1,8 @@
+# ⚠️当前版本已停止维护，将不再收到更新⚠️
+## 请切换到 [OQQWall_rust](https://github.com/gfhdhytghd/OQQWall_rust)，Rust版本在一切指标上碾压当前版本。
 # OQQWall开放QQ校园墙自动运营系统
 # 👍 稳定运行数千万秒 👍
-## 我买了GPT-pro,我会用它来重构一下OQQWall
+## 我买了GPT-pro,我会用它来[重构一下OQQWall](https://github.com/gfhdhytghd/OQQWall_rust)
 
 ## 目前系统暂无显著问题，当前版本持续稳定运行，可以用在生产环境中
 ## 额外说明
